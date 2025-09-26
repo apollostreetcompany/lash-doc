@@ -1,0 +1,27 @@
+# Prompt Pack — Full 23-Step Path
+
+Each step is a standalone, copy-ready prompt. Run them in order, 00 → 22.
+
+- [Step 00 — Repo Map + Acceptance Gates](step-00-repo-map-and-acceptance-gates.md)
+- [Step 01 — Monorepo Scaffolding](step-01-monorepo-scaffolding.md)
+- [Step 02 — Editor Schema v1 + Toolbar](step-02-editor-schema-v1-and-toolbar.md)
+- [Step 03 — Outline + Collapse Persistence](step-03-outline-and-collapse-persistence.md)
+- [Step 04 — Markdown Import/Export](step-04-markdown-import-export.md)
+- [Step 05 — Images](step-05-images.md)
+- [Step 06 — Tables MVP](step-06-tables-mvp.md)
+- [Step 07 — Table Performance Harness](step-07-table-perf-harness.md)
+- [Step 08 — Chips from Internal Doc Links](step-08-chips-from-internal-links.md)
+- [Step 09 — Mentions (Users & Groups) + Privacy](step-09-mentions-users-groups-privacy.md)
+- [Step 10 — Natural Date Mentions](step-10-natural-date-mentions.md)
+- [Step 11 — Autosave + Focus Mode](step-11-autosave-and-focus-mode.md)
+- [Step 12 — Collaboration with Yjs](step-12-collab-with-yjs.md)
+- [Step 13 — History Log + Snapshots + Restore](step-13-history-log-snapshots-restore.md)
+- [Step 14 — Deterministic Diff](step-14-deterministic-diff.md)
+- [Step 15 — Suggest Mode + Filtered Diffs](step-15-suggest-mode-and-filtered-diffs.md)
+- [Step 16 — Authorship / Blame](step-16-authorship-blame.md)
+- [Step 17 — Doc Chat: Anchored & Diff‑Aware](step-17-doc-chat-anchored-diff-aware.md)
+- [Step 18 — Share Links + RBAC + Redaction](step-18-share-links-rbac-redaction.md)
+- [Step 19 — AI Edit Agent (Patch, Not Paste)](step-19-ai-edit-agent-patch-not-paste.md)
+- [Step 20 — AI Chat Citations](step-20-ai-chat-citations.md)
+- [Step 21 — Accessibility + i18n (IME, bidi, Screen Readers)](step-21-accessibility-i18n-ime-bidi-sr.md)
+- [Step 22 — Observability + SLOs + CI + Cross‑Browser](step-22-observability-slos-ci-cross-browser.md)

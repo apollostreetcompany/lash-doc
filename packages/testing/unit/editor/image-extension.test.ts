@@ -1,0 +1,79 @@
+/** @vitest-environment jsdom */
+
+import { describe, expect, it } from 'vitest';
+import { Editor } from '@tiptap/core';
+
+import { createLashEditorExtensions, type LashImageUploader } from '@lash/editor-core';
+
+const flushMicrotasks = () => new Promise((resolve) => setTimeout(resolve, 0));
+
+describe('Lash image extension', () => {
+  it('inserts a placeholder and resolves the upload', async () => {
+    let progressValues: number[] = [];
+    const uploader: LashImageUploader = {
+      async upload(_file, onProgress) {
+        onProgress(0.4);
+        progressValues.push(0.4);
+        return { src: 'https://mock.cdn/image-idle.png', width: 460 };
+      },
+    };
+
+    const editor = new Editor({
+      extensions: createLashEditorExtensions({ image: { uploader } }),
+      content: '<p></p>',
+    });
+
+    const file = new File([new Uint8Array([137, 80, 78, 71])], 'sample.png', { type: 'image/png' });
+    editor.commands.insertImagePlaceholder(file);
+    await flushMicrotasks();
+
+    const node = editor.state.doc.content.firstChild;
+    expect(node?.type.name).toBe('image');
+    expect(node?.attrs.status).toBe('idle');
+    expect(node?.attrs.src).toBe('https://mock.cdn/image-idle.png');
+    expect(node?.attrs.width).toBe(460);
+    expect(progressValues).toContain(0.4);
+
+    editor.commands.updateImageAttributes({ alt: 'Uploaded diagram' });
+    const updated = editor.state.doc.content.firstChild;
+    expect(updated?.attrs.alt).toBe('Uploaded diagram');
+
+    editor.destroy();
+  });
+
+  it('allows retry after a failed upload', async () => {
+    let attempts = 0;
+    const uploader: LashImageUploader = {
+      async upload(_file, _onProgress) {
+        attempts += 1;
+        if (attempts === 1) {
+          throw new Error('network down');
+        }
+        return { src: 'https://mock.cdn/image-retry.png', width: 420 };
+      },
+    };
+
+    const editor = new Editor({
+      extensions: createLashEditorExtensions({ image: { uploader } }),
+      content: '<p></p>',
+    });
+
+    const file = new File([new Uint8Array([0xff, 0xd8])], 'retry.jpg', { type: 'image/jpeg' });
+    editor.commands.insertImagePlaceholder(file);
+    await flushMicrotasks();
+
+    let node = editor.state.doc.content.firstChild;
+    expect(node?.attrs.status).toBe('error');
+    const uploadId = node?.attrs.uploadId as string;
+    expect(typeof uploadId).toBe('string');
+
+    editor.commands.retryImageUpload(uploadId);
+    await flushMicrotasks();
+
+    node = editor.state.doc.content.firstChild;
+    expect(node?.attrs.status).toBe('idle');
+    expect(node?.attrs.src).toBe('https://mock.cdn/image-retry.png');
+
+    editor.destroy();
+  });
+});
