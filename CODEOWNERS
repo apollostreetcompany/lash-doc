@@ -1,0 +1,51 @@
+# CODEOWNERS — file-level ownership for PR review routing.
+#
+# Mapping mirrors plan.md lane ownership. Update when lanes are reassigned.
+
+# Core editor (chips, suggest marks, table extensions, schema)
+/packages/editor-core/                  @lash/editor-core-owners
+
+# Data contracts — load-bearing; require careful review
+/packages/types/                        @lash/architects
+
+# M2 lanes
+/packages/collab-service/               @lash/collab-owners
+/packages/history/                      @lash/history-owners
+/packages/authorship/                   @lash/authorship-owners
+
+# M3 lanes
+/packages/mentions/                     @lash/mentions-owners
+/packages/share/                        @lash/share-owners
+/packages/doc-chat/                     @lash/doc-chat-owners
+
+# M4 lanes
+/packages/ai/                           @lash/ai-owners
+
+# M5 lanes
+/packages/tables-media/                 @lash/perf-owners
+/packages/observability/                @lash/sre-owners
+/packages/storage/                      @lash/sre-owners
+/packages/infra-scripts/                @lash/sre-owners
+
+# Apps
+/apps/web/                              @lash/web-owners
+/apps/api/                              @lash/api-owners
+/apps/realtime-gateway/                 @lash/collab-owners
+/apps/ai-orchestrator/                  @lash/ai-owners
+/apps/admin/                            @lash/web-owners
+
+# Cross-cutting tests
+/packages/testing/                      @lash/qa-owners
+/apps/web/e2e/                          @lash/qa-owners
+
+# Build, CI, governance
+/.github/                               @lash/architects
+/CLAUDE.md                              @lash/architects
+/plan.md                                @lash/architects
+/agents.md                              @lash/architects
+/REPO_MAP.md                            @lash/architects
+/ACCEPTANCE_GATES.md                    @lash/architects
+/tsconfig.base.json                     @lash/architects
+/.eslintrc.cjs                          @lash/architects
+/playwright.config.ts                   @lash/qa-owners
+/vitest.config.ts                       @lash/qa-owners

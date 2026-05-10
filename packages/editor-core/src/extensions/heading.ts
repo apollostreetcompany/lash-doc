@@ -1,6 +1,7 @@
-import Heading from '@tiptap/extension-heading';
+// eslint-disable-next-line import/no-named-as-default
+import HeadingExtension from '@tiptap/extension-heading';
 
-export const LashHeading = Heading.extend({
+export const LashHeading = HeadingExtension.extend({
   addAttributes() {
     return {
       ...this.parent?.(),

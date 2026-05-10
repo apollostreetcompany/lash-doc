@@ -8,6 +8,8 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
-    "@tiptap/core": "^2.4.0"
+    "@tiptap/core": "^2.4.0",
+    "@tiptap/extension-table": "^2.4.0",
+    "@tiptap/pm": "^2.4.0"
   }
 }

@@ -34,3 +34,17 @@ pnpm-debug.log*
 # OS artifacts
 .DS_Store
 Thumbs.db
+
+# Test outputs and ephemeral artifacts
+test-results/
+playwright-report/
+.vitest-cache/
+
+# Local working notes (not source-of-truth; capture in commits/issues instead)
+*-output.txt
+*-output.txt.txt
+codex-*-terminal.txt
+*-session-summary.md
+fixes-required-*.md
+test-focus-fix.md
+Claude-Code-*.txt

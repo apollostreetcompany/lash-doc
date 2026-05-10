@@ -40,7 +40,24 @@ module.exports = {
       },
     ],
     '@typescript-eslint/no-explicit-any': 'warn',
+    '@typescript-eslint/no-unused-vars': [
+      'error',
+      {
+        argsIgnorePattern: '^_',
+        varsIgnorePattern: '^_',
+        ignoreRestSiblings: true,
+        caughtErrorsIgnorePattern: '^_',
+      },
+    ],
     '@next/next/no-html-link-for-pages': 'off',
   },
+  overrides: [
+    {
+      files: ['**/*.spec.ts', '**/*.spec.tsx', '**/*.test.ts', '**/*.test.tsx', 'apps/web/e2e/**/*'],
+      rules: {
+        '@typescript-eslint/no-explicit-any': 'off',
+      },
+    },
+  ],
   ignorePatterns: ['node_modules/', '.next/', 'dist/', '.turbo/', 'coverage/'],
 };

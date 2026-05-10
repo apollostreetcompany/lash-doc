@@ -1,9 +1,8 @@
 import { Node, mergeAttributes } from '@tiptap/core';
-import type { CommandProps } from '@tiptap/core';
-import { Plugin, PluginKey } from '@tiptap/pm/state';
-import type { EditorState, Selection, Transaction } from '@tiptap/pm/state';
-import { Selection as PMSelection } from '@tiptap/pm/state';
+import type { CommandProps, NodeViewRendererProps } from '@tiptap/core';
 import type { Node as ProseMirrorNode } from '@tiptap/pm/model';
+import type { EditorState, Selection, Transaction } from '@tiptap/pm/state';
+import { Plugin, PluginKey, Selection as PMSelection } from '@tiptap/pm/state';
 import type { EditorView, NodeView } from '@tiptap/pm/view';
 
 export type ImageStatus = 'idle' | 'uploading' | 'error';
@@ -27,8 +26,24 @@ interface UploadEntry {
 
 interface UploadManager {
   plugin: Plugin;
+  /** insert via direct view.dispatch — used by paste/drop handlers (outside CM context) */
   insert(view: { state: EditorState; dispatch: (tr: Transaction) => void }, file: File): void;
+  /** retry via direct view.dispatch — used outside CM context */
   retry(view: { state: EditorState; dispatch: (tr: Transaction) => void }, uploadId: string): void;
+  /** insert by mutating an existing tr — used inside addCommands so CM dispatches our tr cleanly */
+  insertIntoTransaction(
+    state: EditorState,
+    tr: Transaction,
+    view: EditorView,
+    file: File,
+  ): void;
+  /** retry by mutating an existing tr — used inside addCommands */
+  retryIntoTransaction(
+    state: EditorState,
+    tr: Transaction,
+    view: EditorView,
+    uploadId: string,
+  ): void;
 }
 
 interface LashImageStorage {
@@ -139,29 +154,11 @@ const createUploadManager = (options: LashImageOptions): UploadManager => {
   const uploads = new Map<string, UploadEntry>();
   const disposers = new Map<string, () => void>();
 
-  const insert = (
+  const startUpload = (
     view: { state: EditorState; dispatch: (tr: Transaction) => void },
-    file: File,
+    uploadId: string,
+    entry: UploadEntry,
   ) => {
-    const uploadId = generateUploadId();
-    const previewURL =
-      typeof window !== 'undefined' && typeof window.URL?.createObjectURL === 'function'
-        ? window.URL.createObjectURL(file)
-        : null;
-    const node = view.state.schema.nodes.image.create({
-      src: '',
-      previewSrc: previewURL,
-      alt: '',
-      width: options.initialWidth,
-      status: 'uploading',
-      uploadId,
-      progress: 0,
-      error: null,
-    });
-    const tr = view.state.tr.replaceSelectionWith(node).scrollIntoView();
-    view.dispatch(tr);
-
-    const entry: UploadEntry = { file, previewURL };
     uploads.set(uploadId, entry);
     const disposer = scheduleUpload(
       view,
@@ -182,6 +179,36 @@ const createUploadManager = (options: LashImageOptions): UploadManager => {
     disposers.set(uploadId, disposer);
   };
 
+  const buildPlaceholderNode = (state: EditorState, file: File): { uploadId: string; previewURL: string | null; node: ProseMirrorNode } => {
+    const uploadId = generateUploadId();
+    const previewURL =
+      typeof window !== 'undefined' && typeof window.URL?.createObjectURL === 'function'
+        ? window.URL.createObjectURL(file)
+        : null;
+    const node = state.schema.nodes.image.create({
+      src: '',
+      previewSrc: previewURL,
+      alt: '',
+      width: options.initialWidth,
+      status: 'uploading',
+      uploadId,
+      progress: 0,
+      error: null,
+    });
+    return { uploadId, previewURL, node };
+  };
+
+  // Direct-dispatch path: used by paste/drop handlers, outside CM context.
+  const insert = (
+    view: { state: EditorState; dispatch: (tr: Transaction) => void },
+    file: File,
+  ) => {
+    const { uploadId, previewURL, node } = buildPlaceholderNode(view.state, file);
+    const tr = view.state.tr.replaceSelectionWith(node).scrollIntoView();
+    view.dispatch(tr);
+    startUpload(view, uploadId, { file, previewURL });
+  };
+
   const retry = (
     view: { state: EditorState; dispatch: (tr: Transaction) => void },
     uploadId: string,
@@ -190,23 +217,7 @@ const createUploadManager = (options: LashImageOptions): UploadManager => {
     if (!entry) {
       return;
     }
-    const disposer = scheduleUpload(
-      view,
-      options.uploader,
-      uploadId,
-      entry,
-      () => {
-        if (entry.previewURL && typeof window !== 'undefined' && typeof window.URL?.revokeObjectURL === 'function') {
-          window.URL.revokeObjectURL(entry.previewURL);
-        }
-        uploads.delete(uploadId);
-        disposers.delete(uploadId);
-      },
-      () => {
-        // retain preview on failure
-      },
-    );
-    disposers.set(uploadId, disposer);
+    startUpload(view, uploadId, entry);
     const resetTr = updateImageAttrs(view.state, uploadId, {
       status: 'uploading',
       progress: 0,
@@ -215,6 +226,33 @@ const createUploadManager = (options: LashImageOptions): UploadManager => {
     if (resetTr) {
       view.dispatch(resetTr);
     }
+  };
+
+  // Tr-mutation path: used by addCommands so TipTap CommandManager dispatches a single
+  // coherent tr. Upload start is deferred to a microtask to ensure the placeholder is
+  // committed to view.state before scheduleUpload's first onProgress runs.
+  const insertIntoTransaction = (state: EditorState, tr: Transaction, view: EditorView, file: File) => {
+    const { uploadId, previewURL, node } = buildPlaceholderNode(state, file);
+    tr.replaceSelectionWith(node).scrollIntoView();
+    queueMicrotask(() => startUpload(view, uploadId, { file, previewURL }));
+  };
+
+  const retryIntoTransaction = (state: EditorState, tr: Transaction, view: EditorView, uploadId: string) => {
+    const entry = uploads.get(uploadId);
+    if (!entry) {
+      return;
+    }
+    const result = findImageByUploadId(state.doc, uploadId);
+    if (result) {
+      const { pos, node } = result as { pos: number; node: ProseMirrorNode };
+      tr.setNodeMarkup(pos, undefined, {
+        ...node.attrs,
+        status: 'uploading',
+        progress: 0,
+        error: null,
+      });
+    }
+    queueMicrotask(() => startUpload(view, uploadId, entry));
   };
 
   const plugin = new Plugin({
@@ -305,7 +343,7 @@ const createUploadManager = (options: LashImageOptions): UploadManager => {
     },
   });
 
-  return { plugin, insert, retry };
+  return { plugin, insert, retry, insertIntoTransaction, retryIntoTransaction };
 };
 
 class LashImageNodeView implements NodeView {
@@ -579,30 +617,34 @@ export const LashImage = Node.create<LashImageOptions>({
     return ['img', mergeAttributes(attrs)];
   },
   addCommands() {
+    // eslint-disable-next-line @typescript-eslint/no-this-alias
     const extension = this;
     return {
       insertImagePlaceholder(file: File) {
-        return ({ view }: CommandProps) => {
+        return ({ tr, state, view, dispatch }: CommandProps) => {
           const storage = extension.storage as LashImageStorage;
           if (!storage.uploadManager) {
             return false;
           }
-          storage.uploadManager.insert(view, file);
+          if (!dispatch) {
+            return true;
+          }
+          storage.uploadManager.insertIntoTransaction(state, tr, view, file);
           return true;
         };
       },
       updateImageAttributes(attrs: Record<string, unknown>) {
-        return ({ state, dispatch }: CommandProps) => {
+        return ({ tr, state, dispatch }: CommandProps) => {
           const { selection } = state;
           let updated = false;
           state.doc.nodesBetween(selection.from, selection.to, (node, pos) => {
             if (node.type.name === 'image') {
-              dispatch?.(
-                state.tr.setNodeMarkup(pos, undefined, {
+              if (dispatch) {
+                tr.setNodeMarkup(pos, undefined, {
                   ...node.attrs,
                   ...attrs,
-                }),
-              );
+                });
+              }
               updated = true;
               return false;
             }
@@ -612,26 +654,34 @@ export const LashImage = Node.create<LashImageOptions>({
         };
       },
       retryImageUpload(uploadId: string) {
-        return ({ view }: CommandProps) => {
+        return ({ tr, state, view, dispatch }: CommandProps) => {
           const storage = extension.storage as LashImageStorage;
           if (!storage.uploadManager) {
             return false;
           }
-          storage.uploadManager.retry(view, uploadId);
+          if (!dispatch) {
+            return true;
+          }
+          storage.uploadManager.retryIntoTransaction(state, tr, view, uploadId);
           return true;
         };
       },
     };
   },
   addNodeView() {
+    // eslint-disable-next-line @typescript-eslint/no-this-alias
     const extension = this;
-    return (...params: unknown[]) => {
-      const [node, view, getPos] = params as [ProseMirrorNode, EditorView, () => number];
+    return (props: NodeViewRendererProps) => {
       const storage = extension.storage as LashImageStorage;
       if (!storage.uploadManager) {
         throw new Error('LashImage upload manager not initialised');
       }
-      return new LashImageNodeView(node, view, getPos, storage.uploadManager);
+      return new LashImageNodeView(
+        props.node,
+        props.editor.view,
+        props.getPos as () => number,
+        storage.uploadManager,
+      );
     };
   },
   addProseMirrorPlugins() {

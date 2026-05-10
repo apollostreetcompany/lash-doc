@@ -21,9 +21,12 @@ test.describe('table-select-open-close', () => {
     expect(setup.selected).toBe(true);
     expect(setup.typed).toBe(true);
 
-    const selectCell = editor.locator('td[data-cell-type="select"]').first();
-    const control = selectCell.locator('.lash-table-cell-control');
-    await selectCell.click();
+    // Use same locator pattern as status test - find control directly
+    const control = editor.locator('[data-role="table-cell-control"]:not([hidden])').first();
+    await expect(control).toHaveText('High');
+
+    // Get the parent cell for later assertions
+    const selectCell = control.locator('..').locator('..');
 
     await page.keyboard.press('Enter');
     await expect(selectCell).toHaveAttribute('data-picker-open', 'true');

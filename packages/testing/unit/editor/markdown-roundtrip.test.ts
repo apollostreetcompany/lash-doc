@@ -1,8 +1,8 @@
 /** @vitest-environment jsdom */
 
+import { parseMarkdownToDoc, serializeDocToMarkdown } from '@lash/editor-core';
 import { describe, expect, it } from 'vitest';
 
-import { parseMarkdownToDoc, serializeDocToMarkdown } from '@lash/editor-core';
 
 const SAMPLE_MARKDOWN = `# Project Plan
 

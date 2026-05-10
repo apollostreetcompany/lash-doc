@@ -1,8 +1,8 @@
-import { CellSelection, TableMap, cellAround } from '@tiptap/pm/tables';
-import type { EditorState, Transaction } from '@tiptap/pm/state';
 import type { Node as ProseMirrorNode } from '@tiptap/pm/model';
+import type { EditorState, Transaction } from '@tiptap/pm/state';
+import { CellSelection, TableMap, cellAround } from '@tiptap/pm/tables';
 
-import type { LashTableCellAttrs, LashTableCellType } from './types';
+import type { LashTableCellAttrs } from './types';
 import { sanitizeCellType } from './types';
 import {
   collectSelectedCells,
@@ -123,6 +123,9 @@ export const applyMatrixToSelection = (
   const width = rect.right - rect.left;
   const height = rect.bottom - rect.top;
   let changed = false;
+
+  // Track all cell positions before making changes
+  const cellPositions: Array<{ originalPos: number; rowIndex: number; colIndex: number; value: string }> = [];
   for (let rowIndex = 0; rowIndex < height; rowIndex += 1) {
     for (let colIndex = 0; colIndex < width; colIndex += 1) {
       const value = matrix[rowIndex]?.[colIndex];
@@ -132,23 +135,29 @@ export const applyMatrixToSelection = (
       const mapIndex = (rect.top + rowIndex) * map.width + (rect.left + colIndex);
       const cellRelativePos = map.map[mapIndex];
       const pos = tableStart + cellRelativePos;
-      const node = tr.doc.nodeAt(pos);
-      if (!node) {
-        continue;
-      }
-      const cellInfo = { pos, node } as const;
-      const attrs = node.attrs as Partial<LashTableCellAttrs>;
-      const cellType = sanitizeCellType(attrs.cellType);
-      if (cellType === 'text') {
-        replaceCellContent(tr, cellInfo, value);
-        setCellAttributes(tr, cellInfo, { value });
-      } else {
-        const options = resolveOptions(cellType, attrs.options);
-        const nextValue = options.includes(value) ? value : options[0] ?? '';
-        setCellAttributes(tr, cellInfo, { value: nextValue });
-      }
-      changed = true;
+      cellPositions.push({ originalPos: pos, rowIndex, colIndex, value });
     }
+  }
+
+  // Apply changes and track position mappings
+  for (const cellData of cellPositions) {
+    // Map the position through any changes made so far
+    const mappedPos = tr.mapping.map(cellData.originalPos);
+    const node = tr.doc.nodeAt(mappedPos);
+    if (!node) {
+      continue;
+    }
+    const cellInfo = { pos: mappedPos, node } as const;
+    const attrs = node.attrs as Partial<LashTableCellAttrs>;
+    const cellType = sanitizeCellType(attrs.cellType);
+    if (cellType === 'text') {
+      replaceCellContent(tr, cellInfo, cellData.value);
+    } else {
+      const options = resolveOptions(cellType, attrs.options);
+      const nextValue = options.includes(cellData.value) ? cellData.value : options[0] ?? '';
+      setCellAttributes(tr, cellInfo, { value: nextValue });
+    }
+    changed = true;
   }
   return changed;
 };

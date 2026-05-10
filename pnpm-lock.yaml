@@ -70,6 +70,14 @@ importers:
         specifier: ^18.3.0
         version: 18.3.7(@types/react@18.3.24)
 
+  packages/ai: {}
+
+  packages/authorship: {}
+
+  packages/collab-service: {}
+
+  packages/doc-chat: {}
+
   packages/editor-core:
     dependencies:
       '@tiptap/core':
@@ -157,11 +165,31 @@ importers:
         specifier: ^11.0.4
         version: 11.0.5
 
+  packages/history: {}
+
+  packages/infra-scripts: {}
+
+  packages/mentions: {}
+
+  packages/observability: {}
+
+  packages/share: {}
+
+  packages/storage: {}
+
+  packages/tables-media: {}
+
   packages/testing:
     dependencies:
       '@tiptap/core':
         specifier: ^2.4.0
         version: 2.26.2(@tiptap/pm@2.26.2)
+      '@tiptap/extension-table':
+        specifier: ^2.4.0
+        version: 2.26.2(@tiptap/core@2.26.2)(@tiptap/pm@2.26.2)
+      '@tiptap/pm':
+        specifier: ^2.4.0
+        version: 2.26.2
 
   packages/types: {}
 

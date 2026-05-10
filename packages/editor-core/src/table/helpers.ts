@@ -51,6 +51,7 @@ export const selectTableCells = (
     resolvedTable.start + headCellPos,
   );
 
-  view.dispatch(state.tr.setSelection(selection));
+  const tr = state.tr.setSelection(selection).scrollIntoView();
+  view.dispatch(tr);
   return true;
 };

@@ -1,13 +1,13 @@
 /** @vitest-environment jsdom */
 
-import { Editor } from '@tiptap/core';
-import { describe, expect, it } from 'vitest';
-
 import {
   createLashEditorExtensions,
   createMemoryOutlinePersistence,
   getOutlineItems,
 } from '@lash/editor-core';
+import { Editor } from '@tiptap/core';
+import { describe, expect, it } from 'vitest';
+
 
 const SAMPLE_DOCUMENT = `
   <h1>Chapter One</h1>

@@ -12,6 +12,8 @@ import {
   serializeDocToMarkdown,
   toolbarGroups,
   type LashImageUploader,
+  type LashTableCellAttrs,
+  type LashTableCellType,
   type OutlineItem,
   type ToolbarButtonSpec,
 } from '@lash/editor-core';
@@ -40,11 +42,21 @@ const TOOLBAR_META = [
 
 const OUTLINE_DOC_ID = 'demo-document';
 
+const TABLE_CELL_TYPES: Array<{ type: LashTableCellType; label: string }> = [
+  { type: 'text', label: 'Text' },
+  { type: 'status', label: 'Status' },
+  { type: 'select', label: 'Select' },
+];
+
 export function EditorWorkspace() {
   const [version, setVersion] = useState(0);
   const [isMounted, setIsMounted] = useState(false);
   const [outlineItems, setOutlineItems] = useState<OutlineItem[]>([]);
   const [isFocusMode, setIsFocusMode] = useState(false);
+  const [activeTableCell, setActiveTableCell] = useState<Pick<
+    LashTableCellAttrs,
+    'cellType' | 'value' | 'options'
+  > | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   const imageUploader = useMemo<LashImageUploader>(() => createBrowserImageUploader(), []);
@@ -120,6 +132,67 @@ export function EditorWorkspace() {
   }, [editor]);
 
   useEffect(() => {
+    if (!editor) {
+      setActiveTableCell(null);
+      return;
+    }
+
+    const update = () => {
+      const attrs = lashCommands.getTableCellAttrs(editor);
+      if (!attrs) {
+        setActiveTableCell(null);
+        return;
+      }
+      const normalizedOptions = Array.isArray(attrs.options)
+        ? attrs.options.filter((option): option is string => typeof option === 'string')
+        : [];
+      setActiveTableCell({
+        cellType: attrs.cellType as LashTableCellType,
+        value: typeof attrs.value === 'string' ? attrs.value : '',
+        options: normalizedOptions,
+      });
+    };
+
+    update();
+    editor.on('selectionUpdate', update);
+    editor.on('transaction', update);
+    return () => {
+      editor.off('selectionUpdate', update);
+      editor.off('transaction', update);
+    };
+  }, [editor]);
+
+  const handleSetTableCellType = useCallback(
+    (type: LashTableCellType) => {
+      if (!editor) {
+        return;
+      }
+      lashCommands.setTableCellType(editor, type);
+    },
+    [editor],
+  );
+
+  const handleSetTableCellValue = useCallback(
+    (value: string) => {
+      if (!editor) {
+        return;
+      }
+      lashCommands.setTableCellValue(editor, value);
+    },
+    [editor],
+  );
+
+  const handleCycleTableCellOption = useCallback(
+    (direction: 1 | -1 = 1) => {
+      if (!editor) {
+        return;
+      }
+      lashCommands.cycleTableCellOption(editor, direction);
+    },
+    [editor],
+  );
+
+  useEffect(() => {
     if (typeof window === 'undefined') {
       return;
     }
@@ -149,6 +222,7 @@ export function EditorWorkspace() {
         lashCommands.setTableCellType(editor, type as never, options),
       setCellValue: (value: string) => lashCommands.setTableCellValue(editor, value),
       cycle: (direction = 1) => lashCommands.cycleTableCellOption(editor, direction as 1 | -1),
+      getActive: () => lashCommands.getTableCellAttrs(editor),
     };
     win.__lashInsertTable = (rows = 3, cols = 3) => {
       lashCommands.insertTable(editor, { rows, cols });
@@ -417,6 +491,82 @@ export function EditorWorkspace() {
               </ToolbarGroup>
             ))}
           </div>
+
+          {isEditorReady && activeTableCell ? (
+            <div
+              className="lash-table-panel"
+              data-cell-type={activeTableCell.cellType}
+              aria-live="polite"
+            >
+              <div className="lash-table-panel-row">
+                <span className="lash-table-panel-label">Cell type</span>
+                <div className="lash-table-type-buttons" role="group" aria-label="Table cell type">
+                  {TABLE_CELL_TYPES.map(({ type, label }) => {
+                    const isActive = activeTableCell.cellType === type;
+                    return (
+                      <button
+                        key={type}
+                        type="button"
+                        className="lash-table-type-button"
+                        data-active={isActive ? 'true' : 'false'}
+                        aria-pressed={isActive ? 'true' : 'false'}
+                        onClick={() => handleSetTableCellType(type)}
+                      >
+                        {label}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {activeTableCell.cellType !== 'text' ? (
+                <div className="lash-table-panel-row">
+                  <span className="lash-table-panel-label">Value</span>
+                  <div className="lash-table-value-controls">
+                    <span className="lash-table-value-chip">{activeTableCell.value || '—'}</span>
+                    <button
+                      type="button"
+                      className="lash-table-cycle-button"
+                      onClick={() => handleCycleTableCellOption(1)}
+                    >
+                      Cycle
+                    </button>
+                    <button
+                      type="button"
+                      className="lash-table-cycle-button"
+                      onClick={() => handleCycleTableCellOption(-1)}
+                    >
+                      Back
+                    </button>
+                  </div>
+                  {activeTableCell.options.length ? (
+                    <div
+                      className="lash-table-option-grid"
+                      role="listbox"
+                      aria-label="Table cell options"
+                    >
+                      {activeTableCell.options.map((option) => {
+                        const isActiveOption = option === activeTableCell.value;
+                        return (
+                          <button
+                            key={option}
+                            type="button"
+                            className="lash-table-option-button"
+                            role="option"
+                            aria-selected={isActiveOption ? 'true' : 'false'}
+                            data-active={isActiveOption ? 'true' : 'false'}
+                            onClick={() => handleSetTableCellValue(option)}
+                          >
+                            {option}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  ) : null}
+                </div>
+              ) : null}
+            </div>
+          ) : null}
 
           <div className="lash-editor-content-wrapper" role="region" aria-label="Document editor">
             {!isMounted || !isEditorReady ? (

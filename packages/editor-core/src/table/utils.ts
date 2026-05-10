@@ -1,6 +1,6 @@
+import type { Node as ProseMirrorNode } from '@tiptap/pm/model';
 import type { EditorState, Transaction } from '@tiptap/pm/state';
 import { CellSelection, cellAround } from '@tiptap/pm/tables';
-import type { Node as ProseMirrorNode } from '@tiptap/pm/model';
 
 import type { LashTableCellAttrs, LashTableCellType } from './types';
 import {

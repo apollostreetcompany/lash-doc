@@ -2,6 +2,10 @@ import { expect, test } from '@playwright/test';
 
 test.describe('table-paste-in', () => {
   test('fills cell range from TSV clipboard data', async ({ page }) => {
+    page.on('console', (msg) => {
+      // eslint-disable-next-line no-console
+      console.log('[browser]', msg.text());
+    });
     await page.goto('/');
     const editor = page.getByTestId('lash-editor-content');
     await editor.click();
@@ -19,11 +23,17 @@ test.describe('table-paste-in', () => {
     expect(setup.selected).toBe(true);
 
     await page.evaluate((tsv) => {
-      const editorElement = document.querySelector('[data-testid="lash-editor-content"]');
-      const data = new DataTransfer();
-      data.setData('text/plain', tsv);
-      const event = new ClipboardEvent('paste', { clipboardData: data });
-      editorElement?.dispatchEvent(event);
+      // Dispatch on ProseMirror element, not wrapper
+      const proseMirrorElement = document.querySelector('.ProseMirror');
+      // Create a DataTransfer-like object
+      const mockData: Record<string, string> = { 'text/plain': tsv };
+      const dataTransfer = {
+        getData: (format: string) => mockData[format] || '',
+      };
+      // Create ClipboardEvent and attach dataTransfer
+      const event = new ClipboardEvent('paste', { bubbles: true, cancelable: true });
+      Object.defineProperty(event, 'clipboardData', { value: dataTransfer, writable: false });
+      proseMirrorElement?.dispatchEvent(event);
     }, 'Alpha\tBeta\nGamma\tDelta');
 
     const tableValues = await page.evaluate(() => {

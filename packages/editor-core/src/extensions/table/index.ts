@@ -1,21 +1,25 @@
 import { mergeAttributes, type NodeViewRendererProps } from '@tiptap/core';
 import TableExtension from '@tiptap/extension-table';
-import TableRowExtension from '@tiptap/extension-table-row';
-import TableHeaderExtension from '@tiptap/extension-table-header';
 import BaseTableCellExtension from '@tiptap/extension-table-cell';
-import { Plugin, PluginKey } from '@tiptap/pm/state';
-import type { EditorState, Transaction } from '@tiptap/pm/state';
+import TableHeaderExtension from '@tiptap/extension-table-header';
+import TableRowExtension from '@tiptap/extension-table-row';
 import type { Node as ProseMirrorNode } from '@tiptap/pm/model';
+import { Plugin, PluginKey } from '@tiptap/pm/state';
+import type { EditorState } from '@tiptap/pm/state';
 import type { EditorView } from '@tiptap/pm/view';
 
+import {
+  applyMatrixToSelection,
+  buildTsvFromMatrix,
+  extractSelectionMatrix,
+  hasTableSelection,
+  parseClipboardTableText,
+} from '../../table/interop';
 import {
   sanitizeCellType,
   cloneDefaultSelectOptions,
   cloneDefaultStatusOptions,
-  DEFAULT_SELECT_CELL_OPTIONS,
-  DEFAULT_STATUS_CELL_OPTIONS,
   type LashTableCellAttrs,
-  type LashTableCellType,
   type LashTableOptions,
 } from '../../table/types';
 import {
@@ -25,13 +29,6 @@ import {
   resolveOptions,
   setCellAttributes,
 } from '../../table/utils';
-import {
-  applyMatrixToSelection,
-  buildTsvFromMatrix,
-  extractSelectionMatrix,
-  hasTableSelection,
-  parseClipboardTableText,
-} from '../../table/interop';
 
 interface InteractionMeta {
   type: 'open' | 'close' | 'move' | 'toggle';
@@ -140,6 +137,7 @@ const createCellNodeView = (
   control.type = 'button';
   control.className = 'lash-table-cell-control';
   control.dataset.role = 'table-cell-control';
+  control.dataset.controlId = `control-${cellId}`;
   control.setAttribute('aria-haspopup', 'listbox');
   control.setAttribute('aria-expanded', 'false');
   control.tabIndex = -1;
@@ -185,9 +183,6 @@ const createCellNodeView = (
   const syncFromNode = (target: ProseMirrorNode) => {
     const attrs = target.attrs as Partial<LashTableCellAttrs>;
     const cellType = sanitizeCellType(attrs.cellType);
-    if (typeof window !== 'undefined' && (window as any).__LASH_TABLE_DEBUG) {
-      console.log('syncFromNode', cellType, attrs);
-    }
     dom.dataset.cellType = cellType;
     dom.setAttribute('data-cell-type', cellType);
     wrapper.dataset.cellType = cellType;
@@ -231,7 +226,10 @@ const createCellNodeView = (
     control.textContent = displayValue;
     control.hidden = cellType === 'text';
     control.tabIndex = cellType === 'text' ? -1 : 0;
-    control.setAttribute('aria-expanded', 'false');
+    // Only set aria-expanded if it's not already set (preserve picker open state)
+    if (!control.hasAttribute('aria-expanded')) {
+      control.setAttribute('aria-expanded', 'false');
+    }
     if (cellType !== 'text') {
       contentDOM.setAttribute('data-hidden-content', 'true');
       contentDOM.style.display = 'none';
@@ -286,6 +284,32 @@ const createCellNodeView = (
 
   syncFromNode(node);
 
+  // Check if this cell's picker should be open based on plugin state
+  const cellPos = typeof props.getPos === 'function' ? props.getPos() : null;
+  let pickerIsOpen = false;
+  if (cellPos !== null && props.view) {
+    const pluginState = TABLE_INTERACTION_PLUGIN_KEY.getState(props.view.state);
+    if (pluginState && pluginState.openCellPos === cellPos) {
+      pickerIsOpen = true;
+      control.setAttribute('aria-expanded', 'true');
+      control.dataset.active = 'true';
+      menu.hidden = false;
+      // Set active index
+      const activeIndex = pluginState.activeIndex;
+      dom.dataset.activeIndex = String(activeIndex);
+      if (menu) {
+        menu.dataset.activeIndex = String(activeIndex);
+      }
+      optionButtons.forEach((button, index) => {
+        const isActive = index === activeIndex;
+        button.dataset.active = isActive ? 'true' : 'false';
+        button.setAttribute('aria-selected', isActive ? 'true' : 'false');
+      });
+    }
+  }
+  // Always set picker-open attribute (true or false)
+  dom.dataset.pickerOpen = pickerIsOpen ? 'true' : 'false';
+
   return {
     dom,
     contentDOM,
@@ -297,8 +321,19 @@ const createCellNodeView = (
       if (updatedNode.type.name !== node.type.name) {
         return false;
       }
+      // Only sync if attributes actually changed
+      const oldAttrs = node.attrs as Partial<LashTableCellAttrs>;
+      const newAttrs = updatedNode.attrs as Partial<LashTableCellAttrs>;
+
+      const cellTypeChanged = oldAttrs.cellType !== newAttrs.cellType;
+      const valueChanged = oldAttrs.value !== newAttrs.value;
+      const optionsChanged = JSON.stringify(oldAttrs.options) !== JSON.stringify(newAttrs.options);
+      const attrsChanged = cellTypeChanged || valueChanged || optionsChanged;
+
       node = updatedNode;
-      syncFromNode(updatedNode);
+      if (attrsChanged) {
+        syncFromNode(updatedNode);
+      }
       return true;
     },
   };
@@ -353,9 +388,6 @@ const handleCellKeydown = (view: EditorView, event: KeyboardEvent): boolean => {
     return false;
   }
   const cells = collectSelectedCells(view.state as EditorState);
-  if (typeof window !== 'undefined' && (window as any).__LASH_TABLE_DEBUG) {
-    console.log('keydown event', event.key, 'cells count', cells.length);
-  }
   if (!cells.length) {
     return false;
   }
@@ -476,7 +508,7 @@ const handlePasteEvent = (view: EditorView, event: ClipboardEvent): boolean => {
     return false;
   }
   const data =
-    event.clipboardData?.getData('text/tab-separated-values') ??
+    event.clipboardData?.getData('text/tab-separated-values') ||
     event.clipboardData?.getData('text/plain');
   if (!data) {
     return false;
@@ -558,23 +590,39 @@ export const createLashTableInteractionPlugin = () =>
     },
     view(view) {
       let previousPos: number | null = null;
+      let previousIndex: number = 0;
       return {
         update(updatedView, _prevState) {
           const state = TABLE_INTERACTION_PLUGIN_KEY.getState(updatedView.state) ?? createInitialState();
+
+          // Close previous picker if position changed
           if (previousPos !== null && previousPos !== state.openCellPos) {
             const dom = updatedView.nodeDOM(previousPos) as HTMLElement | null;
             if (dom) {
               setPickerOpen(dom, false);
             }
           }
+
+          // Open/update current picker ONLY if position or index changed
           if (state.openCellPos !== null) {
-            const dom = updatedView.nodeDOM(state.openCellPos) as HTMLElement | null;
-            if (dom) {
-              setPickerOpen(dom, true);
-              setPickerActiveIndex(dom, state.activeIndex);
+            const positionChanged = previousPos !== state.openCellPos;
+            const indexChanged = previousIndex !== state.activeIndex;
+
+            if (positionChanged || indexChanged) {
+              const dom = updatedView.nodeDOM(state.openCellPos) as HTMLElement | null;
+              if (dom) {
+                if (positionChanged) {
+                  setPickerOpen(dom, true);
+                }
+                if (indexChanged) {
+                  setPickerActiveIndex(dom, state.activeIndex);
+                }
+              }
             }
           }
+
           previousPos = state.openCellPos;
+          previousIndex = state.activeIndex;
         },
         destroy() {
           if (previousPos !== null) {

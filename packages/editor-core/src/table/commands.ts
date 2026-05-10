@@ -9,20 +9,21 @@ import {
   resolveOptions,
   clampOptionIndex,
   setCellAttributes,
+  replaceCellContent,
 } from './utils';
 
 const applyTransaction = (
   editor: Editor,
-  mutator: (state: EditorState, tr: Transaction) => void,
+  mutator: (state: EditorState, tr: Transaction) => boolean | void,
 ): boolean => {
   const { state, view } = editor;
   const tr = state.tr;
-  mutator(state, tr);
+  const handled = mutator(state, tr);
   if (tr.docChanged || tr.storedMarksSet || tr.selectionSet) {
     view?.dispatch(tr);
     return true;
   }
-  return false;
+  return Boolean(handled);
 };
 
 export const setSelectionCellType = (
@@ -33,24 +34,59 @@ export const setSelectionCellType = (
   const nextType = sanitizeCellType(cellType);
   return applyTransaction(editor, (state, tr) => {
     const cells = collectSelectedCells(state);
+    if (!cells.length) {
+      return false;
+    }
+    const providedOptions = Array.isArray(options)
+      ? options.filter((item): item is string => typeof item === 'string')
+      : null;
     cells.forEach((cell) => {
-      const nextAttrs = mergeCellAttrs(cell.node, {
-        cellType: nextType,
-        options,
-        value: options && options.length ? options[0] : undefined,
-      } as Partial<LashTableCellAttrs>);
-      tr.setNodeMarkup(cell.pos, cell.node.type, nextAttrs);
+      const patch: Partial<LashTableCellAttrs> = { cellType: nextType };
+      if (nextType === 'text') {
+        patch.options = [];
+      } else if (providedOptions !== null) {
+        patch.options = [...providedOptions];
+        if (providedOptions.length) {
+          patch.value = providedOptions[0];
+        }
+      } else {
+        patch.options = undefined;
+        patch.value = undefined;
+      }
+      const previousAttrs = cell.node.attrs as LashTableCellAttrs;
+      const previousType = sanitizeCellType(previousAttrs.cellType);
+      if (nextType === 'text' && previousType !== 'text') {
+        const restoredValue =
+          typeof patch.value === 'string'
+            ? patch.value
+            : typeof previousAttrs.value === 'string'
+              ? previousAttrs.value
+              : '';
+        replaceCellContent(tr, cell, restoredValue);
+        patch.value = restoredValue;
+      }
+      setCellAttributes(tr, cell, patch);
     });
+    return true;
   });
 };
 
 export const setSelectionCellValue = (editor: Editor, value: string): boolean =>
   applyTransaction(editor, (state, tr) => {
     const cells = collectSelectedCells(state);
+    if (!cells.length) {
+      return false;
+    }
+    const stringValue = value == null ? '' : String(value);
     cells.forEach((cell) => {
-      const nextAttrs = mergeCellAttrs(cell.node, { value });
-      tr.setNodeMarkup(cell.pos, cell.node.type, nextAttrs);
+      const attrs = cell.node.attrs as LashTableCellAttrs;
+      const cellType = sanitizeCellType(attrs.cellType);
+      if (cellType === 'text') {
+        replaceCellContent(tr, cell, stringValue);
+      }
+      setCellAttributes(tr, cell, { value: stringValue });
     });
+    return true;
   });
 
 export const cycleSelectionCellOption = (
@@ -59,10 +95,18 @@ export const cycleSelectionCellOption = (
 ): boolean =>
   applyTransaction(editor, (state, tr) => {
     const cells = collectSelectedCells(state);
+    if (!cells.length) {
+      return false;
+    }
+    let handled = false;
     cells.forEach((cell) => {
       const attrs = cell.node.attrs as LashTableCellAttrs;
-      const options = resolveOptions(attrs.cellType, attrs.options);
-      if (!options.length || attrs.cellType === 'text') {
+      const cellType = sanitizeCellType(attrs.cellType);
+      if (cellType === 'text') {
+        return;
+      }
+      const options = resolveOptions(cellType, attrs.options);
+      if (!options.length) {
         return;
       }
       const currentIndex = options.indexOf(attrs.value ?? '');
@@ -71,7 +115,9 @@ export const cycleSelectionCellOption = (
       setCellAttributes(tr, cell, {
         value: nextValue,
       });
+      handled = true;
     });
+    return handled;
   });
 
 export const getActiveCellAttrs = (

@@ -308,6 +308,115 @@ main {
   color: #0f172a;
 }
 
+.lash-table-panel {
+  margin: 0.75rem 0 1rem;
+  padding: 0.75rem 1rem;
+  border-radius: 0.75rem;
+  background: rgba(30, 41, 59, 0.55);
+  border: 1px solid rgba(59, 130, 246, 0.25);
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.lash-table-panel-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.lash-table-panel-label {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: rgba(226, 232, 240, 0.85);
+  min-width: 5rem;
+}
+
+.lash-table-type-buttons {
+  display: inline-flex;
+  gap: 0.5rem;
+}
+
+.lash-table-type-button {
+  appearance: none;
+  border: 1px solid rgba(148, 163, 184, 0.35);
+  background: rgba(15, 23, 42, 0.35);
+  color: inherit;
+  padding: 0.35rem 0.75rem;
+  border-radius: 999px;
+  font-size: 0.85rem;
+  cursor: pointer;
+  transition: background 0.2s ease, border-color 0.2s ease;
+}
+
+.lash-table-type-button[data-active='true'] {
+  border-color: rgba(96, 165, 250, 0.8);
+  background: rgba(59, 130, 246, 0.35);
+  color: #0f172a;
+}
+
+.lash-table-value-controls {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.lash-table-value-chip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.25rem 0.75rem;
+  border-radius: 999px;
+  background: rgba(59, 130, 246, 0.25);
+  border: 1px solid rgba(59, 130, 246, 0.4);
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+
+.lash-table-cycle-button {
+  appearance: none;
+  border: 1px solid rgba(148, 163, 184, 0.35);
+  background: rgba(15, 23, 42, 0.4);
+  color: inherit;
+  padding: 0.3rem 0.6rem;
+  border-radius: 0.6rem;
+  font-size: 0.8rem;
+  cursor: pointer;
+  transition: background 0.2s ease, border-color 0.2s ease;
+}
+
+.lash-table-cycle-button:hover {
+  border-color: rgba(59, 130, 246, 0.65);
+  background: rgba(59, 130, 246, 0.3);
+  color: #0f172a;
+}
+
+.lash-table-option-grid {
+  width: 100%;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.lash-table-option-button {
+  appearance: none;
+  border: 1px solid rgba(148, 163, 184, 0.35);
+  background: rgba(15, 23, 42, 0.45);
+  color: inherit;
+  padding: 0.3rem 0.65rem;
+  border-radius: 0.6rem;
+  font-size: 0.8rem;
+  cursor: pointer;
+  transition: background 0.2s ease, border-color 0.2s ease;
+}
+
+.lash-table-option-button[data-active='true'] {
+  border-color: rgba(96, 165, 250, 0.8);
+  background: rgba(59, 130, 246, 0.4);
+  color: #0f172a;
+}
+
 .lash-image-node {
   display: flex;
   flex-direction: column;

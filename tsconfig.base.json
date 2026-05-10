@@ -17,7 +17,17 @@
       "@lash/editor-core": ["packages/editor-core/src"],
       "@lash/ui": ["packages/ui/src"],
       "@lash/types": ["packages/types/src"],
-      "@lash/testing/*": ["packages/testing/*"]
+      "@lash/testing/*": ["packages/testing/*"],
+      "@lash/collab-service": ["packages/collab-service/src"],
+      "@lash/history": ["packages/history/src"],
+      "@lash/authorship": ["packages/authorship/src"],
+      "@lash/mentions": ["packages/mentions/src"],
+      "@lash/share": ["packages/share/src"],
+      "@lash/ai": ["packages/ai/src"],
+      "@lash/doc-chat": ["packages/doc-chat/src"],
+      "@lash/tables-media": ["packages/tables-media/src"],
+      "@lash/observability": ["packages/observability/src"],
+      "@lash/storage": ["packages/storage/src"]
     }
   },
   "include": [],

@@ -3,16 +3,17 @@ import LinkExtension from '@tiptap/extension-link';
 import TaskItemExtension from '@tiptap/extension-task-item';
 import TaskListExtension from '@tiptap/extension-task-list';
 import UnderlineExtension from '@tiptap/extension-underline';
+import { Plugin, PluginKey , TextSelection } from '@tiptap/pm/state';
 import StarterKitExtension from '@tiptap/starter-kit';
 
 import { LashHeading } from './extensions/heading';
-import { OutlineManager, type OutlinePersistenceAdapter } from './plugins/outline';
 import { LashImage, type LashImageUploader } from './extensions/image';
 import {
   createLashTableExtensions,
   type LashTableOptions,
   createLashTableInteractionPlugin,
 } from './extensions/table';
+import { OutlineManager, type OutlinePersistenceAdapter } from './plugins/outline';
 
 export interface LashSchemaOptions {
   onRequestLink?: (editor: Editor) => boolean;
@@ -50,6 +51,63 @@ const LashKeyboardShortcuts = Extension.create<LashSchemaOptions>({
         return this.editor.chain().focus().extendMarkRange('link').unsetLink().run();
       },
     };
+  },
+});
+
+// Table navigation extension - must use keymap plugin for proper priority
+const LashTableNavigation = Extension.create({
+  name: 'lashTableNavigation',
+  addProseMirrorPlugins() {
+    return [
+      new Plugin({
+        key: new PluginKey('lashTableNavigation'),
+        props: {
+          handleKeyDown: (view, event) => {
+            // Only handle Tab and Shift+Tab in table cells, let everything else pass through
+            if (event.key !== 'Tab') {
+              return false;
+            }
+
+            const editor = this.editor as Editor;
+
+            // Prevent default Tab behavior
+            event.preventDefault();
+
+            if (event.shiftKey) {
+              // Shift+Tab: go to previous cell
+              return editor.chain()
+                .goToPreviousCell()
+                .command(({ tr, dispatch: cmdDispatch }) => {
+                  // Place cursor at end of cell content after navigation
+                  if (cmdDispatch && tr.selection) {
+                    const { $from } = tr.selection;
+                    const endPos = $from.end($from.depth);
+                    const newSelection = TextSelection.create(tr.doc, endPos);
+                    tr.setSelection(newSelection);
+                  }
+                  return true;
+                })
+                .run();
+            } else {
+              // Tab: go to next cell
+              return editor.chain()
+                .goToNextCell()
+                .command(({ tr, dispatch: cmdDispatch }) => {
+                  // Place cursor at end of cell content after navigation
+                  if (cmdDispatch && tr.selection) {
+                    const { $from } = tr.selection;
+                    const endPos = $from.end($from.depth);
+                    const newSelection = TextSelection.create(tr.doc, endPos);
+                    tr.setSelection(newSelection);
+                  }
+                  return true;
+                })
+                .run();
+            }
+          },
+        },
+      }),
+    ];
   },
 });
 
@@ -111,6 +169,7 @@ export const createLashEditorExtensions = (options?: LashSchemaOptions): Extensi
       },
     }),
     LashKeyboardShortcuts.configure(options ?? {}),
+    LashTableNavigation,
     Extension.create({
       name: 'lashTableInteraction',
       addProseMirrorPlugins() {

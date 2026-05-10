@@ -38,10 +38,13 @@ test.describe('table-copy-out', () => {
     expect(applied.rangeSelected).toBe(true);
 
     const copied = await page.evaluate(() => {
-      const editorElement = document.querySelector('[data-testid="lash-editor-content"]');
+      // Dispatch on ProseMirror element, not wrapper
+      const proseMirrorElement = document.querySelector('.ProseMirror');
       const data = new DataTransfer();
-      const event = new ClipboardEvent('copy', { clipboardData: data });
-      editorElement?.dispatchEvent(event);
+      // Create event with clipboardData - need to use Object.defineProperty workaround
+      const event = new ClipboardEvent('copy', { bubbles: true, cancelable: true });
+      Object.defineProperty(event, 'clipboardData', { value: data, writable: false });
+      proseMirrorElement?.dispatchEvent(event);
       return data.getData('text/plain');
     });
 

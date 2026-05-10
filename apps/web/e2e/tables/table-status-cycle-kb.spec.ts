@@ -26,7 +26,7 @@ test.describe('table-status-cycle-kb', () => {
     expect(setup.selected).toBe(true);
     expect(setup.typed).toBe(true);
 
-    const docSnapshot = await page.evaluate(() => {
+    const _docSnapshot = await page.evaluate(() => {
       const editor = (window as unknown as { __lashEditor?: { getJSON: () => unknown } }).__lashEditor;
       return editor?.getJSON();
     });

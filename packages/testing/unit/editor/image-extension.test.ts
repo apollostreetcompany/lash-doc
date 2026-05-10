@@ -1,15 +1,15 @@
 /** @vitest-environment jsdom */
 
-import { describe, expect, it } from 'vitest';
-import { Editor } from '@tiptap/core';
-
 import { createLashEditorExtensions, type LashImageUploader } from '@lash/editor-core';
+import { Editor } from '@tiptap/core';
+import { describe, expect, it } from 'vitest';
+
 
 const flushMicrotasks = () => new Promise((resolve) => setTimeout(resolve, 0));
 
 describe('Lash image extension', () => {
   it('inserts a placeholder and resolves the upload', async () => {
-    let progressValues: number[] = [];
+    const progressValues: number[] = [];
     const uploader: LashImageUploader = {
       async upload(_file, onProgress) {
         onProgress(0.4);

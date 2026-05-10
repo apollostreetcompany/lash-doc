@@ -1,9 +1,4 @@
 import type { JSONContent } from '@tiptap/core';
-import { unified } from 'unified';
-import remarkParse from 'remark-parse';
-import remarkStringify from 'remark-stringify';
-import type { Options as RemarkStringifyOptions } from 'remark-stringify';
-import remarkGfm from 'remark-gfm';
 import type {
   Content,
   Definition,
@@ -20,6 +15,11 @@ import type {
   TableRow,
   PhrasingContent,
 } from 'mdast';
+import remarkGfm from 'remark-gfm';
+import remarkParse from 'remark-parse';
+import remarkStringify from 'remark-stringify';
+import type { Options as RemarkStringifyOptions } from 'remark-stringify';
+import { unified } from 'unified';
 
 export interface MarkdownImportResult {
   doc: JSONContent;
@@ -383,7 +383,7 @@ interface ImageDefinition {
 const applyMarks = (
   node: JSONContent,
   warnings: Set<string>,
-  definitions: Map<string, ImageDefinition>,
+  _definitions: Map<string, ImageDefinition>,
 ): PhrasingContent => {
   if (node.type === 'text') {
     const base: PhrasingContent = node.marks?.some((mark) => mark.type === 'code')
@@ -570,7 +570,7 @@ const convertTableToMdast = (
   warnings: Set<string>,
   definitions: Map<string, ImageDefinition>,
 ): Table => {
-  const rows: TableRow[] = (node.content ?? []).map((row, rowIndex) => {
+  const rows: TableRow[] = (node.content ?? []).map((row) => {
     const cells: TableCell[] = (row.content ?? []).map((cell) => {
       const cellContent = convertInlineForExport(
         (cell.content?.[0]?.content as JSONContent[] | undefined) ?? [],

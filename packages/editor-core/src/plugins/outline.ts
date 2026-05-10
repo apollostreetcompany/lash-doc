@@ -1,7 +1,7 @@
 import { Extension, type CommandProps, type RawCommands } from '@tiptap/core';
 import type { Node as ProseMirrorNode } from '@tiptap/pm/model';
 import { Plugin, PluginKey, Selection as PMSelection, TextSelection } from '@tiptap/pm/state';
-import type { EditorState, Selection, Transaction } from '@tiptap/pm/state';
+import type { EditorState, Selection } from '@tiptap/pm/state';
 import { Decoration, DecorationSet } from '@tiptap/pm/view';
 
 import { createHeadingIdPlugin } from './heading-id';
@@ -182,23 +182,13 @@ const computeOutlineState = (
 };
 
 const findNextVisiblePosition = (doc: ProseMirrorNode, outline: OutlineItem[], targetId: string) => {
-  const index = outline.findIndex((item) => item.headingId === targetId);
-  if (index === -1) {
+  const target = outline.find((item) => item.headingId === targetId);
+  if (!target) {
     return null;
   }
-
-  const target = outline[index];
-  if (target.contentFrom >= target.contentTo) {
-    const next = outline[index + 1];
-    return next ? next.from : doc.content.size;
-  }
-
-  const next = outline.slice(index + 1).find((item) => item.contentFrom < item.contentTo || !item.collapsed);
-  if (next) {
-    return next.from;
-  }
-
-  return doc.content.size;
+  // After collapsing target, the first visible block sits at target.contentTo —
+  // which by construction equals the next sibling-or-uncle heading's `from` (or doc end).
+  return Math.min(target.contentTo, doc.content.size);
 };
 
 const createOutlinePlugin = (config: OutlinePluginConfig) =>

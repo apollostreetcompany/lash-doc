@@ -3,6 +3,7 @@ import type { Editor } from '@tiptap/core';
 import type { LashTableCellType } from './extensions/table';
 import {
   cycleSelectionCellOption,
+  getActiveCellAttrs,
   setSelectionCellType,
   setSelectionCellValue,
 } from './table/commands';
@@ -84,6 +85,9 @@ export const lashCommands = {
   },
   cycleTableCellOption(editor: Editor, direction: 1 | -1 = 1) {
     return cycleSelectionCellOption(editor, direction);
+  },
+  getTableCellAttrs(editor: Editor) {
+    return getActiveCellAttrs(editor);
   },
 };
 
