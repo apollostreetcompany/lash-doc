@@ -47,6 +47,10 @@ export interface MapAnchorInput {
   /** Doc JSON after `ops` are applied. Used to resolve the "current"
    *  occurrence index when text disambiguation is needed. */
   currentDoc: unknown;
+  /** sha256 of `currentDoc` (typically the most recent HistoryEntry.resultSha
+   *  at the time of the call). The returned `Anchor.baseVersion` is set to
+   *  this so downstream consumers can deterministically diff/render. */
+  targetVersion: string;
 }
 
 /** Map an anchor through a sequence of ops, marking it orphaned if its range

@@ -129,7 +129,7 @@ Enter: rolling, starts as features land. Exit:
 ## 2. Parallel DAG
 
 ```
-M0  HYGIENE & CONTRACTS (sequential prefix; A1 first, A2-A8 parallel after)
+M0  HYGIENE & CONTRACTS (sequential prefix; A1 first, A2-A9 parallel after)
 ┌────────────────────────────────────────────────────────────────────┐
 │ A1 [seq] lint clean to 0 errors                                    │
 │ A2 [par] image NodeView attrs fix         (image.ts only)          │
@@ -140,28 +140,44 @@ M0  HYGIENE & CONTRACTS (sequential prefix; A1 first, A2-A8 parallel after)
 │         protection, .gitignore, CODEOWNERS                         │
 │ A6 [par] test infra: fixture loader +     (packages/testing/       │
 │         "Legal Contract" fixture           fixtures/*)             │
-│ A7 [par] @lash/types data contracts       (packages/types/src)     │
-│ A8 [par] scaffold 11 packages w/typed     (new dirs only)          │
-│         stubs, refactor schema.ts into                             │
-│         schema/{base,chips,mentions,suggest,ai} modules            │
+│ A7 [par] @lash/types data contracts +     (packages/types/src)     │
+│         canonicalize / hashCanonical                               │
+│ A8 [par] scaffold 12 packages w/typed     (new dirs only)          │
+│         stubs (collab/history/authorship/                          │
+│         mentions/share/ai/doc-chat/                                │
+│         tables-media/observability/                                │
+│         storage/infra-scripts/RBAC) +                              │
+│         tsconfig path aliases                                      │
+│ A9 [seq] proconsult-m0 review fix loop    (architecture+correctness│
+│         (depends on A1-A8 committed)       +infra; runs until 0    │
+│                                            P0/P1)                  │
 └────────────────────────────────────────────────────────────────────┘
-        │ A1 must commit before any A2-A4 commit
+        │ A1 must commit before any A2-A4 commit; A9 after all of A1-A8
         ▼
-M1  PHASE 0 FINISH (4 lanes parallel)
+M1  PHASE 0 FINISH (B0 prerequisite, then 5 lanes parallel)
 ┌────────────────────────────────────────────────────────────────────┐
-│ B1 chips basic       (editor-core/src/extensions/chip + e2e/chips) │
-│ B2 checklists wire   (editor-core schema + e2e/checklists)         │
-│ B3 autosave skel     (apps/web/lib/autosave + unit/autosave)       │
-│ B4 focus-mode UI     (apps/web/components + e2e/focus-mode)        │
+│ B0 [seq] schema/slot split  (editor-core/src/schema/* +            │
+│         (PREREQUISITE)       apps/web/components slot pattern)     │
+│ B1 chips basic              (editor-core/src/extensions/chip +     │
+│                              e2e/chips)                            │
+│ B2 checklists wire          (editor-core schema/checklist +        │
+│                              e2e/checklists)                       │
+│ B3 autosave skel            (apps/web/lib/autosave + unit/autosave)│
+│ B4 focus-mode UI            (apps/web/components + e2e/focus-mode) │
+│ B5 stabilization fixes      (outline selectors, md roundtrip,      │
+│                              image e2e retarget, focus-a11y)       │
 └────────────────────────────────────────────────────────────────────┘
         ▼
-M2  PHASE 1 (5 lanes parallel after C2 ops shape locked)
+M2  PHASE 1 (6 lanes parallel after C2 ops shape locked)
 ┌────────────────────────────────────────────────────────────────────┐
 │ C1 collab        (packages/collab-service + apps/realtime-gateway) │
 │ C2 history log   (packages/history + apps/api) [hub]               │
 │ C3 diff render   (packages/history/diff + apps/web history panel)  │
 │ C4 restore       (packages/history + apps/api restore route)       │
 │ C5 authorship    (packages/authorship + apps/web blame gutter)     │
+│ C6 offline       (packages/collab-service/offline + e2e/offline    │
+│                   formerly D5; lives in M2 because its acceptance  │
+│                   IDs are M2 exit criteria)                        │
 └────────────────────────────────────────────────────────────────────┘
         ▼
 M3  PHASE 2 (4 lanes parallel)
@@ -194,8 +210,16 @@ M5  HARDENING (5 lanes; many start mid-M2)
 ### Critical path (longest serial chain)
 
 ```
-A1 → A4 → B1 chips → C2 history-ops → C3 diff → D4 chat-anchor → E4 suggest → F4 perf
+A1 lint → A4 table-step06 → A9 review-pass-clean → B0 schema/slot split
+       → B1 chips → C2 history-ops → C3 diff → C5 authorship
+       → D4 chat-anchor → E4 suggest → E5 filtered-diffs → F4 perf
 ```
+
+Inter-lane dependencies that this DAG already encodes but worth restating:
+- E5 filtered diffs depends on C3 diff + C5 authorship (filter-by-author needs blame metadata).
+- D4 doc chat history-context depends on C3 diff + C4 restore (renders state-at-version inline).
+- E4 suggest mode depends on C2 ops + C3 diff (track-changes visuals = diff spans rendered as marks).
+- All AI labeling/filtering depends on C5 authorship (`actorType: 'ai'` filter feeds DiffSpan).
 
 Everything else runs alongside.
 

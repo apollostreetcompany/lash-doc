@@ -87,29 +87,24 @@ describe('canonicalize', () => {
 });
 
 describe('hashCanonical', () => {
-  it('is sha256 hex of canonicalize() output (locked vector)', async () => {
-    // sha256 hex of `{"a":1,"b":[1,2,3]}` — the canonical form of either input order.
-    const expected = 'b5e1ff58e6b50ddc4a4c1c1c4ed09c6da3a6e1d4c6b1c1f0bc2bd6f1d35d3eb0';
-    // Verify both insertion orders produce identical hash; verify against locked vector.
+  // LOCKED VECTOR — DO NOT EDIT WITHOUT A COORDINATED HASH-MIGRATION PR.
+  // SHA-256 hex of the canonical text `{"a":1,"b":[1,2,3]}` (verified via
+  // `echo -n '{"a":1,"b":[1,2,3]}' | shasum -a 256` on the Lash dev box).
+  const LOCKED_HASH_AB123 = 'bfa6ceebf136e4837ec687f2be09f612c645c9ec1f99e3ef5d497b0d5bb99e0a';
+
+  it('is sha256 hex of canonicalize() output and matches the locked vector', async () => {
     const a = await hashCanonical({ a: 1, b: [1, 2, 3] });
     const b = await hashCanonical({ b: [1, 2, 3], a: 1 });
-    expect(a).toBe(b);
-    // Hash MUST be 64 lowercase hex chars regardless of vector match below.
+    expect(a).toBe(b); // insertion-order independence
     expect(a).toMatch(/^[0-9a-f]{64}$/);
-    // The locked-vector check is a future-proofing assertion; if it fails the
-    // canonicalize implementation has changed and every persisted hash needs
-    // a coordinated migration. (We verify the value is computed from the
-    // canonical text, not by hard-coding a digest computed offline.)
-    const enc = new TextEncoder().encode('{"a":1,"b":[1,2,3]}');
-    const subtle =
-      (globalThis as { crypto?: { subtle?: SubtleCrypto } }).crypto?.subtle ??
-      (await import('node:crypto')).webcrypto.subtle;
-    const buf = await subtle.digest('SHA-256', enc);
-    const hex = Array.from(new Uint8Array(buf))
-      .map((x) => x.toString(16).padStart(2, '0'))
-      .join('');
-    expect(a).toBe(hex);
-    void expected; // documented above; not asserted directly to avoid false negatives across runtimes
+    expect(a).toBe(LOCKED_HASH_AB123);
+  });
+
+  it('matches a second locked vector for an empty object', async () => {
+    // SHA-256 hex of `{}` — verified the same way as above.
+    const LOCKED_HASH_EMPTY_OBJECT = '44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a';
+    const h = await hashCanonical({});
+    expect(h).toBe(LOCKED_HASH_EMPTY_OBJECT);
   });
 
   it('different values produce different hashes', async () => {

@@ -116,7 +116,10 @@ export interface RemoveMarkOp extends BaseEditorOp {
  *  RULE FOR DIFF / AUTHORSHIP / FILTERED-DIFF CONSUMERS (locked to keep
  *  the determinism invariant intact across pm_step ops):
  *
- *    1. `Step.fromJSON(schema, step)` is the canonical interpretation.
+ *    1. `Step.fromJSON(schema, step)` is the canonical interpretation. The
+ *       schema is resolved via the producing context's `schemaVersion`
+ *       (HistoryEntry.schemaVersion or EditPatch.schemaVersion) → an editor
+ *       schema registry exposed by @lash/editor-core.
  *    2. Position mapping uses `step.getMap()` — the same map used by PM's
  *       internal Mapping. Consumers MUST iterate the StepMap and translate
  *       their own data structures (anchors, intervals, diff spans) through it.
@@ -149,19 +152,14 @@ export type EditorOp =
 
 // ---------- M2: HistoryEntry + audit ----------
 
-/** At least one of `ipHash` or `ua` MUST be set per agents.md security gate
- *  (audit log must be able to identify a write source). The type system
- *  cannot encode "at least one" cleanly without verbosity, so the runtime
- *  validator (see boundary-validation note below) MUST reject `audit: {}`.
- *  When neither is genuinely available (e.g., system-actor migrations),
- *  callers should use the `system:` actor type and set `ua` to the migration
- *  identifier rather than leaving both blank. */
-export interface HistoryAudit {
-  /** sha256 of source IP at write time; never plain IP */
-  ipHash?: string;
-  /** user-agent string or, for system actors, a stable migration tag */
-  ua?: string;
-}
+/** Audit metadata required by agents.md security gate — the audit log MUST be
+ *  able to identify a write source. The type is a union enforcing "at least
+ *  one of ipHash | ua" at compile time so `audit: {}` cannot typecheck. When
+ *  no IP is genuinely available (e.g., system-actor migrations), set `ua` to
+ *  a stable migration tag and use the `system:` actor type. */
+export type HistoryAudit =
+  | { ipHash: string; ua?: string }
+  | { ipHash?: string; ua: string };
 
 export interface HistoryEntry {
   /** uuid */
@@ -181,6 +179,11 @@ export interface HistoryEntry {
   seq: number;
   /** Lamport clock for distributed-determinism; optional in single-region. */
   lamport?: number;
+  /** Editor-schema version these ops were authored against. Required by
+   *  PmStepOp consumers to call `Step.fromJSON(schema, step)` deterministically
+   *  across schema evolution. Format is a stable identifier owned by
+   *  @lash/editor-core (e.g., `"lash-schema-v1"`). */
+  schemaVersion: string;
   ops: EditorOp[];
   intent: Intent;
   /** Present when this entry restores a prior version (never destructive). */
@@ -317,6 +320,10 @@ export interface EditPatch {
    *  refuse to apply when `baseVersion` does not equal the current head, OR
    *  rebase by re-running the validator with the new baseVersion. */
   baseVersion: string;
+  /** Editor-schema version these ops were authored against. Required by
+   *  PmStepOp consumers and by the validator (the patch's pm_step ops must
+   *  be Step.fromJSON-able under this schema version). */
+  schemaVersion: string;
   author: ActorRef;
   /** ISO-8601 UTC */
   createdAt: string;
@@ -474,7 +481,11 @@ export const canonicalize = (value: unknown): string => {
  *    - jsdom (Vitest default for editor tests): `crypto` is present but
  *      `crypto.subtle` is NOT polyfilled — fall back to Node's webcrypto.
  *    - Older Node: also fall back to Node's webcrypto.
- *  Cached after first resolution to avoid re-importing on every hash call. */
+ *
+ *  The Node fallback is gated behind a Node-runtime check so browser bundlers
+ *  (esbuild/rollup/webpack) can statically eliminate the `node:crypto`
+ *  dynamic import via dead-code elimination when `process` is undefined.
+ *  Cached after first resolution. */
 let _subtleCache: SubtleCrypto | null = null;
 const resolveSubtle = async (): Promise<SubtleCrypto> => {
   if (_subtleCache) return _subtleCache;
@@ -483,7 +494,15 @@ const resolveSubtle = async (): Promise<SubtleCrypto> => {
     _subtleCache = native;
     return native;
   }
-  // Node fallback. Dynamic import keeps this tree-shakeable for browser bundles.
+  // Node-only fallback. The runtime guard lets browser bundlers tree-shake
+  // the dynamic import (when `process` is undefined the branch is provably
+  // unreachable, and esbuild/rollup elide the `node:crypto` chunk).
+  const isNode =
+    typeof process !== 'undefined' &&
+    typeof (process as { versions?: { node?: string } }).versions?.node === 'string';
+  if (!isNode) {
+    throw new Error('hashCanonical: SubtleCrypto.digest unavailable and not running on Node');
+  }
   const mod = (await import('node:crypto')) as { webcrypto?: { subtle?: SubtleCrypto } };
   const subtle = mod.webcrypto?.subtle;
   if (!subtle || typeof subtle.digest !== 'function') {

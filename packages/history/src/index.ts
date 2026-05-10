@@ -29,6 +29,10 @@ export interface AppendInput {
   actor: ActorRef;
   /** sha256 the caller believes is the current head. Server enforces match. */
   expectedParentSha: string;
+  /** Editor-schema version these ops were authored against. Required so
+   *  PmStepOp consumers (history.replayOps, computeDiff, authorship) can
+   *  call `Step.fromJSON(schema, step)` deterministically. */
+  schemaVersion: string;
   ops: EditorOp[];
   intent: Intent;
   audit: HistoryAudit;
