@@ -15,6 +15,10 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          # Full history is required for the "Block fresh test.skip / test.todo"
+          # diff guard below to resolve `BASE_SHA...HEAD_SHA` locally.
+          fetch-depth: 0
 
       - name: Setup PNPM
         uses: pnpm/action-setup@v2
@@ -37,20 +41,26 @@ jobs:
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           PR_BODY: ${{ github.event.pull_request.body }}
         run: |
-          set -e
+          set -euo pipefail
           # Allow contributors to opt out per-PR with `[allow-skip: <reason>]` in the body.
           if printf '%s' "$PR_BODY" | grep -Eq '\[allow-skip:[^]]+\]'; then
             echo "allow-skip token present in PR body — skipping check."
             exit 0
           fi
-          # Look for newly-added test.skip(true, ...) or test.todo( lines in the PR diff.
-          ADDED=$(git diff --no-color "$BASE_SHA...$HEAD_SHA" -- '*.spec.ts' '*.spec.tsx' '*.test.ts' '*.test.tsx' \
-            | grep -E '^\+[^+]' \
-            | grep -E 'test\.skip\(\s*true|test\.todo\(' \
-            || true)
+          # Make sure both refs are present locally (defense-in-depth for shallow caches).
+          git fetch --no-tags --depth=1 origin "$BASE_SHA" 2>/dev/null || true
+          git fetch --no-tags --depth=1 origin "$HEAD_SHA" 2>/dev/null || true
+          # Look for newly-added skip/todo invocations in test files. Matches:
+          #   test.skip(...), it.skip(...), describe.skip(...), test.skip.each(...)
+          #   test.todo(...), it.todo(...)
+          # Word-boundary `\b` after .skip prevents false-positives on .skipIf etc.
+          DIFF=$(git diff --no-color "$BASE_SHA...$HEAD_SHA" -- '*.spec.ts' '*.spec.tsx' '*.test.ts' '*.test.tsx')
+          ADDED=$(printf '%s' "$DIFF" \
+            | { grep -E '^\+[^+]' || true; } \
+            | { grep -E '\b(test|it|describe)\.skip\b|\b(test|it)\.todo\b' || true; })
           if [ -n "$ADDED" ]; then
-            echo "::error::PR adds test.skip(true,...) or test.todo(...) lines."
-            echo "If intentional, add '[allow-skip: <short reason>]' to the PR body."
+            echo "::error::PR adds test.skip / test.todo lines."
+            echo "If intentional (e.g. waiting on an upstream lane), add '[allow-skip: <short reason>]' to the PR body."
             echo "$ADDED"
             exit 1
           fi
