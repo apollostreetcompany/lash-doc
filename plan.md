@@ -14,7 +14,7 @@
 | Unit tests | 13 todo, 3 real failures (`image` ×2, `outline-plugin`) | 🟢 19 passed, 13 todo, 0 failures (added 3 fixture-loader tests) |
 | E2E tests | 71 specs, 51 stubbed; Step 06 ×3 failing | Step 06 ×3 🟢; 7 unrelated specs fail (see §Open) |
 | Apps present | Only `apps/web` (shell) | unchanged — `api`/`realtime-gateway`/`ai-orchestrator`/`admin` belong to M2/M3/M4 |
-| Packages present | 4 (editor-core, types, ui, testing) | 🟢 15 (added 11 typed scaffolds; contracts in `@lash/types`) |
+| Packages present | 4 (editor-core, types, ui, testing) | 🟢 16 (added 12 typed scaffolds: collab-service, history, authorship, mentions, share, ai, doc-chat, tables-media, observability, storage, infra-scripts, **rbac**; contracts in `@lash/types`) |
 | CI | `.github/workflows/ci.yml` correct gates | unchanged |
 
 ### M0 status — DONE (9/9 lanes; A9 added to address review)
@@ -305,7 +305,7 @@ CI workflow already enforces these in `.github/workflows/ci.yml`.
 
 ## 6. Operational notes
 
-- Lanes share `editor-core/src/schema.ts` and `EditorWorkspace.tsx` — split during A8 to remove this serialization point.
+- Lanes share `editor-core/src/schema.ts` and `EditorWorkspace.tsx` — split as M1 prerequisite-before-B1 (lane `lash-b0`) to remove this serialization point.
 - `EditorOp` and `EditPatch` are the load-bearing contracts; freeze in `@lash/types` early in M2 so 5 lanes parallelize cleanly.
 - All AI edits flow through the same op pipeline as human edits — no special-casing in history/authorship/diff (per `agents.md` determinism principle).
 - Each lane PR ships: code + tests + (if applicable) fixture changes. No "tests later" milestones.
