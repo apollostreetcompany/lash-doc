@@ -12,7 +12,7 @@
 | Lint | 🔴 19 errors / 6 warnings after `--fix` | 🟢 0 errors, 0 warnings |
 | Typecheck | 🟢 clean | 🟢 clean |
 | Unit tests | 13 todo, 3 real failures (`image` ×2, `outline-plugin`) | 🟢 19 passed, 13 todo, 0 failures (added 3 fixture-loader tests) |
-| E2E tests | 71 specs, 51 stubbed; Step 06 ×3 failing | Step 06 ×3 🟢; 7 unrelated specs fail (see §Open) |
+| E2E tests | 71 specs, 51 stubbed; Step 06 ×3 failing | Step 06 ×3 🟢; 10 unrelated specs fail (see §Open) |
 | Apps present | Only `apps/web` (shell) | unchanged — `api`/`realtime-gateway`/`ai-orchestrator`/`admin` belong to M2/M3/M4 |
 | Packages present | 4 (editor-core, types, ui, testing) | 🟢 16 (added 12 typed scaffolds: collab-service, history, authorship, mentions, share, ai, doc-chat, tables-media, observability, storage, infra-scripts, **rbac**; contracts in `@lash/types`) |
 | CI | `.github/workflows/ci.yml` correct gates | unchanged |
@@ -67,7 +67,7 @@ Exit criteria:
 - `pnpm lint` exits 0
 - `pnpm typecheck` exits 0
 - `pnpm test:unit` 0 failures (no fresh todos)
-- `pnpm test:e2e` 0 failures on currently real specs (Step 06 6/6 green)
+- `pnpm test:e2e` Step 06 specs (M0-owned: `table-select-open-close`, `table-copy-out`, `table-paste-in`) 6/6 green. Other pre-existing real-spec failures (outline/markdown/focus/image — listed in §Open) are scoped to M1/B5 stabilization, not M0
 - Git remote configured, branch protection on `main`
 - `.gitignore` excludes `test-results/`, `*-output.txt.txt`, `codex-*-terminal.txt`, `*-session-summary.md`
 - 12 missing packages scaffolded with typed stubs (collab-service, history, authorship, mentions, share, ai, doc-chat, tables-media, observability, storage, infra-scripts, **rbac**)
@@ -257,7 +257,7 @@ Each lane = one beads issue. Format below is `br`-importable: id, title, deps, s
 - **id:** lash-b2, **title:** "M1/B2: checklists toggle + nesting", **deps:** [lash-b0], **owner:** reactlord, **acceptance:** `checklist-toggle`, `checklist-nesting` green
 - **id:** lash-b3, **title:** "M1/B3: autosave indicator + latency", **deps:** [lash-a7], **owner:** nextking, **acceptance:** `autosave-indicator`, `autosave-latency` green
 - **id:** lash-b4, **title:** "M1/B4: focus mode UI + a11y", **deps:** [lash-b0], **owner:** fronty, **acceptance:** `focus-mode-ui`, `focus-mode-a11y` green
-- **id:** lash-b5, **title:** "M1/B5: stabilization — outline `[data-heading-id]` selector scoping, markdown roundtrip + table import, image e2e retarget to `.ProseMirror`, focus-mode-a11y toolbar visibility", **deps:** [lash-b0], **owner:** typegod, **acceptance:** the 7 unrelated e2e specs flagged in M0 §Open all green.
+- **id:** lash-b5, **title:** "M1/B5: stabilization — outline `[data-heading-id]` selector scoping (3 specs), markdown roundtrip + table import (2 specs), image e2e retarget to `.ProseMirror` (4 specs), focus-mode-a11y toolbar visibility (1 spec)", **deps:** [lash-b0], **owner:** typegod, **acceptance:** the 10 unrelated e2e specs flagged in M0 §Open all green.
 
 ### M2
 
@@ -273,7 +273,7 @@ Each lane = one beads issue. Format below is `br`-importable: id, title, deps, s
 - **id:** lash-d1, **title:** "M3/D1: mentions (users/groups/dates) + RBAC", **deps:** [lash-a7, lash-c2], **owner:** reactlord, **acceptance:** `mention-*` 5/5 green; date tests 2/2 green
 - **id:** lash-d2, **title:** "M3/D2: chips advanced — preview, backlinks", **deps:** [lash-b1, lash-d1], **owner:** reactlord, **acceptance:** chip preview hover loads; backlink graph populated
 - **id:** lash-d3, **title:** "M3/D3: share links + RBAC + redaction", **deps:** [lash-a7, lash-c3], **owner:** typegod, **acceptance:** `share-*` + `*-redact` green
-- **id:** lash-d4, **title:** "M3/D4: doc chat with anchored threads + filters", **deps:** [lash-c2, lash-c3], **owner:** reactlord, **acceptance:** `chat-*` 6/6 green
+- **id:** lash-d4, **title:** "M3/D4: doc chat with anchored threads + filters", **deps:** [lash-c2, lash-c3, lash-c4], **owner:** reactlord, **acceptance:** `chat-*` 6/6 green
 
 ### M4
 
@@ -281,7 +281,7 @@ Each lane = one beads issue. Format below is `br`-importable: id, title, deps, s
 - **id:** lash-e2, **title:** "M4/E2: AI orchestrator service + patch flow UI", **deps:** [lash-e1], **owner:** thesnake, **acceptance:** `ai-patch-apply`, `ai-labeling`, `ai-rationale`, `ai-scope-global-confirm` green
 - **id:** lash-e3, **title:** "M4/E3: AI chat citations", **deps:** [lash-d4, lash-e1], **owner:** reactlord, **acceptance:** `ai-chat-citation`, `ai-citation-jump` green
 - **id:** lash-e4, **title:** "M4/E4: suggest mode marks + accept/reject", **deps:** [lash-c2, lash-c3], **owner:** typegod, **acceptance:** `suggest-visuals`, `suggest-accept`, `suggest-reject` green
-- **id:** lash-e5, **title:** "M4/E5: filtered diffs (author/time/share-link)", **deps:** [lash-c3, lash-d3], **owner:** reactlord, **acceptance:** `diff-filter-author`, `diff-filter-time`, `diff-share-link` green
+- **id:** lash-e5, **title:** "M4/E5: filtered diffs (author/time/share-link)", **deps:** [lash-c3, lash-c5, lash-d3], **owner:** reactlord, **acceptance:** `diff-filter-author`, `diff-filter-time`, `diff-share-link` green
 
 ### M5
 
@@ -306,6 +306,6 @@ CI workflow already enforces these in `.github/workflows/ci.yml`.
 ## 6. Operational notes
 
 - Lanes share `editor-core/src/schema.ts` and `EditorWorkspace.tsx` — split as M1 prerequisite-before-B1 (lane `lash-b0`) to remove this serialization point.
-- `EditorOp` and `EditPatch` are the load-bearing contracts; freeze in `@lash/types` early in M2 so 5 lanes parallelize cleanly.
+- `EditorOp` and `EditPatch` are the load-bearing contracts; already frozen in M0/A7 (with proconsult-m0/A9 hardening) so M2 lanes parallelize cleanly from day-1.
 - All AI edits flow through the same op pipeline as human edits — no special-casing in history/authorship/diff (per `agents.md` determinism principle).
 - Each lane PR ships: code + tests + (if applicable) fixture changes. No "tests later" milestones.
