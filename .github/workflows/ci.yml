@@ -42,24 +42,55 @@ jobs:
           PR_BODY: ${{ github.event.pull_request.body }}
         run: |
           set -euo pipefail
-          # Allow contributors to opt out per-PR with `[allow-skip: <reason>]` in the body.
-          if printf '%s' "$PR_BODY" | grep -Eq '\[allow-skip:[^]]+\]'; then
+
+          # `grep ... || true` swallows BOTH "no match" (status 1) AND real
+          # grep errors (status 2+); pipefail then can't surface a real error.
+          # This helper normalizes ONLY no-match → 0, leaving syntax/runtime
+          # failures to propagate.
+          grep_no_match_ok() {
+            if grep -E "$1"; then
+              return 0
+            fi
+            status=$?
+            if [ "$status" -eq 1 ]; then
+              return 0
+            fi
+            return "$status"
+          }
+
+          # Allow contributors to opt out per-PR with `[allow-skip: <non-empty reason>]`.
+          # The regex requires at least one non-whitespace char so an empty
+          # `[allow-skip: ]` is rejected.
+          if printf '%s' "$PR_BODY" | grep -Eq '\[allow-skip:[^]]*[^][:space:]][^]]*\]'; then
             echo "allow-skip token present in PR body — skipping check."
             exit 0
           fi
-          # Make sure both refs are present locally (defense-in-depth for shallow caches).
+
+          # Endpoint-object availability defense; merge-base availability is
+          # provided by `fetch-depth: 0` on the checkout step above. These
+          # fetches alone do NOT guarantee a usable three-dot diff against a
+          # shallow cache.
           git fetch --no-tags --depth=1 origin "$BASE_SHA" 2>/dev/null || true
           git fetch --no-tags --depth=1 origin "$HEAD_SHA" 2>/dev/null || true
-          # Look for newly-added skip/todo invocations in test files. Matches:
+
+          # Preflight: if the base SHA is not retrievable, fail loudly with a
+          # clear message instead of a raw `git diff` fatal further down.
+          if ! git cat-file -e "$BASE_SHA" 2>/dev/null; then
+            echo "::error::PR base SHA $BASE_SHA is not present locally even after fetch."
+            echo "If this is a force-pushed PR, rebase against current main and re-push."
+            exit 1
+          fi
+
+          # Match all common skip/todo invocations:
           #   test.skip(...), it.skip(...), describe.skip(...), test.skip.each(...)
           #   test.todo(...), it.todo(...)
-          # Word-boundary `\b` after .skip prevents false-positives on .skipIf etc.
+          # Trailing `\b` after .skip prevents false-positives on .skipIf, etc.
           DIFF=$(git diff --no-color "$BASE_SHA...$HEAD_SHA" -- '*.spec.ts' '*.spec.tsx' '*.test.ts' '*.test.tsx')
           ADDED=$(printf '%s' "$DIFF" \
-            | { grep -E '^\+[^+]' || true; } \
-            | { grep -E '\b(test|it|describe)\.skip\b|\b(test|it)\.todo\b' || true; })
+            | grep_no_match_ok '^\+[^+]' \
+            | grep_no_match_ok '\b(test|it|describe)\.skip\b|\b(test|it)\.todo\b')
           if [ -n "$ADDED" ]; then
-            echo "::error::PR adds test.skip / test.todo lines."
+            echo "::error::PR adds test.skip / test.todo lines (any form: test/it/describe .skip(...), .skip.each(...), test/it .todo(...))."
             echo "If intentional (e.g. waiting on an upstream lane), add '[allow-skip: <short reason>]' to the PR body."
             echo "$ADDED"
             exit 1
