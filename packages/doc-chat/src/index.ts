@@ -31,9 +31,30 @@ export interface ThreadStore {
   list(docId: DocumentId, filter?: ChatThread['filters']): Promise<ChatThread[]>;
 }
 
-/** Map an anchor through a sequence of ops, marking it orphaned if its range is destroyed.
- *  Uses the anchor's `token` (text + occurrence + nodeId/nodePath + assoc) for recovery. */
-export const mapAnchor = (_anchor: Anchor, _ops: EditorOp[]): Anchor => {
+/** Inputs needed for deterministic anchor recovery.
+ *
+ *  Just `anchor + ops` is insufficient: when `anchor.token.text` repeats in
+ *  the doc, deciding which occurrence survives an edit requires knowing the
+ *  doc state and the producing history entries' step maps. Implementations
+ *  walk the ops via PM Step semantics (see `PmStepOp` rule in @lash/types)
+ *  to maintain occurrence counts. */
+export interface MapAnchorInput {
+  anchor: Anchor;
+  /** Doc JSON at `anchor.baseVersion`. */
+  baseDoc: unknown;
+  /** Ops applied since `anchor.baseVersion`, in order. */
+  ops: EditorOp[];
+  /** Doc JSON after `ops` are applied. Used to resolve the "current"
+   *  occurrence index when text disambiguation is needed. */
+  currentDoc: unknown;
+}
+
+/** Map an anchor through a sequence of ops, marking it orphaned if its range
+ *  is destroyed. Uses the anchor's `token` (text + occurrence + nodeId/
+ *  nodePath + assoc) for recovery. The result's `baseVersion` advances to
+ *  whatever the caller treats as the post-ops version (typically the latest
+ *  HistoryEntry.resultSha). */
+export const mapAnchor = (_input: MapAnchorInput): Anchor => {
   throw new Error('mapAnchor: not implemented (M3/D4)');
 };
 

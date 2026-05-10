@@ -20,8 +20,8 @@
  * runner side and pass markdown/parsed content into the page via evaluate().
  */
 
-import { readFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { existsSync, readFileSync } from 'node:fs';
+import { dirname, join, resolve } from 'node:path';
 
 export type FixtureName = 'legal-contract' | 'multilingual' | 'large-table' | 'image-heavy' | 'changelog';
 
@@ -58,23 +58,50 @@ const REGISTERED: Record<FixtureName, string> = {
   changelog: 'changelog.md',
 };
 
-/** Resolve the fixtures markdown directory.
+/** Walk up from `start` looking for a `pnpm-workspace.yaml` marker; that's
+ *  always the Lash repo root. Returns null if not found within 8 hops. */
+const findRepoRoot = (start: string): string | null => {
+  let cur = resolve(start);
+  for (let i = 0; i < 8; i += 1) {
+    if (existsSync(join(cur, 'pnpm-workspace.yaml'))) {
+      return cur;
+    }
+    const parent = dirname(cur);
+    if (parent === cur) {
+      return null;
+    }
+    cur = parent;
+  }
+  return null;
+};
+
+/** Resolve the fixtures markdown directory across run contexts.
  *
- *  We avoid `import.meta.url` here entirely. Vitest's default Node env may
- *  parse this module as CJS (where `import.meta` is a syntax error); even in
- *  ESM-mode tests, mixing CJS-style guards with `import.meta.url` causes
- *  bundler/parser surprises. Instead we resolve relative to a known checked-in
- *  source file by walking up from `__dirname` when CJS, or relying on the
- *  fact that this file lives at `packages/testing/fixtures/index.ts` and the
- *  CWD inside Vitest/Playwright runs is the repo root.
+ *  - CJS (Vitest default): `__dirname` is set; `__dirname/markdown` works directly.
+ *  - ESM mode: `__dirname` is undefined; we walk up from `process.cwd()` to the
+ *    repo root (sentinel: `pnpm-workspace.yaml`) and resolve repo-relative.
+ *  - Vitest invoked from `packages/testing/` (or any subdir): same repo-root
+ *    walk handles it; we never compute a path that requires cwd === repo-root.
+ *  - Last resort: assume cwd IS the repo root (works in CI from the workspace root).
+ *
+ *  Multiple candidates are checked; the first existing one wins. This avoids the
+ *  proconsult-m0/C P1 scenario where `pnpm vitest` run from `packages/testing/`
+ *  computed `packages/testing/packages/testing/fixtures/markdown`.
  */
 const fixtureDir = (() => {
+  const candidates: string[] = [];
   if (typeof __dirname === 'string') {
-    return join(__dirname, 'markdown');
+    candidates.push(join(__dirname, 'markdown'));
+    const root = findRepoRoot(__dirname);
+    if (root) candidates.push(join(root, 'packages', 'testing', 'fixtures', 'markdown'));
   }
-  // Last-resort fallback: relative to repo cwd. Runs that change cwd should
-  // resolve their own paths instead of relying on this.
-  return join(process.cwd(), 'packages', 'testing', 'fixtures', 'markdown');
+  const cwdRoot = findRepoRoot(process.cwd());
+  if (cwdRoot) candidates.push(join(cwdRoot, 'packages', 'testing', 'fixtures', 'markdown'));
+  candidates.push(join(process.cwd(), 'packages', 'testing', 'fixtures', 'markdown'));
+  for (const c of candidates) {
+    if (existsSync(c)) return c;
+  }
+  return candidates[0];
 })();
 
 /** Helper: distinguish ENOENT from real fs failures. */
@@ -118,6 +145,3 @@ export const listAvailableFixtures = (): FixtureName[] => {
   });
 };
 
-// Used to silence unused import lint for `dirname` if reorganizations remove its callsite.
-// (Kept: sometimes useful for path-debug in tests; intentionally not exported.)
-void dirname;

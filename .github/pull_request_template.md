@@ -17,7 +17,8 @@
 - [ ] `pnpm run test:unit` 0 failures
 - [ ] `pnpm run test:e2e` 0 failures on changed area
 - [ ] `pnpm run build` green
-- [ ] No fresh `test.skip(true,'TODO')` or `test.todo` for the lane's acceptance IDs
+- [ ] No fresh `test.skip(true, ...)` or `test.todo(...)` for the lane's acceptance IDs ([ACCEPTANCE_GATES.md](../ACCEPTANCE_GATES.md))
+  - CI enforces this. To intentionally add a stub (e.g. waiting on an upstream lane), include a token like `[allow-skip: <short reason>]` in the PR body so the guard passes.
 
 ## Contracts touched
 

@@ -227,10 +227,12 @@ Each lane = one beads issue. Format below is `br`-importable: id, title, deps, s
 
 ### M1
 
-- **id:** lash-b1, **title:** "M1/B1: chips (basic) — autoconvert/hover/revert", **deps:** [lash-a7, lash-a8], **owner:** reactlord, **acceptance:** `chip-autoconvert`, `chip-hover`, `chip-revert` green
-- **id:** lash-b2, **title:** "M1/B2: checklists toggle + nesting", **deps:** [lash-a8], **owner:** reactlord, **acceptance:** `checklist-toggle`, `checklist-nesting` green
+- **id:** lash-b0, **title:** "M1/B0 (PREREQUISITE): split editor-core schema.ts into schema/{base,chips,mentions,suggest,ai}.ts modules + refactor apps/web/components/editor/EditorWorkspace.tsx into a slot pattern (`<EditorShell><HistoryPanel/><ChatPanel/>...</EditorShell>`)", **deps:** [lash-a9], **owner:** typegod, **acceptance:** all M1 lanes can edit disjoint files; existing tests still pass; no functional change.
+- **id:** lash-b1, **title:** "M1/B1: chips (basic) — autoconvert/hover/revert", **deps:** [lash-b0], **owner:** reactlord, **acceptance:** `chip-autoconvert`, `chip-hover`, `chip-revert` green
+- **id:** lash-b2, **title:** "M1/B2: checklists toggle + nesting", **deps:** [lash-b0], **owner:** reactlord, **acceptance:** `checklist-toggle`, `checklist-nesting` green
 - **id:** lash-b3, **title:** "M1/B3: autosave indicator + latency", **deps:** [lash-a7], **owner:** nextking, **acceptance:** `autosave-indicator`, `autosave-latency` green
-- **id:** lash-b4, **title:** "M1/B4: focus mode UI + a11y", **deps:** [lash-a8], **owner:** fronty, **acceptance:** `focus-mode-ui`, `focus-mode-a11y` green
+- **id:** lash-b4, **title:** "M1/B4: focus mode UI + a11y", **deps:** [lash-b0], **owner:** fronty, **acceptance:** `focus-mode-ui`, `focus-mode-a11y` green
+- **id:** lash-b5, **title:** "M1/B5: stabilization — outline `[data-heading-id]` selector scoping, markdown roundtrip + table import, image e2e retarget to `.ProseMirror`, focus-mode-a11y toolbar visibility", **deps:** [lash-b0], **owner:** typegod, **acceptance:** the 7 unrelated e2e specs flagged in M0 §Open all green.
 
 ### M2
 
@@ -239,6 +241,7 @@ Each lane = one beads issue. Format below is `br`-importable: id, title, deps, s
 - **id:** lash-c3, **title:** "M2/C3: deterministic diff engine + history panel", **deps:** [lash-c2], **owner:** typegod, **acceptance:** `diff-deterministic`, `history-open`, `history-diff` green
 - **id:** lash-c4, **title:** "M2/C4: restore endpoint", **deps:** [lash-c2], **owner:** thesnake-or-typegod, **acceptance:** `history-restore` green; new head version, no destructive rewrite
 - **id:** lash-c5, **title:** "M2/C5: authorship interval tree + blame gutter", **deps:** [lash-c2], **owner:** typegod, **acceptance:** `blame-*` 5/5 green; property tests stable
+- **id:** lash-c6, **title:** "M2/C6: offline queue + merge + presence resume (formerly D5; lives in M2 because its acceptance IDs are M2 exit criteria)", **deps:** [lash-c1, lash-c2], **owner:** typegod, **acceptance:** `offline-queue`, `offline-merge`, `presence-resume` green
 
 ### M3
 
@@ -246,7 +249,6 @@ Each lane = one beads issue. Format below is `br`-importable: id, title, deps, s
 - **id:** lash-d2, **title:** "M3/D2: chips advanced — preview, backlinks", **deps:** [lash-b1, lash-d1], **owner:** reactlord, **acceptance:** chip preview hover loads; backlink graph populated
 - **id:** lash-d3, **title:** "M3/D3: share links + RBAC + redaction", **deps:** [lash-a7, lash-c3], **owner:** typegod, **acceptance:** `share-*` + `*-redact` green
 - **id:** lash-d4, **title:** "M3/D4: doc chat with anchored threads + filters", **deps:** [lash-c2, lash-c3], **owner:** reactlord, **acceptance:** `chat-*` 6/6 green
-- **id:** lash-d5, **title:** "M3/D5: offline queue + merge", **deps:** [lash-c1, lash-c2], **owner:** typegod, **acceptance:** `offline-queue`, `offline-merge` green
 
 ### M4
 

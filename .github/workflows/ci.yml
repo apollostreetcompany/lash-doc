@@ -30,6 +30,31 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Block fresh test.skip / test.todo without escape token
+        if: github.event_name == 'pull_request'
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PR_BODY: ${{ github.event.pull_request.body }}
+        run: |
+          set -e
+          # Allow contributors to opt out per-PR with `[allow-skip: <reason>]` in the body.
+          if printf '%s' "$PR_BODY" | grep -Eq '\[allow-skip:[^]]+\]'; then
+            echo "allow-skip token present in PR body — skipping check."
+            exit 0
+          fi
+          # Look for newly-added test.skip(true, ...) or test.todo( lines in the PR diff.
+          ADDED=$(git diff --no-color "$BASE_SHA...$HEAD_SHA" -- '*.spec.ts' '*.spec.tsx' '*.test.ts' '*.test.tsx' \
+            | grep -E '^\+[^+]' \
+            | grep -E 'test\.skip\(\s*true|test\.todo\(' \
+            || true)
+          if [ -n "$ADDED" ]; then
+            echo "::error::PR adds test.skip(true,...) or test.todo(...) lines."
+            echo "If intentional, add '[allow-skip: <short reason>]' to the PR body."
+            echo "$ADDED"
+            exit 1
+          fi
+
       - name: Lint
         run: pnpm run lint
 

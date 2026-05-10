@@ -111,7 +111,27 @@ export interface RemoveMarkOp extends BaseEditorOp {
   mark: { type: string };
 }
 
-/** Escape hatch for arbitrary ProseMirror Step JSON. */
+/** Escape hatch for arbitrary ProseMirror Step JSON.
+ *
+ *  RULE FOR DIFF / AUTHORSHIP / FILTERED-DIFF CONSUMERS (locked to keep
+ *  the determinism invariant intact across pm_step ops):
+ *
+ *    1. `Step.fromJSON(schema, step)` is the canonical interpretation.
+ *    2. Position mapping uses `step.getMap()` — the same map used by PM's
+ *       internal Mapping. Consumers MUST iterate the StepMap and translate
+ *       their own data structures (anchors, intervals, diff spans) through it.
+ *    3. Span attribution: when a `pm_step` produces inserted/deleted ranges,
+ *       authorship and DiffSpan use the producing HistoryEntry's `actor` and
+ *       `intent` exactly as for high-level ops — pm_step is NEVER opaque to
+ *       attribution.
+ *    4. Authorship intervals over pm_step-produced text use
+ *       `sourceOpIndex` pointing at the pm_step entry; downstream consumers
+ *       resolve metadata via the producing entry, not via the step payload.
+ *    5. Unknown PM step types (custom plugins): consumers fall back to the
+ *       net-position delta from `step.getMap()`. They never silently drop
+ *       attribution.
+ *  This rule is invariant; changing it requires a coordinated PR across
+ *  packages/history, packages/authorship, and packages/doc-chat. */
 export interface PmStepOp extends BaseEditorOp {
   op: 'pm_step';
   /** Output of `Step.toJSON()`. Consumers round-trip via `Step.fromJSON(schema, step)`. */
@@ -129,10 +149,17 @@ export type EditorOp =
 
 // ---------- M2: HistoryEntry + audit ----------
 
+/** At least one of `ipHash` or `ua` MUST be set per agents.md security gate
+ *  (audit log must be able to identify a write source). The type system
+ *  cannot encode "at least one" cleanly without verbosity, so the runtime
+ *  validator (see boundary-validation note below) MUST reject `audit: {}`.
+ *  When neither is genuinely available (e.g., system-actor migrations),
+ *  callers should use the `system:` actor type and set `ua` to the migration
+ *  identifier rather than leaving both blank. */
 export interface HistoryAudit {
   /** sha256 of source IP at write time; never plain IP */
   ipHash?: string;
-  /** user-agent string */
+  /** user-agent string or, for system actors, a stable migration tag */
   ua?: string;
 }
 
@@ -374,39 +401,106 @@ export interface DiffJSON {
 // diff fingerprints, EditPatch.baseVersion, redactionPolicy) MUST go through
 // `canonicalize` → `hashCanonical`. History/diff/share/AI implementations
 // MUST NOT inject their own hash function (proconsult-m0/B P0 #5).
+//
+// **Cross-the-wire validation.** These types are TypeScript-checked at
+// compile time but not runtime-validated. Before apps/api / apps/realtime-
+// gateway / apps/ai-orchestrator accept any of these shapes off the wire,
+// the receiving boundary MUST run them through a generated zod/valibot
+// validator (see plan.md M3 prerequisite). Without it, malformed payloads
+// from a misbehaving client could bypass the discriminated-union invariants.
 
-/** Recursively sorts object keys, omits `undefined`, and rejects non-finite
- *  numbers. The output is byte-identical for equivalent inputs regardless
- *  of key insertion order or environment. */
+/** Strict JSON-only canonicalization. Rejects every non-plain-JSON input —
+ *  no Date, RegExp, Map, Set, BigInt, Symbol, Function, NaN, ±Infinity, or
+ *  class instances — so equivalents like `new Date()` cannot silently
+ *  collapse to `{}` and produce a divergent hash on a future round-trip.
+ *
+ *  Rules:
+ *    - Allowed: string, finite number (incl. -0 normalized to 0), boolean,
+ *      null, plain object (Object.prototype only), array.
+ *    - Object keys: own enumerable string keys only, sorted lexicographically.
+ *      Symbol keys ignored. `undefined`-valued entries omitted.
+ *    - Numbers: NaN/±Infinity rejected. -0 emitted as `0` for stability
+ *      (JSON.stringify already does this; documented here as a guarantee).
+ *    - Top-level `undefined`/function/symbol rejected (would otherwise
+ *      produce JSON.stringify === undefined and a TypeError downstream).
+ *
+ *  Output is byte-identical across Node + browsers for equivalent inputs. */
 export const canonicalize = (value: unknown): string => {
-  const sortKeys = (v: unknown): unknown => {
-    if (v === null || typeof v !== 'object') {
-      if (typeof v === 'number' && !Number.isFinite(v)) {
-        throw new Error(`canonicalize: non-finite number encountered (${String(v)})`);
+  const isPlainObject = (v: unknown): v is Record<string, unknown> => {
+    if (v === null || typeof v !== 'object') return false;
+    const proto = Object.getPrototypeOf(v);
+    return proto === Object.prototype || proto === null;
+  };
+
+  const normalize = (v: unknown, path: string): unknown => {
+    if (v === null) return null;
+    const t = typeof v;
+    if (t === 'string' || t === 'boolean') return v;
+    if (t === 'number') {
+      if (!Number.isFinite(v as number)) {
+        throw new Error(`canonicalize: non-finite number at ${path || '<root>'}`);
       }
-      return v;
+      // Normalize -0 to 0. JSON.stringify already does this, but be explicit.
+      return Object.is(v, -0) ? 0 : v;
     }
+    if (t === 'bigint') {
+      throw new Error(`canonicalize: bigint not supported at ${path || '<root>'}`);
+    }
+    if (t === 'symbol' || t === 'function' || t === 'undefined') {
+      throw new Error(`canonicalize: ${t} not allowed at ${path || '<root>'}`);
+    }
+    // typeof === 'object' (including arrays)
     if (Array.isArray(v)) {
-      return v.map(sortKeys);
+      return v.map((child, i) => normalize(child, `${path}[${i}]`));
+    }
+    if (!isPlainObject(v)) {
+      const ctor = (v as { constructor?: { name?: string } })?.constructor?.name ?? 'object';
+      throw new Error(`canonicalize: non-plain ${ctor} not allowed at ${path || '<root>'}`);
     }
     const sorted: Record<string, unknown> = {};
-    const obj = v as Record<string, unknown>;
+    const obj = v;
     for (const k of Object.keys(obj).sort()) {
       const child = obj[k];
       if (child === undefined) continue;
-      sorted[k] = sortKeys(child);
+      sorted[k] = normalize(child, path ? `${path}.${k}` : k);
     }
     return sorted;
   };
-  return JSON.stringify(sortKeys(value));
+  return JSON.stringify(normalize(value, ''));
 };
 
-/** SHA-256 hex digest of `canonicalize(value)`. Available in Node 18+ via
- *  globalThis.crypto.subtle and in all modern browsers. */
+/** Resolve a Web-Crypto-compatible subtle implementation across runtimes:
+ *    - Browsers + Node 20+: `globalThis.crypto.subtle` is present.
+ *    - jsdom (Vitest default for editor tests): `crypto` is present but
+ *      `crypto.subtle` is NOT polyfilled — fall back to Node's webcrypto.
+ *    - Older Node: also fall back to Node's webcrypto.
+ *  Cached after first resolution to avoid re-importing on every hash call. */
+let _subtleCache: SubtleCrypto | null = null;
+const resolveSubtle = async (): Promise<SubtleCrypto> => {
+  if (_subtleCache) return _subtleCache;
+  const native = (globalThis as { crypto?: { subtle?: SubtleCrypto } }).crypto?.subtle;
+  if (native && typeof native.digest === 'function') {
+    _subtleCache = native;
+    return native;
+  }
+  // Node fallback. Dynamic import keeps this tree-shakeable for browser bundles.
+  const mod = (await import('node:crypto')) as { webcrypto?: { subtle?: SubtleCrypto } };
+  const subtle = mod.webcrypto?.subtle;
+  if (!subtle || typeof subtle.digest !== 'function') {
+    throw new Error('hashCanonical: no SubtleCrypto.digest available in this runtime');
+  }
+  _subtleCache = subtle;
+  return subtle;
+};
+
+/** SHA-256 hex digest of `canonicalize(value)`. Single source of truth for
+ *  parentSha, resultSha, EditPatch.baseVersion, and redactionPolicy hashes.
+ *  Works in Node 20+, modern browsers, and jsdom (via node:crypto fallback). */
 export const hashCanonical = async (value: unknown): Promise<string> => {
   const text = canonicalize(value);
   const data = new TextEncoder().encode(text);
-  const buf = await globalThis.crypto.subtle.digest('SHA-256', data);
+  const subtle = await resolveSubtle();
+  const buf = await subtle.digest('SHA-256', data);
   const bytes = new Uint8Array(buf);
   let hex = '';
   for (let i = 0; i < bytes.length; i += 1) {
