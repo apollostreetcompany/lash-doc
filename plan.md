@@ -222,6 +222,10 @@ It is NOT a strict dependency edge set; the actual programmatic deps live
 in §4 lane manifest. Some chain steps overlap in time (C5 starts after C2
 but before C3 finishes; E4 and D4 are parallel).
 
+> **Do not import this chain into beads / `br sync` directly.** Only the
+> dependency lists in §4 are executable. Bead runners must consume the
+> `deps: [...]` arrays per lane, not the prose chain.
+
 Inter-lane dependencies that the §4 manifest encodes (and which the chain
 above implies):
 - E5 filtered diffs depends on C3 diff + C5 authorship (filter-by-author needs blame metadata).
@@ -252,7 +256,7 @@ Each lane = one beads issue. Format below is `br`-importable: id, title, deps, s
 - **id:** lash-a2, **title:** "M0/A2: image NodeView `attrs.width` default", **deps:** [lash-a1], **owner:** reactlord, **acceptance:** `image-extension.test.ts` 2/2 green
 - **id:** lash-a3, **title:** "M0/A3: outline caret-on-collapse moves to next visible heading", **deps:** [lash-a1], **owner:** typegod, **acceptance:** `outline-plugin.test.ts` 2/2 green
 - **id:** lash-a4, **title:** "M0/A4: Step 06 close — select cell NodeView + clipboard handlers", **deps:** [lash-a1], **owner:** typegod, **acceptance:** `table-select-open-close`, `table-copy-out`, `table-paste-in` green
-- **id:** lash-a5, **title:** "M0/A5: repo governance — remote, branch protection, .gitignore, CODEOWNERS, PR template", **deps:** [], **owner:** gitty, **acceptance:** remote set, push works, `.gitignore` excludes test-results/output/session files
+- **id:** lash-a5, **title:** "M0/A5: repo governance files (.gitignore, CODEOWNERS, PR template, CI skip/todo guard, test-results untrack)", **deps:** [], **owner:** gitty, **acceptance:** `.gitignore` excludes test-results/output/session/agent files; CODEOWNERS exists with banner annotating it as documentation-not-enforcement until GitHub teams exist; PR template enumerates skip/todo CI rules with allow-skip escape; CI workflow blocks fresh `test.skip` / `test.todo` lines without `[allow-skip: <reason>]`. (Remote configuration — git remote, branch protection on main, GitHub team binding for CODEOWNERS — is a deployment-time follow-up tracked in §1; it does NOT block this lane or M0 → main merge.)
 - **id:** lash-a6, **title:** "M0/A6: test fixture loader + Legal Contract fixture", **deps:** [], **owner:** scribe, **acceptance:** `loadFixture('legal-contract')` returns parsed doc; harness shared with unit + e2e
 - **id:** lash-a7, **title:** "M0/A7: @lash/types data contracts (EditorOp, EditPatch, HistoryEntry, AuthorshipInterval, Anchor, ShareToken, MentionResolveResult, DiffJSON)", **deps:** [], **owner:** typegod, **acceptance:** typecheck clean; types exported from `@lash/types`
 - **id:** lash-a8, **title:** "M0/A8: scaffold 12 missing packages with typed stubs + tsconfig path aliases (collab-service, history, authorship, mentions, share, ai, doc-chat, tables-media, observability, storage, infra-scripts, **rbac**)", **deps:** [lash-a1], **owner:** nextking, **acceptance:** all 12 packages exist with `package.json` + `tsconfig.json` + `src/index.ts`; `pnpm typecheck` clean. (Schema/EditorWorkspace split was REASSIGNED to M1 prerequisite-before-B1 — see lash-b0.)
@@ -269,8 +273,8 @@ Each lane = one beads issue. Format below is `br`-importable: id, title, deps, s
 
 ### M2
 
-- **id:** lash-c1, **title:** "M2/C1: Yjs collab + presence broker", **deps:** [lash-b*], **owner:** typegod, **acceptance:** `multi-client-converge`, `selection-stability` green; `apps/realtime-gateway` boots. (`presence-resume` is owned by lash-c6 since it's part of the offline reconnect flow.)
-- **id:** lash-c2, **title:** "M2/C2: append-only history log + ops shape (HUB)", **deps:** [lash-b*], **owner:** typegod, **acceptance:** ops shape locked; history persists; deterministic JSON
+- **id:** lash-c1, **title:** "M2/C1: Yjs collab + presence broker", **deps:** [lash-b0, lash-b1, lash-b2, lash-b3, lash-b4, lash-b5, lash-c2], **owner:** typegod, **acceptance:** `multi-client-converge`, `selection-stability` green; `apps/realtime-gateway` boots. (`presence-resume` is owned by lash-c6 since it's part of the offline reconnect flow.)
+- **id:** lash-c2, **title:** "M2/C2: append-only history log + ops shape (HUB)", **deps:** [lash-b0, lash-b1, lash-b2, lash-b3, lash-b4, lash-b5], **owner:** typegod, **acceptance:** ops shape locked; history persists; deterministic JSON
 - **id:** lash-c3, **title:** "M2/C3: deterministic diff engine + history panel", **deps:** [lash-c2], **owner:** typegod, **acceptance:** `diff-deterministic`, `history-open`, `history-diff` green
 - **id:** lash-c4, **title:** "M2/C4: restore endpoint", **deps:** [lash-c2], **owner:** thesnake-or-typegod, **acceptance:** `history-restore` green; new head version, no destructive rewrite
 - **id:** lash-c5, **title:** "M2/C5: authorship interval tree + blame gutter", **deps:** [lash-c2], **owner:** typegod, **acceptance:** `blame-*` 5/5 green; property tests stable
@@ -278,11 +282,11 @@ Each lane = one beads issue. Format below is `br`-importable: id, title, deps, s
 
 ### M3
 
-- **id:** lash-d0, **title:** "M3/D0 (PREREQUISITE): typed route registry / OpenAPI-style contract for `apps/api` + manifest of read paths consumed by D1/D3/D4 (so M3 lanes don't fork on independent route shapes)", **deps:** [lash-a7], **owner:** typegod, **acceptance:** `apps/api` exposes a typed route table consumed by all M3 lanes; `pnpm typecheck` clean across mentions/share/doc-chat callers
+- **id:** lash-d0, **title:** "M3/D0 (PREREQUISITE): typed route registry / OpenAPI-style contract for `apps/api` + manifest of read paths consumed by D1/D3/D4 (so M3 lanes don't fork on independent route shapes). Depends on M2 history endpoints existing.", **deps:** [lash-a7, lash-c2, lash-c4], **owner:** typegod, **acceptance:** `apps/api` exposes a typed route table consumed by all M3 lanes; `pnpm typecheck` clean across mentions/share/doc-chat callers
 - **id:** lash-d1, **title:** "M3/D1: mentions (users/groups/dates) + RBAC", **deps:** [lash-a7, lash-c2, lash-d0], **owner:** reactlord, **acceptance:** `mention-*` 5/5 green; date tests 2/2 green
 - **id:** lash-d2, **title:** "M3/D2: chips advanced — preview, backlinks", **deps:** [lash-b1, lash-d1], **owner:** reactlord, **acceptance:** chip preview hover loads; backlink graph populated
-- **id:** lash-d3, **title:** "M3/D3: share links + RBAC + redaction", **deps:** [lash-a7, lash-c3, lash-d0], **owner:** typegod, **acceptance:** `share-*` + `*-redact` green
-- **id:** lash-d4, **title:** "M3/D4: doc chat with anchored threads + filters", **deps:** [lash-c2, lash-c3, lash-c4, lash-d0], **owner:** reactlord, **acceptance:** `chat-*` 6/6 green
+- **id:** lash-d3, **title:** "M3/D3: share links + RBAC + redaction engine (generic; chat-redact is owned by D4)", **deps:** [lash-a7, lash-c3, lash-d0], **owner:** typegod, **acceptance:** `share-comment-scope`, `share-suggest-scope`, `share-edit-scope`, `share-expiry`, `share-audit`, `history-redact` green. (Generic redaction engine in `@lash/share` is consumed by D4 for `chat-redact`.)
+- **id:** lash-d4, **title:** "M3/D4: doc chat with anchored threads + filters + chat-redact", **deps:** [lash-c2, lash-c3, lash-c4, lash-c5, lash-d0, lash-d3], **owner:** reactlord, **acceptance:** `chat-anchor-map`, `chat-orphan`, `chat-history-context`, `chat-current-context`, `chat-filter-author`, `chat-filter-ai`, `chat-redact` green. (lash-c5 needed for `chat-filter-author` author-attribution; lash-d3 for redaction policy/audit hooks consumed by `chat-redact`.)
 
 ### M4
 
@@ -294,11 +298,11 @@ Each lane = one beads issue. Format below is `br`-importable: id, title, deps, s
 
 ### M5
 
-- **id:** lash-f1, **title:** "M5/F1: cross-browser matrix", **deps:** [M2 done], **owner:** fronty, **acceptance:** `cb-chrome|safari|firefox|edge|ipad` 5/5 green
-- **id:** lash-f2, **title:** "M5/F2: IME composition", **deps:** [lash-a8], **owner:** typegod, **acceptance:** `ime-composition`, `ime-autosave` green
-- **id:** lash-f3, **title:** "M5/F3: screen reader navigation", **deps:** [M3 done], **owner:** fronty, **acceptance:** `sr-headings`, `sr-diff-announce`, `sr-thread-nav` green
-- **id:** lash-f4, **title:** "M5/F4: perf gates", **deps:** [M2 done], **owner:** typegod, **acceptance:** `table-perf-100x20` ≤ SLO; CI perf smoke fails on >15% regression
-- **id:** lash-f5, **title:** "M5/F5: deploy docs + canary", **deps:** [M2 done], **owner:** scribe, **acceptance:** `docs/deploy.md` complete; observability wiring; canary checklist
+- **id:** lash-f1, **title:** "M5/F1: cross-browser matrix", **deps:** [lash-c1, lash-c2, lash-c3, lash-c4, lash-c5, lash-c6], **owner:** fronty, **acceptance:** `cb-chrome|safari|firefox|edge|ipad` 5/5 green
+- **id:** lash-f2, **title:** "M5/F2: IME composition", **deps:** [lash-a8, lash-b3], **owner:** typegod, **acceptance:** `ime-composition`, `ime-autosave` green. (lash-b3 needed because `ime-autosave` is the autosave-respects-compositionend invariant, and autosave is introduced in B3.)
+- **id:** lash-f3, **title:** "M5/F3: screen reader navigation", **deps:** [lash-d1, lash-d2, lash-d3, lash-d4], **owner:** fronty, **acceptance:** `sr-headings`, `sr-diff-announce`, `sr-thread-nav` green
+- **id:** lash-f4, **title:** "M5/F4: perf gates", **deps:** [lash-c1, lash-c2, lash-c3, lash-c4, lash-c5, lash-c6], **owner:** typegod, **acceptance:** `table-perf-100x20` ≤ SLO; CI perf smoke fails on >15% regression
+- **id:** lash-f5, **title:** "M5/F5: deploy docs + canary", **deps:** [lash-c1, lash-c2, lash-c3, lash-c4, lash-c5, lash-c6], **owner:** scribe, **acceptance:** `docs/deploy.md` complete; observability wiring; canary checklist
 
 ## 5. Validation gates (run before merging any lane)
 
