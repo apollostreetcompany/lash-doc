@@ -1,12 +1,23 @@
 # CODEOWNERS — file-level ownership for PR review routing.
 #
 # Mapping mirrors plan.md lane ownership. Update when lanes are reassigned.
+#
+# IMPORTANT — placeholder teams: `@lash/architects`, `@lash/editor-core-owners`,
+# etc. are placeholders for the GitHub team handles that will be created when
+# this repo is pushed to a remote. CODEOWNERS provides ZERO enforcement until
+# (a) those teams exist on GitHub, (b) branch protection on `main` requires
+# code-owner review, and (c) `Restrict who can push to matching branches` is
+# enabled. Until then, treat this file as documentation, not an enforcement
+# barrier — see plan.md M0/A5 follow-up.
 
 # Core editor (chips, suggest marks, table extensions, schema)
 /packages/editor-core/                  @lash/editor-core-owners
 
 # Data contracts — load-bearing; require careful review
 /packages/types/                        @lash/architects
+
+# Cross-cutting permission engine — touched by share, mentions, chat, AI, api
+/packages/rbac/                         @lash/architects
 
 # M2 lanes
 /packages/collab-service/               @lash/collab-owners
@@ -41,11 +52,21 @@
 # Build, CI, governance
 /.github/                               @lash/architects
 /CLAUDE.md                              @lash/architects
+/CODEOWNERS                             @lash/architects
 /plan.md                                @lash/architects
 /agents.md                              @lash/architects
 /REPO_MAP.md                            @lash/architects
 /ACCEPTANCE_GATES.md                    @lash/architects
 /tsconfig.base.json                     @lash/architects
+/tsconfig.json                          @lash/architects
 /.eslintrc.cjs                          @lash/architects
+/.gitignore                             @lash/architects
+/.github/workflows/                     @lash/architects @lash/sre-owners
+/package.json                           @lash/architects
+/pnpm-workspace.yaml                    @lash/architects
+/pnpm-lock.yaml                         @lash/architects @lash/sre-owners
 /playwright.config.ts                   @lash/qa-owners
 /vitest.config.ts                       @lash/qa-owners
+/prettier.config.cjs                    @lash/architects
+/apps/web/next.config.mjs               @lash/architects @lash/web-owners
+/apps/web/next-env.d.ts                 @lash/web-owners

@@ -27,7 +27,9 @@
       "@lash/doc-chat": ["packages/doc-chat/src"],
       "@lash/tables-media": ["packages/tables-media/src"],
       "@lash/observability": ["packages/observability/src"],
-      "@lash/storage": ["packages/storage/src"]
+      "@lash/storage": ["packages/storage/src"],
+      "@lash/infra-scripts": ["packages/infra-scripts/src"],
+      "@lash/rbac": ["packages/rbac/src"]
     }
   },
   "include": [],

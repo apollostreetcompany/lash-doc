@@ -1,29 +1,31 @@
 /**
- * @lash/tables-media — large-table virtualization, image upload/transform pipeline,
- *                      checklist behavior helpers.
+ * @lash/tables-media — large-table virtualization + image upload/transform pipeline.
  *
- * NOTE: most table behavior already lives in `@lash/editor-core/extensions/table`.
- * This package owns features that are too heavy to colocate (virtualization, upload pipelines,
- * media transforms). Status: SCAFFOLD — implement in M5/F4 (perf gates).
+ * NOTE: most table behavior already lives in `@lash/editor-core/extensions/table`,
+ * including checklist behavior helpers (which stayed there per proconsult-m0/B
+ * P2 — they belong with schema/plugin ownership, not with virtualization/media).
+ *
+ * Status: SCAFFOLD — implement in M5/F4 (perf gates) for tables, ad-hoc for media.
  */
 
 export interface TableViewport {
-  /** visible row range */
+  /** Visible row range. */
   rowFrom: number;
   rowTo: number;
-  /** visible col range */
+  /** Visible col range. */
   colFrom: number;
   colTo: number;
 }
 
 export interface TableVirtualizer {
-  /** decide which cells to render given the viewport */
   selectVisibleCells(table: unknown, viewport: TableViewport): { row: number; col: number }[];
-  /** notify of scroll/resize */
   onViewportChange(viewport: TableViewport): void;
 }
 
-export const createTableVirtualizer = (_config: { rowHeightPx: number; columnWidthPx: number }): TableVirtualizer => {
+export const createTableVirtualizer = (_config: {
+  rowHeightPx: number;
+  columnWidthPx: number;
+}): TableVirtualizer => {
   throw new Error('createTableVirtualizer: not implemented (M5/F4)');
 };
 

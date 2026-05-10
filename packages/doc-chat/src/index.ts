@@ -12,15 +12,15 @@ export interface ChatMessage {
   /** ISO-8601 UTC */
   ts: string;
   body: string;
-  /** for AI replies, citations into the doc or external refs */
-  citations?: { type: 'doc'; rangeFrom: number; rangeTo: number; baseVersion: string }[];
+  /** For AI replies; doc citations are version-anchored so the citation-jump
+   *  UX (I.4) survives subsequent edits. */
+  citations?: Array<{ type: 'doc'; baseVersion: string; rangeFrom: number; rangeTo: number }>;
 }
 
 export interface ChatThread {
   id: string;
   docId: DocumentId;
   anchor: Anchor;
-  /** thread-local history; for cross-version views, query the history layer */
   messages: ChatMessage[];
   filters: { authorId?: string; ai?: boolean; nodeType?: string };
 }
@@ -31,7 +31,8 @@ export interface ThreadStore {
   list(docId: DocumentId, filter?: ChatThread['filters']): Promise<ChatThread[]>;
 }
 
-/** Map an anchor through a sequence of ops, marking it orphaned if its range is destroyed. */
+/** Map an anchor through a sequence of ops, marking it orphaned if its range is destroyed.
+ *  Uses the anchor's `token` (text + occurrence + nodeId/nodePath + assoc) for recovery. */
 export const mapAnchor = (_anchor: Anchor, _ops: EditorOp[]): Anchor => {
   throw new Error('mapAnchor: not implemented (M3/D4)');
 };

@@ -6,12 +6,12 @@
  *
  * Mapping to milestones (see plan.md):
  *   M2 (Phase 1 collab/history): EditorOp, HistoryEntry, AuthorshipInterval, Anchor
- *   M3 (Phase 2 share/mentions/chat): ShareToken, MentionResolveResult
- *   M4 (Phase 3 AI):                  EditPatch
- *   M2/M5 (diff + filtered diffs):    DiffJSON
+ *   M3 (Phase 2 share/mentions/chat): ShareToken, RevocationRecord, MentionResolveResult
+ *   M4 (Phase 3 AI):                  EditPatch, EditPatchCitation, ValidationConfirmations
+ *   M2/M5 (diff + filtered diffs):    DiffJSON, DiffSpan
  */
 
-// ---------- existing minimal exports (preserved) ----------
+// ---------- minimal exports (preserved across iterations) ----------
 
 export type DocumentId = string & { readonly brand: unique symbol };
 
@@ -33,7 +33,7 @@ export interface LashEnvironment {
 
 export const createDocumentId = (value: string): DocumentId => value as DocumentId;
 
-// ---------- M2: EditorOp (the canonical edit-pipeline op) ----------
+// ---------- Actor + intent (used by HistoryEntry, EditPatch, audit) ----------
 
 export type ActorRef =
   | { type: 'user'; id: string }
@@ -42,11 +42,33 @@ export type ActorRef =
 
 export type Intent = 'edit' | 'suggest' | 'ai';
 
+// ---------- M2: EditorOp ----------
+//
+// EditorOp is the canonical edit-pipeline operation. Both human and AI edits
+// flow through the SAME variants (per agents.md determinism principle), but
+// the pipeline is intentionally a strict superset:
+//
+//   - High-level "intent" ops (replace_text, set_attr, add/remove_mark, etc.)
+//     are emitted by AI patches and most human commands. They are easy to
+//     validate, audit, render in diffs, and reason about for authorship.
+//
+//   - `pm_step` is the escape hatch for arbitrary ProseMirror Step JSON
+//     (split, join, replaceAround, AddNodeMark, etc.). It is used by
+//     collab-service for raw CRDT-derived steps and by replay/restore paths.
+//     pm_step is intentionally NOT typed in detail here — its payload is a
+//     PM Step.toJSON() result and consumers must round-trip via PM's Step.fromJSON.
+//
+// Positions are interpreted relative to the containing context's baseVersion:
+//   - When ops live in a HistoryEntry, baseVersion = HistoryEntry.parentSha.
+//   - When ops live in an EditPatch, baseVersion = EditPatch.baseVersion.
+//   - For positions that must survive across versions (chat anchors, blame
+//     gutter, share-link-scoped diffs), use Anchor / AuthorshipInterval / DiffSpan,
+//     all of which carry their own baseVersion + disambiguators.
+
 export interface BaseEditorOp {
-  /** monotonically-increasing client sequence within a session */
-  seq: number;
-  /** logical clock from collab layer; deterministic across replays */
-  lamport?: number;
+  /** Position-mapping bias when this op is rebased through later transforms.
+   *  Defaults to -1 (left-biased) per ProseMirror's `Mapping.map` convention. */
+  assoc?: -1 | 1;
 }
 
 export interface ReplaceTextOp extends BaseEditorOp {
@@ -59,7 +81,7 @@ export interface ReplaceTextOp extends BaseEditorOp {
 export interface InsertNodeOp extends BaseEditorOp {
   op: 'insert_node';
   pos: number;
-  /** ProseMirror JSON */
+  /** ProseMirror JSON node */
   node: unknown;
 }
 
@@ -89,15 +111,30 @@ export interface RemoveMarkOp extends BaseEditorOp {
   mark: { type: string };
 }
 
+/** Escape hatch for arbitrary ProseMirror Step JSON. */
+export interface PmStepOp extends BaseEditorOp {
+  op: 'pm_step';
+  /** Output of `Step.toJSON()`. Consumers round-trip via `Step.fromJSON(schema, step)`. */
+  step: unknown;
+}
+
 export type EditorOp =
   | ReplaceTextOp
   | InsertNodeOp
   | DeleteRangeOp
   | SetAttrOp
   | AddMarkOp
-  | RemoveMarkOp;
+  | RemoveMarkOp
+  | PmStepOp;
 
-// ---------- M2: HistoryEntry ----------
+// ---------- M2: HistoryEntry + audit ----------
+
+export interface HistoryAudit {
+  /** sha256 of source IP at write time; never plain IP */
+  ipHash?: string;
+  /** user-agent string */
+  ua?: string;
+}
 
 export interface HistoryEntry {
   /** uuid */
@@ -106,91 +143,152 @@ export interface HistoryEntry {
   actor: ActorRef;
   /** ISO-8601 UTC */
   ts: string;
-  /** sha256 of doc state immediately before these ops applied */
-  parentSha?: string;
+  /** REQUIRED: sha256 of doc state immediately before these ops applied.
+   *  Append MUST reject when this does not match the current head — this is
+   *  the concurrency-control invariant that prevents forked writes. */
+  parentSha: string;
   /** sha256 of doc state after these ops applied */
   resultSha: string;
+  /** Monotonically-increasing per-doc sequence; assigned by the history layer
+   *  on `append`, never by the emitter. (EditPatch / EditorOp do not carry seq.) */
+  seq: number;
+  /** Lamport clock for distributed-determinism; optional in single-region. */
+  lamport?: number;
   ops: EditorOp[];
   intent: Intent;
-  /** present when this entry restores a prior version */
+  /** Present when this entry restores a prior version (never destructive). */
   restoredFromVersion?: string;
+  /** Required audit metadata per agents.md security acceptance. */
+  audit: HistoryAudit;
 }
 
-// ---------- M2: Anchor (used by chat threads, decorations, comments) ----------
+// ---------- M2: Anchor (for chat threads, comments, decorations) ----------
+
+export interface AnchorToken {
+  /** N characters before the anchor, in `baseVersion`'s doc */
+  before: string;
+  /** N characters after the anchor */
+  after: string;
+  /** the anchored text itself */
+  text: string;
+  /** 0-indexed occurrence within the containing block when `text` repeats;
+   *  required to disambiguate when the same string appears multiple times. */
+  occurrence: number;
+  /** Stable id of the containing block node when available. */
+  nodeId?: string;
+  /** Path from doc root to the containing block; used for CRDT-stable mapping
+   *  when block contents shift but the block itself survives. */
+  nodePath?: number[];
+  /** Optional confidence score (0-1) used by recovery heuristics. */
+  confidence?: number;
+}
 
 export interface Anchor {
-  /** snapshot version at which the anchor was minted */
+  /** sha256 at which this anchor was minted */
   baseVersion: string;
+  /** Numeric range in `baseVersion`'s doc */
   from: number;
   to: number;
-  /** stable token identity used to recover after edits */
-  token: {
-    before: string;
-    after: string;
-    text: string;
-  };
-  /** if true, the anchor's range was destroyed and is now pinned to nearest survivor */
+  /** Position-mapping bias for stability under concurrent edits. */
+  assoc?: -1 | 1;
+  /** Recovery token used when `from`/`to` no longer map cleanly. */
+  token: AnchorToken;
+  /** When the original range was destroyed, the anchor is pinned to the
+   *  nearest surviving token and marked `orphaned: true`. */
   orphaned?: boolean;
 }
 
 // ---------- M2: AuthorshipInterval ----------
 
 export interface AuthorshipInterval {
+  /** Numeric range in the doc at `sourceEntryId`'s resultSha. */
   from: number;
   to: number;
   authorId: string;
-  /** ts of the op that produced this interval */
+  /** ISO-8601 ts of the op that produced this interval. */
   ts: string;
+  /** Stable id of the containing text node, when available — used to
+   *  recover blame after CRDT-driven structural rearrangements. */
+  nodeId?: string;
+  /** Backref to the HistoryEntry that produced this interval. */
+  sourceEntryId: string;
+  /** Index of the producing op within `HistoryEntry.ops`. */
+  sourceOpIndex: number;
+  /** Authorship intervals are kept non-overlapping by the interval-tree
+   *  implementation in `@lash/authorship`; consumers MAY rely on this. */
 }
 
-// ---------- M3: ShareToken ----------
+// ---------- M3: ShareToken + RevocationRecord ----------
 
 export type ShareScope = 'view' | 'comment' | 'suggest' | 'edit';
 
 export interface ShareToken {
-  /** signed token (JWT-ish) */
+  /** Unique token id (JWT `jti`). Used for revocation lookups. */
+  jti: string;
+  /** Signed token (JWT or similar); opaque to clients. */
   token: string;
   docId: DocumentId;
   scope: ShareScope;
-  /** ISO-8601 UTC; null = no expiry */
+  /** ISO-8601 UTC; null = no expiry. */
   expiresAt: string | null;
-  /** issuer user id */
+  /** Issuer user id. */
   issuedBy: string;
-  /** sha256 of allowed redaction policy */
+  /** sha256 of the redaction policy in effect. The full policy JSON is
+   *  resolved server-side via `redactionPolicyVersion`. */
   redactionPolicy: string;
+  /** Schema version of the redaction policy (e.g. 1, 2). Bumps require
+   *  a coordinated server rollout. */
+  redactionPolicyVersion: number;
 }
 
-// ---------- M3: MentionResolveResult ----------
+export interface RevocationRecord {
+  jti: string;
+  /** ISO-8601 UTC */
+  revokedAt: string;
+  revokedBy: string;
+  reason?: string;
+}
+
+// ---------- M3: MentionResolveResult (discriminated union for RBAC safety) ----------
 
 export type MentionKind = 'user' | 'group' | 'date';
 
-export interface MentionResolveResult {
+/** Visible mention — caller may see real id and display. */
+export interface VisibleMentionResult {
+  visible: true;
   kind: MentionKind;
-  /** stable id (user/group id, or ISO date) */
   refId: string;
   display: string;
-  /** present for date mentions; ISO-8601 in user's timezone */
+  /** ISO-8601 in caller's timezone, present for date mentions. */
   iso?: string;
-  /** RBAC: false means caller cannot see this entity (anonymized rendering) */
-  visible: boolean;
 }
+
+/** Hidden mention — caller may NOT see real id/display.
+ *  Render as anonymized token; never includes the real ref or display. */
+export interface AnonymizedMentionResult {
+  visible: false;
+  /** Stable opaque token suitable for screen-reader rendering, e.g. `@hidden-user`. */
+  anonymizedDisplay: string;
+}
+
+export type MentionResolveResult = VisibleMentionResult | AnonymizedMentionResult;
 
 // ---------- M4: EditPatch (the AI-and-programmatic patch envelope) ----------
 
-export interface EditPatchCitation {
-  type: 'doc' | 'url';
-  /** for type=doc */
-  rangeFrom?: number;
-  rangeTo?: number;
-  /** for type=url */
-  href?: string;
-}
+/** Discriminated union — citations are either doc ranges or external URLs.
+ *  Doc citations carry baseVersion so the citation jump UX (I.4) can navigate
+ *  to the exact slice even after the doc has changed. */
+export type EditPatchCitation =
+  | { type: 'doc'; baseVersion: string; rangeFrom: number; rangeTo: number }
+  | { type: 'url'; href: string };
 
 export interface EditPatch {
   /** uuid */
   patchId: string;
   docId: DocumentId;
-  /** sha256 of last applied state — used to verify clean apply */
+  /** sha256 of the doc state the patch was generated atop. Validator MUST
+   *  refuse to apply when `baseVersion` does not equal the current head, OR
+   *  rebase by re-running the validator with the new baseVersion. */
   baseVersion: string;
   author: ActorRef;
   /** ISO-8601 UTC */
@@ -198,33 +296,121 @@ export interface EditPatch {
   operations: EditorOp[];
   rationale: string;
   citations?: EditPatchCitation[];
-  /** when true, requires explicit user confirmation (doc-wide ops) */
+  /** Marks a patch that intends to mutate beyond the user's selection.
+   *  An AI-emitted patch may set this to `true`, but the validator MUST
+   *  also receive `globalEditConfirmed: true` in `ValidationConfirmations`
+   *  before applying. (See I.3 ai-scope-global-confirm.) */
   allowGlobal?: boolean;
 }
 
-// ---------- M2/M5: DiffJSON (deterministic diff output) ----------
+/** Out-of-band confirmations the validator requires for sensitive operations. */
+export interface ValidationConfirmations {
+  /** True iff the user confirmed via the doc-wide modal (I.3). */
+  globalEditConfirmed?: boolean;
+}
+
+// ---------- M2/M5: DiffJSON (deterministic, filterable diff output) ----------
 
 export type DiffSpanKind = 'unchanged' | 'inserted' | 'deleted' | 'attrChanged';
 
-export interface DiffSpan {
-  kind: DiffSpanKind;
-  /** position in the LATER version (target of diff render) */
+export interface DiffSpanBase {
+  /** Stable, deterministic id for this span (consumed by share-link filters,
+   *  copy-link state, and SR announcements). Computed from {kind,from,to,...}. */
+  id: string;
+  /** Position in the LATER version (target of diff render). */
   from: number;
   to: number;
-  /** present for inserted/deleted spans */
-  text?: string;
-  /** present for attrChanged spans */
-  attrChanges?: { nodeId: string; before: Record<string, unknown>; after: Record<string, unknown> };
-  /** authorship for filtered diffs */
+  /** Backref to the producing HistoryEntry; required for filtered diffs (D.3). */
+  entryId?: string;
+  /** Index of the producing op within `HistoryEntry.ops`. */
+  opIndex?: number;
+  /** Author for filtered-by-author diffs. */
   authorId?: string;
-  /** ISO-8601 ts of the op that produced this span */
+  /** Actor type for filtered-by-AI diffs. */
+  actorType?: ActorRef['type'];
+  intent?: Intent;
+  /** ISO-8601 ts of the producing op (filter by time-range). */
   ts?: string;
+  /** True iff this span is hidden under the current redaction policy.
+   *  The consumer SHOULD render a redacted placeholder; counts MUST remain accurate. */
+  redacted?: boolean;
 }
 
+export interface UnchangedSpan extends DiffSpanBase {
+  kind: 'unchanged';
+}
+
+export interface InsertedSpan extends DiffSpanBase {
+  kind: 'inserted';
+  text: string;
+}
+
+export interface DeletedSpan extends DiffSpanBase {
+  kind: 'deleted';
+  text: string;
+}
+
+export interface AttrChangedSpan extends DiffSpanBase {
+  kind: 'attrChanged';
+  nodeId: string;
+  before: Record<string, unknown>;
+  after: Record<string, unknown>;
+}
+
+export type DiffSpan = UnchangedSpan | InsertedSpan | DeletedSpan | AttrChangedSpan;
+
 export interface DiffJSON {
-  /** sha256 of "from" version */
+  /** sha256 of the "from" version */
   from: string;
-  /** sha256 of "to" version */
+  /** sha256 of the "to" version */
   to: string;
   spans: DiffSpan[];
 }
+
+// ---------- Canonical serialization + deterministic hash ----------
+//
+// `canonicalize` is the SINGLE source of truth for byte-identical JSON
+// serialization across CI, dev, and prod. All hashing (parentSha, resultSha,
+// diff fingerprints, EditPatch.baseVersion, redactionPolicy) MUST go through
+// `canonicalize` → `hashCanonical`. History/diff/share/AI implementations
+// MUST NOT inject their own hash function (proconsult-m0/B P0 #5).
+
+/** Recursively sorts object keys, omits `undefined`, and rejects non-finite
+ *  numbers. The output is byte-identical for equivalent inputs regardless
+ *  of key insertion order or environment. */
+export const canonicalize = (value: unknown): string => {
+  const sortKeys = (v: unknown): unknown => {
+    if (v === null || typeof v !== 'object') {
+      if (typeof v === 'number' && !Number.isFinite(v)) {
+        throw new Error(`canonicalize: non-finite number encountered (${String(v)})`);
+      }
+      return v;
+    }
+    if (Array.isArray(v)) {
+      return v.map(sortKeys);
+    }
+    const sorted: Record<string, unknown> = {};
+    const obj = v as Record<string, unknown>;
+    for (const k of Object.keys(obj).sort()) {
+      const child = obj[k];
+      if (child === undefined) continue;
+      sorted[k] = sortKeys(child);
+    }
+    return sorted;
+  };
+  return JSON.stringify(sortKeys(value));
+};
+
+/** SHA-256 hex digest of `canonicalize(value)`. Available in Node 18+ via
+ *  globalThis.crypto.subtle and in all modern browsers. */
+export const hashCanonical = async (value: unknown): Promise<string> => {
+  const text = canonicalize(value);
+  const data = new TextEncoder().encode(text);
+  const buf = await globalThis.crypto.subtle.digest('SHA-256', data);
+  const bytes = new Uint8Array(buf);
+  let hex = '';
+  for (let i = 0; i < bytes.length; i += 1) {
+    hex += bytes[i].toString(16).padStart(2, '0');
+  }
+  return hex;
+};

@@ -153,6 +153,19 @@ const scheduleUpload = (
 const createUploadManager = (options: LashImageOptions): UploadManager => {
   const uploads = new Map<string, UploadEntry>();
   const disposers = new Map<string, () => void>();
+  // Flipped by the plugin's view().destroy() — used by deferred microtasks
+  // to skip uploads after editor teardown (proconsult-m0/A P1).
+  let destroyed = false;
+
+  const revokePreview = (entry: UploadEntry) => {
+    if (
+      entry.previewURL &&
+      typeof window !== 'undefined' &&
+      typeof window.URL?.revokeObjectURL === 'function'
+    ) {
+      window.URL.revokeObjectURL(entry.previewURL);
+    }
+  };
 
   const startUpload = (
     view: { state: EditorState; dispatch: (tr: Transaction) => void },
@@ -166,9 +179,7 @@ const createUploadManager = (options: LashImageOptions): UploadManager => {
       uploadId,
       entry,
       () => {
-        if (entry.previewURL && typeof window !== 'undefined' && typeof window.URL?.revokeObjectURL === 'function') {
-          window.URL.revokeObjectURL(entry.previewURL);
-        }
+        revokePreview(entry);
         uploads.delete(uploadId);
         disposers.delete(uploadId);
       },
@@ -177,6 +188,26 @@ const createUploadManager = (options: LashImageOptions): UploadManager => {
       },
     );
     disposers.set(uploadId, disposer);
+  };
+
+  /** Guard wrapper for deferred (microtask) startUpload from CM-managed paths.
+   *  Skips when the editor has been destroyed OR when the placeholder no
+   *  longer exists in the doc (e.g., user undid the insert before the
+   *  microtask ran). Either case, revoke the preview URL so we don't leak. */
+  const startUploadIfPlaceholderAlive = (
+    view: { state: EditorState; dispatch: (tr: Transaction) => void },
+    uploadId: string,
+    entry: UploadEntry,
+  ) => {
+    if (destroyed) {
+      revokePreview(entry);
+      return;
+    }
+    if (!findImageByUploadId(view.state.doc, uploadId)) {
+      revokePreview(entry);
+      return;
+    }
+    startUpload(view, uploadId, entry);
   };
 
   const buildPlaceholderNode = (state: EditorState, file: File): { uploadId: string; previewURL: string | null; node: ProseMirrorNode } => {
@@ -230,11 +261,13 @@ const createUploadManager = (options: LashImageOptions): UploadManager => {
 
   // Tr-mutation path: used by addCommands so TipTap CommandManager dispatches a single
   // coherent tr. Upload start is deferred to a microtask to ensure the placeholder is
-  // committed to view.state before scheduleUpload's first onProgress runs.
+  // committed to view.state before scheduleUpload's first onProgress runs. The deferred
+  // start is guarded so that an undo or editor-destroy before the microtask runs does
+  // not leak an upload against a missing placeholder (proconsult-m0/A P1).
   const insertIntoTransaction = (state: EditorState, tr: Transaction, view: EditorView, file: File) => {
     const { uploadId, previewURL, node } = buildPlaceholderNode(state, file);
     tr.replaceSelectionWith(node).scrollIntoView();
-    queueMicrotask(() => startUpload(view, uploadId, { file, previewURL }));
+    queueMicrotask(() => startUploadIfPlaceholderAlive(view, uploadId, { file, previewURL }));
   };
 
   const retryIntoTransaction = (state: EditorState, tr: Transaction, view: EditorView, uploadId: string) => {
@@ -243,16 +276,18 @@ const createUploadManager = (options: LashImageOptions): UploadManager => {
       return;
     }
     const result = findImageByUploadId(state.doc, uploadId);
-    if (result) {
-      const { pos, node } = result as { pos: number; node: ProseMirrorNode };
-      tr.setNodeMarkup(pos, undefined, {
-        ...node.attrs,
-        status: 'uploading',
-        progress: 0,
-        error: null,
-      });
+    if (!result) {
+      // Placeholder is already gone — caller is retrying a stale id.
+      return;
     }
-    queueMicrotask(() => startUpload(view, uploadId, entry));
+    const { pos, node } = result as { pos: number; node: ProseMirrorNode };
+    tr.setNodeMarkup(pos, undefined, {
+      ...node.attrs,
+      status: 'uploading',
+      progress: 0,
+      error: null,
+    });
+    queueMicrotask(() => startUploadIfPlaceholderAlive(view, uploadId, entry));
   };
 
   const plugin = new Plugin({
@@ -330,13 +365,10 @@ const createUploadManager = (options: LashImageOptions): UploadManager => {
     view() {
       return {
         destroy() {
+          destroyed = true;
           disposers.forEach((dispose) => dispose());
           disposers.clear();
-          uploads.forEach((entry) => {
-            if (entry.previewURL && typeof window !== 'undefined' && typeof window.URL?.revokeObjectURL === 'function') {
-              window.URL.revokeObjectURL(entry.previewURL);
-            }
-          });
+          uploads.forEach((entry) => revokePreview(entry));
           uploads.clear();
         },
       };

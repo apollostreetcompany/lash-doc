@@ -182,13 +182,27 @@ const computeOutlineState = (
 };
 
 const findNextVisiblePosition = (doc: ProseMirrorNode, outline: OutlineItem[], targetId: string) => {
-  const target = outline.find((item) => item.headingId === targetId);
-  if (!target) {
+  const index = outline.findIndex((item) => item.headingId === targetId);
+  if (index === -1) {
     return null;
   }
-  // After collapsing target, the first visible block sits at target.contentTo —
-  // which by construction equals the next sibling-or-uncle heading's `from` (or doc end).
-  return Math.min(target.contentTo, doc.content.size);
+  const target = outline[index];
+
+  // Find the first heading whose `from` is at or beyond `target.contentTo` —
+  // i.e., the first heading OUTSIDE target's collapsed range. This skips
+  // nested children (e.g., H3 inside the collapsed H2).
+  for (let i = index + 1; i < outline.length; i += 1) {
+    if (outline[i].from >= target.contentTo) {
+      return outline[i].from;
+    }
+  }
+
+  // No next-visible heading. If we returned target.contentTo here it would
+  // equal doc.content.size and PMSelection.near(end, 1) would search backward
+  // INTO the collapsed range (proconsult-m0/A P1). Fall back to a position
+  // inside the still-visible target heading itself so the caret never lands
+  // in hidden content.
+  return Math.min(target.from + 1, doc.content.size);
 };
 
 const createOutlinePlugin = (config: OutlinePluginConfig) =>

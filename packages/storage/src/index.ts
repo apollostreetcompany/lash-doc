@@ -1,6 +1,9 @@
 /**
  * @lash/storage — Postgres bindings, object-store adapters, search index hydration.
  * Status: SCAFFOLD — implement in M2/C2 alongside the history log.
+ *
+ * Hashing for `parentSha`/`resultSha` MUST go through `@lash/types/hashCanonical`.
+ * Storage layer never invents its own hash function.
  */
 
 import type { DocumentId, HistoryEntry } from '@lash/types';
@@ -11,8 +14,14 @@ export interface DocStore {
 }
 
 export interface HistoryLogStore {
-  append(entry: HistoryEntry): Promise<void>;
-  list(docId: DocumentId, filter?: { since?: string; until?: string; authorId?: string }): Promise<HistoryEntry[]>;
+  /** Append-only — implementations enforce the parent-sha precondition. */
+  append(entry: HistoryEntry, expectedParentSha: string): Promise<{ ok: true } | { ok: false; reason: 'parent-mismatch'; currentHead: string }>;
+  list(
+    docId: DocumentId,
+    filter?: { since?: string; until?: string; authorId?: string },
+  ): Promise<HistoryEntry[]>;
+  /** Current head sha for a doc, used by appenders to refresh on conflict. */
+  headSha(docId: DocumentId): Promise<string | null>;
 }
 
 export interface ObjectStore {
@@ -23,7 +32,10 @@ export interface ObjectStore {
 
 export interface SearchIndex {
   hydrate(docId: DocumentId, doc: unknown): Promise<void>;
-  search(query: string, scope?: { docIds?: DocumentId[] }): Promise<{ docId: DocumentId; rangeFrom: number; rangeTo: number; snippet: string }[]>;
+  search(
+    query: string,
+    scope?: { docIds?: DocumentId[] },
+  ): Promise<{ docId: DocumentId; rangeFrom: number; rangeTo: number; snippet: string }[]>;
 }
 
 export const createPostgresDocStore = (_config: { connectionString: string }): DocStore => {

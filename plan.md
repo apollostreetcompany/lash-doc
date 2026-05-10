@@ -17,16 +17,26 @@
 | Packages present | 4 (editor-core, types, ui, testing) | 🟢 15 (added 11 typed scaffolds; contracts in `@lash/types`) |
 | CI | `.github/workflows/ci.yml` correct gates | unchanged |
 
-### M0 status — DONE (8/8 lanes)
+### M0 status — DONE (9/9 lanes; A9 added to address review)
 
 - ✅ A1 lint clean (was 43 errors → 0)
-- ✅ A2 image NodeView (`addNodeView` was treating params as positional; fixed signature + refactored commands to use `props.tr` so CommandManager dispatches one coherent transaction)
-- ✅ A3 outline caret-on-collapse (rewrote `findNextVisiblePosition` to use `target.contentTo`, skipping nested headings)
-- ✅ A4 Step 06 close — all 3 table specs (`select-open-close`, `copy-out`, `paste-in`) pass after lint cleanup of unused destructured vars
-- ✅ A5 governance (.gitignore tightened, CODEOWNERS, PR template; remote setup remains a one-line follow-up)
-- ✅ A6 fixture loader + Legal Contract fixture + 3 unit tests
-- ✅ A7 `@lash/types` data contracts (8 frozen shapes: EditorOp, EditPatch, HistoryEntry, AuthorshipInterval, Anchor, ShareToken, MentionResolveResult, DiffJSON)
-- ✅ A8 11 packages scaffolded with typed stubs (`collab-service`, `history`, `authorship`, `mentions`, `share`, `ai`, `doc-chat`, `tables-media`, `observability`, `storage`, `infra-scripts`); tsconfig path aliases wired
+- ✅ A2 image NodeView (`addNodeView` was treating params as positional; fixed signature + refactored commands to use `props.tr` so CommandManager dispatches one coherent transaction; deferred-upload now guarded by `destroyed` flag + placeholder-alive check so undo or editor-destroy mid-flight doesn't leak uploads)
+- ✅ A3 outline caret-on-collapse (skip past nested headings; fall back to `target.from + 1` when target is the last heading so `PMSelection.near` doesn't drift backward into the collapsed range)
+- ✅ A4 Step 06 close — all 3 table specs (`select-open-close`, `copy-out`, `paste-in`) pass
+- ✅ A5 governance (.gitignore tightened + dedup; tracked `test-results/` artifacts untracked; CODEOWNERS expanded to cover top-level configs and annotated as documentation-not-enforcement until GitHub teams exist; PR template; remote setup is the only one-line follow-up)
+- ✅ A6 fixture loader + Legal Contract fixture + 4 unit tests (CJS-safe path resolution, `RegisteredButMissingFixtureError` distinct from `UnknownFixtureError`, ENOENT-only swallow in `listAvailableFixtures`)
+- ✅ A7 `@lash/types` data contracts (FROZEN per proconsult-m0/B):
+  - EditorOp: 6 high-level variants + `pm_step` escape hatch for arbitrary PM Step JSON; `seq` lives on HistoryEntry not on ops; positions stay numeric with `assoc` mapping bias; cross-version stable refs use Anchor / AuthorshipInterval / DiffSpan
+  - HistoryEntry: `parentSha` REQUIRED (concurrency control); `seq` assigned by history layer; `audit: { ipHash, ua }` per security gate
+  - Anchor: token includes `occurrence` + `nodeId/nodePath` for stable recovery
+  - AuthorshipInterval: `nodeId` + `sourceEntryId` + `sourceOpIndex` for durable mapping
+  - ShareToken: `jti` + `redactionPolicyVersion`; separate `RevocationRecord`
+  - MentionResolveResult: discriminated union (visible vs anonymized) — RBAC-safe
+  - EditPatch: citation is a discriminated union; doc citations carry `baseVersion`; `allowGlobal` requires out-of-band `globalEditConfirmed` in `ValidatorOptions`
+  - DiffJSON / DiffSpan: discriminated union of UnchangedSpan/InsertedSpan/DeletedSpan/AttrChangedSpan; each span carries stable id + entryId/opIndex/actorType/intent/redacted for filtered diffs
+  - `canonicalize(value): string` + `hashCanonical(value): Promise<string>` — single source of truth for deterministic JSON serialization and SHA-256 hashing across CI/dev/prod
+- ✅ A8 12 packages scaffolded with typed stubs that consume the new contracts: `collab-service` (Yjs-update vs EditorOp boundary made explicit), `history` (`AppendInput` with `expectedParentSha` precondition), `authorship`, `mentions` (typed against discriminated MentionResolveResult), `share` (RevocationStore + PolicyStore + AuditLog adapters), `ai` (`ValidatorOptions.confirmations.globalEditConfirmed`), `doc-chat`, `tables-media` (checklists kept in editor-core, not here), `observability`, `storage` (HistoryLogStore.append takes expectedParentSha), `infra-scripts`, **`rbac`** (single `PolicyEngine` consumed by share/mentions/chat/AI/api). All 12 path aliases wired in `tsconfig.base.json`
+- ✅ A9 proconsult-m0 review pass — all 5 P0 + 28 P1 findings addressed inline; remaining P2s either deferred with rationale or recorded as follow-ups
 
 ### Open at end of M0 (NOT blockers for M1)
 
@@ -66,21 +76,29 @@ Exit criteria:
 
 ### M1 — Phase 0 finish
 
-Enter: M0 done. Exit:
+Enter: M0 done.
+
+Exit (Phase 0 gate per agents.md = rich text + outline + markdown + images + tables + checklists + autosave + focus + chips):
 - `chip-autoconvert`, `chip-hover`, `chip-revert` green
 - `checklist-toggle`, `checklist-nesting` green
 - `autosave-indicator`, `autosave-latency` green
 - `focus-mode-ui`, `focus-mode-a11y` green
+- **Stabilization (M0 fallout):**
+  - outline e2e selector bug — `[data-heading-id="X"]` selectors scope to `.outline-entry` so they don't double-match the `<h2>`
+  - `md-roundtrip-basic` ol-count + `md-table-import` thead-cell mismatches resolved
+  - `image-clipboard`, `image-dnd`, `image-resize`, `image-retry` retargeted from EditorContent wrapper to `.ProseMirror`
 - All Phase 0 (A.*, B.*, C.1) acceptance IDs no longer skipped
+
+**Required prerequisite (P1 follow-up before B1 starts):** split `packages/editor-core/src/schema.ts` into `schema/{base,chips,mentions,suggest,ai}.ts` modules and `apps/web/components/editor/EditorWorkspace.tsx` into a slot pattern (`<EditorShell><HistoryPanel/><ChatPanel/>...</EditorShell>`). Without this, B1 (chips) / B2 (checklists) / E4 (suggest) / D2 (chips advanced) all collide on the same files. (proconsult-m0/B P1 #19.)
 
 ### M2 — Phase 1: collab / history / diff / restore / authorship
 
-Enter: M1 done; `EditorOp`, `HistoryEntry`, `AuthorshipInterval`, `Anchor` frozen in `@lash/types`. Exit:
+Enter: M1 done; `EditorOp`, `HistoryEntry`, `AuthorshipInterval`, `Anchor` frozen in `@lash/types` (already done in M0 with proconsult-m0/B P0 fixes — `pm_step` op + `assoc` mapping bias + canonical `hashCanonical`). Exit:
 - `multi-client-converge`, `selection-stability` green (Yjs broker live)
-- `diff-deterministic` golden snapshot green
+- `diff-deterministic` golden snapshot green (uses `@lash/types/hashCanonical`, never an injected hash)
 - `history-open`, `history-diff`, `history-restore` green
 - `blame-gutter`, `blame-hover`, `blame-filter`, `blame-interval-map`, `blame-property` green
-- `offline-queue`, `offline-merge`, `presence-resume` green
+- `offline-queue`, `offline-merge`, `presence-resume` green (D5 lives in M2, not M3 — proconsult-m0/B P1 #18)
 
 ### M3 — Phase 2: mentions / share / chat
 
@@ -185,10 +203,12 @@ Everything else runs alongside.
 
 | Bottleneck | Mitigation |
 |---|---|
-| `editor-core/src/schema.ts` is single file; chips/mentions/suggest/AI all want to extend it | A8: split into `schema/{base,chips,mentions,suggest,ai}.ts` modules so lanes own disjoint files |
-| `apps/web/components/editor/EditorWorkspace.tsx` is single file accumulating every panel | A8: refactor to slot pattern (`<EditorShell><HistoryPanel/><ChatPanel/>...</EditorShell>`) |
-| Playwright share/RBAC and chat tests need seeded users/orgs | A6: build seed harness before M3 starts |
-| C2's `EditorOp` shape unblocks 5 M2 lanes | Lock the shape on M2 day-1 PR before parallel branches diverge |
+| `editor-core/src/schema.ts` is single file; chips/mentions/suggest/AI all want to extend it | M0/A8 was scaffold-only; the SCHEMA SPLIT is now M1 prerequisite (before B1) |
+| `apps/web/components/editor/EditorWorkspace.tsx` is single file accumulating every panel | M1 prerequisite: refactor to slot pattern (`<EditorShell><HistoryPanel/><ChatPanel/>...</EditorShell>`) |
+| Playwright share/RBAC and chat tests need seeded users/orgs | M0/A6 fixture corpus + M3 seed harness extension |
+| `EditorOp` + `HistoryEntry` shape unblocks 5 M2 lanes | LOCKED in M0/A7 (with proconsult-m0/B P0 fixes — pm_step, assoc, canonicalize/hashCanonical) |
+| RBAC was previously embedded in `@lash/share` and `@lash/mentions` (cross-cutting concern) | M0 introduced `@lash/rbac` as a separate package; share/mentions/chat/AI/api all consume one `PolicyEngine` |
+| `apps/api` route shape (currently doesn't exist) — every M3 feature reads through it | M3 prerequisite: typed route registry contract before D1/D3/D4 fork (proconsult-m0/B P1 #21) |
 
 ## 4. Lane manifest (beads-friendly)
 
