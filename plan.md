@@ -102,7 +102,7 @@ Enter: M1 done; `EditorOp`, `HistoryEntry`, `AuthorshipInterval`, `Anchor` froze
 
 ### M3 — Phase 2: mentions / share / chat
 
-Enter: M2 done; `MentionResolveResult`, `ShareToken` frozen. Exit:
+Release gate (M2's user-facing surface ships before M3's user-facing surface); contracts `MentionResolveResult`, `ShareToken` frozen. Per-lane execution follows §4 deps; some M3 lanes can start as soon as their listed M2 deps land. Exit:
 - `mention-suggest`, `mention-insert`, `mention-privacy`, `mention-rbac-hide`, `mention-anonymized` green
 - `mention-date-parse`, `mention-date-locale` green
 - `share-comment-scope`, `share-suggest-scope`, `share-edit-scope`, `share-expiry`, `share-audit` green
@@ -111,7 +111,7 @@ Enter: M2 done; `MentionResolveResult`, `ShareToken` frozen. Exit:
 
 ### M4 — Phase 3: AI / suggest mode / filtered diffs
 
-Enter: M3 done; `EditPatch` frozen. Exit:
+Release gate (M3's user-facing surface ships before M4); `EditPatch` frozen (already in M0/A7). Per-lane execution follows §4 deps. Exit:
 - `ai-patch-apply`, `ai-labeling`, `ai-rationale` green
 - `ai-invalid-reject`, `ai-fallback`, `ai-scope-selection`, `ai-scope-global-confirm` green
 - `ai-chat-citation`, `ai-citation-jump` green
@@ -129,7 +129,7 @@ Enter: rolling, starts as features land. Exit:
 ## 2. Parallel DAG
 
 ```
-M0  HYGIENE & CONTRACTS (sequential prefix; A1 first, A2-A9 parallel after)
+M0  HYGIENE & CONTRACTS (A1 first; A2-A8 parallel after A1; A9 sequential after A2-A8)
 ┌────────────────────────────────────────────────────────────────────┐
 │ A1 [seq] lint clean to 0 errors                                    │
 │ A2 [par] image NodeView attrs fix         (image.ts only)          │
@@ -168,7 +168,7 @@ M1  PHASE 0 FINISH (B0 prerequisite, then 5 lanes parallel)
 │                              image e2e retarget, focus-a11y)       │
 └────────────────────────────────────────────────────────────────────┘
         ▼
-M2  PHASE 1 (6 lanes parallel after C2 ops shape locked)
+M2  PHASE 1 (C2 first; C1/C3/C4/C5 fan out from C2; C6 after C1+C2 — see §4 deps)
 ┌────────────────────────────────────────────────────────────────────┐
 │ C1 collab        (packages/collab-service + apps/realtime-gateway) │
 │ C2 history log   (packages/history + apps/api) [hub]               │
@@ -180,7 +180,7 @@ M2  PHASE 1 (6 lanes parallel after C2 ops shape locked)
 │                   IDs are M2 exit criteria)                        │
 └────────────────────────────────────────────────────────────────────┘
         ▼
-M3  PHASE 2 (4 lanes parallel)
+M3  PHASE 2 (D0 prerequisite; D1/D3 fan out from D0; D2 after D1; D4 after D3+C5 — see §4 deps)
 ┌────────────────────────────────────────────────────────────────────┐
 │ D1 mentions          (packages/mentions + apps/api resolver)       │
 │ D2 chips advanced    (packages/mentions + apps/web chip preview)   │
