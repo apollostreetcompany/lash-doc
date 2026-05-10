@@ -47,15 +47,21 @@ jobs:
           # grep errors (status 2+); pipefail then can't surface a real error.
           # This helper normalizes ONLY no-match → 0, leaving syntax/runtime
           # failures to propagate.
+          #
+          # Bash gotcha: capturing `$?` AFTER `fi` when no branch executed
+          # returns the if-statement's status (0), not grep's. Capture inside
+          # `else` where grep was the last command run.
           grep_no_match_ok() {
+            local status
             if grep -E "$1"; then
               return 0
+            else
+              status=$?
+              if [ "$status" -eq 1 ]; then
+                return 0
+              fi
+              return "$status"
             fi
-            status=$?
-            if [ "$status" -eq 1 ]; then
-              return 0
-            fi
-            return "$status"
           }
 
           # Allow contributors to opt out per-PR with `[allow-skip: <non-empty reason>]`.
