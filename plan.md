@@ -11,7 +11,7 @@
 | Git | 1 commit on `main`, no remote, dirty tree (Step 06 in flight) | unchanged — uncommitted M0 work in tree |
 | Lint | 🔴 19 errors / 6 warnings after `--fix` | 🟢 0 errors, 0 warnings |
 | Typecheck | 🟢 clean | 🟢 clean |
-| Unit tests | 13 todo, 3 real failures (`image` ×2, `outline-plugin`) | 🟢 19 passed, 13 todo, 0 failures (added 3 fixture-loader tests) |
+| Unit tests | 13 todo, 3 real failures (`image` ×2, `outline-plugin`) | 🟢 35 passed, 13 todo, 0 failures (added 4 fixture-loader tests + 14 canonicalize/hashCanonical locked-vector tests during the M0/A9 review-fix loop) |
 | E2E tests | 71 specs, 51 stubbed; Step 06 ×3 failing | Step 06 ×3 🟢; 10 unrelated specs fail (see §Open) |
 | Apps present | Only `apps/web` (shell) | unchanged — `api`/`realtime-gateway`/`ai-orchestrator`/`admin` belong to M2/M3/M4 |
 | Packages present | 4 (editor-core, types, ui, testing) | 🟢 16 (added 12 typed scaffolds: collab-service, history, authorship, mentions, share, ai, doc-chat, tables-media, observability, storage, infra-scripts, **rbac**; contracts in `@lash/types`) |
@@ -68,7 +68,7 @@ Exit criteria:
 - `pnpm typecheck` exits 0
 - `pnpm test:unit` 0 failures (no fresh todos)
 - `pnpm test:e2e` Step 06 specs (M0-owned: `table-select-open-close`, `table-copy-out`, `table-paste-in`) 6/6 green. Other pre-existing real-spec failures (outline/markdown/focus/image — listed in §Open) are scoped to M1/B5 stabilization, not M0
-- Git remote configured, branch protection on `main`
+- Git remote + branch protection on `main`: deferred. The repo runs locally without a remote; the `main` merge happens in this checkout. Remote configuration (push to GitHub, branch-protection rules, CODEOWNERS team binding) is a deployment-time follow-up; it does NOT block M0 → main merge today. Tracked under lash-a5.
 - `.gitignore` excludes `test-results/`, `*-output.txt.txt`, `codex-*-terminal.txt`, `*-session-summary.md`
 - 12 missing packages scaffolded with typed stubs (collab-service, history, authorship, mentions, share, ai, doc-chat, tables-media, observability, storage, infra-scripts, **rbac**)
 - `@lash/types` exports `EditorOp`, `EditPatch`, `HistoryEntry`, `AuthorshipInterval`, `Anchor`, `ShareToken`, `MentionResolveResult`, `DiffJSON`
@@ -207,7 +207,7 @@ M5  HARDENING (5 lanes; many start mid-M2)
 └────────────────────────────────────────────────────────────────────┘
 ```
 
-### Critical path (longest serial chain)
+### Critical path (longest user-visible release-order chain)
 
 ```
 A1 lint → A4 table-step06 → A9 review-pass-clean → B0 schema/slot split
@@ -215,7 +215,15 @@ A1 lint → A4 table-step06 → A9 review-pass-clean → B0 schema/slot split
        → D4 chat-anchor → E4 suggest → E5 filtered-diffs → F4 perf
 ```
 
-Inter-lane dependencies that this DAG already encodes but worth restating:
+This is a **release-order narrative** showing the longest user-visible chain
+of features (lint clean → tables stable → chips → live history → diff render
+→ blame → anchored chat → suggest visuals → filtered diffs → perf gate).
+It is NOT a strict dependency edge set; the actual programmatic deps live
+in §4 lane manifest. Some chain steps overlap in time (C5 starts after C2
+but before C3 finishes; E4 and D4 are parallel).
+
+Inter-lane dependencies that the §4 manifest encodes (and which the chain
+above implies):
 - E5 filtered diffs depends on C3 diff + C5 authorship (filter-by-author needs blame metadata).
 - D4 doc chat history-context depends on C3 diff + C4 restore (renders state-at-version inline).
 - E4 suggest mode depends on C2 ops + C3 diff (track-changes visuals = diff spans rendered as marks).
@@ -255,13 +263,13 @@ Each lane = one beads issue. Format below is `br`-importable: id, title, deps, s
 - **id:** lash-b0, **title:** "M1/B0 (PREREQUISITE): split editor-core schema.ts into schema/{base,chips,mentions,suggest,ai}.ts modules + refactor apps/web/components/editor/EditorWorkspace.tsx into a slot pattern (`<EditorShell><HistoryPanel/><ChatPanel/>...</EditorShell>`)", **deps:** [lash-a9], **owner:** typegod, **acceptance:** all M1 lanes can edit disjoint files; existing tests still pass; no functional change.
 - **id:** lash-b1, **title:** "M1/B1: chips (basic) — autoconvert/hover/revert", **deps:** [lash-b0], **owner:** reactlord, **acceptance:** `chip-autoconvert`, `chip-hover`, `chip-revert` green
 - **id:** lash-b2, **title:** "M1/B2: checklists toggle + nesting", **deps:** [lash-b0], **owner:** reactlord, **acceptance:** `checklist-toggle`, `checklist-nesting` green
-- **id:** lash-b3, **title:** "M1/B3: autosave indicator + latency", **deps:** [lash-a7], **owner:** nextking, **acceptance:** `autosave-indicator`, `autosave-latency` green
+- **id:** lash-b3, **title:** "M1/B3: autosave indicator + latency", **deps:** [lash-a7, lash-b0], **owner:** nextking, **acceptance:** `autosave-indicator`, `autosave-latency` green
 - **id:** lash-b4, **title:** "M1/B4: focus mode UI + a11y", **deps:** [lash-b0], **owner:** fronty, **acceptance:** `focus-mode-ui`, `focus-mode-a11y` green
 - **id:** lash-b5, **title:** "M1/B5: stabilization — outline `[data-heading-id]` selector scoping (3 specs), markdown roundtrip + table import (2 specs), image e2e retarget to `.ProseMirror` (4 specs), focus-mode-a11y toolbar visibility (1 spec)", **deps:** [lash-b0], **owner:** typegod, **acceptance:** the 10 unrelated e2e specs flagged in M0 §Open all green.
 
 ### M2
 
-- **id:** lash-c1, **title:** "M2/C1: Yjs collab + presence broker", **deps:** [lash-b*], **owner:** typegod, **acceptance:** `multi-client-converge`, `selection-stability`, `presence-resume` green; `apps/realtime-gateway` boots
+- **id:** lash-c1, **title:** "M2/C1: Yjs collab + presence broker", **deps:** [lash-b*], **owner:** typegod, **acceptance:** `multi-client-converge`, `selection-stability` green; `apps/realtime-gateway` boots. (`presence-resume` is owned by lash-c6 since it's part of the offline reconnect flow.)
 - **id:** lash-c2, **title:** "M2/C2: append-only history log + ops shape (HUB)", **deps:** [lash-b*], **owner:** typegod, **acceptance:** ops shape locked; history persists; deterministic JSON
 - **id:** lash-c3, **title:** "M2/C3: deterministic diff engine + history panel", **deps:** [lash-c2], **owner:** typegod, **acceptance:** `diff-deterministic`, `history-open`, `history-diff` green
 - **id:** lash-c4, **title:** "M2/C4: restore endpoint", **deps:** [lash-c2], **owner:** thesnake-or-typegod, **acceptance:** `history-restore` green; new head version, no destructive rewrite
@@ -270,15 +278,16 @@ Each lane = one beads issue. Format below is `br`-importable: id, title, deps, s
 
 ### M3
 
-- **id:** lash-d1, **title:** "M3/D1: mentions (users/groups/dates) + RBAC", **deps:** [lash-a7, lash-c2], **owner:** reactlord, **acceptance:** `mention-*` 5/5 green; date tests 2/2 green
+- **id:** lash-d0, **title:** "M3/D0 (PREREQUISITE): typed route registry / OpenAPI-style contract for `apps/api` + manifest of read paths consumed by D1/D3/D4 (so M3 lanes don't fork on independent route shapes)", **deps:** [lash-a7], **owner:** typegod, **acceptance:** `apps/api` exposes a typed route table consumed by all M3 lanes; `pnpm typecheck` clean across mentions/share/doc-chat callers
+- **id:** lash-d1, **title:** "M3/D1: mentions (users/groups/dates) + RBAC", **deps:** [lash-a7, lash-c2, lash-d0], **owner:** reactlord, **acceptance:** `mention-*` 5/5 green; date tests 2/2 green
 - **id:** lash-d2, **title:** "M3/D2: chips advanced — preview, backlinks", **deps:** [lash-b1, lash-d1], **owner:** reactlord, **acceptance:** chip preview hover loads; backlink graph populated
-- **id:** lash-d3, **title:** "M3/D3: share links + RBAC + redaction", **deps:** [lash-a7, lash-c3], **owner:** typegod, **acceptance:** `share-*` + `*-redact` green
-- **id:** lash-d4, **title:** "M3/D4: doc chat with anchored threads + filters", **deps:** [lash-c2, lash-c3, lash-c4], **owner:** reactlord, **acceptance:** `chat-*` 6/6 green
+- **id:** lash-d3, **title:** "M3/D3: share links + RBAC + redaction", **deps:** [lash-a7, lash-c3, lash-d0], **owner:** typegod, **acceptance:** `share-*` + `*-redact` green
+- **id:** lash-d4, **title:** "M3/D4: doc chat with anchored threads + filters", **deps:** [lash-c2, lash-c3, lash-c4, lash-d0], **owner:** reactlord, **acceptance:** `chat-*` 6/6 green
 
 ### M4
 
 - **id:** lash-e1, **title:** "M4/E1: AI EditPatch validator", **deps:** [lash-a7, lash-c2], **owner:** typegod, **acceptance:** `ai-invalid-reject`, `ai-fallback`, `ai-scope-selection` green
-- **id:** lash-e2, **title:** "M4/E2: AI orchestrator service + patch flow UI", **deps:** [lash-e1], **owner:** thesnake, **acceptance:** `ai-patch-apply`, `ai-labeling`, `ai-rationale`, `ai-scope-global-confirm` green
+- **id:** lash-e2, **title:** "M4/E2: AI orchestrator service + patch flow UI", **deps:** [lash-e1, lash-c5], **owner:** thesnake, **acceptance:** `ai-patch-apply`, `ai-labeling`, `ai-rationale`, `ai-scope-global-confirm` green. (lash-c5 needed because `ai-labeling` consumes authorship metadata.)
 - **id:** lash-e3, **title:** "M4/E3: AI chat citations", **deps:** [lash-d4, lash-e1], **owner:** reactlord, **acceptance:** `ai-chat-citation`, `ai-citation-jump` green
 - **id:** lash-e4, **title:** "M4/E4: suggest mode marks + accept/reject", **deps:** [lash-c2, lash-c3], **owner:** typegod, **acceptance:** `suggest-visuals`, `suggest-accept`, `suggest-reject` green
 - **id:** lash-e5, **title:** "M4/E5: filtered diffs (author/time/share-link)", **deps:** [lash-c3, lash-c5, lash-d3], **owner:** reactlord, **acceptance:** `diff-filter-author`, `diff-filter-time`, `diff-share-link` green
