@@ -70,7 +70,7 @@ Exit criteria:
 - `pnpm test:e2e` 0 failures on currently real specs (Step 06 6/6 green)
 - Git remote configured, branch protection on `main`
 - `.gitignore` excludes `test-results/`, `*-output.txt.txt`, `codex-*-terminal.txt`, `*-session-summary.md`
-- 11 missing packages scaffolded with typed stubs
+- 12 missing packages scaffolded with typed stubs (collab-service, history, authorship, mentions, share, ai, doc-chat, tables-media, observability, storage, infra-scripts, **rbac**)
 - `@lash/types` exports `EditorOp`, `EditPatch`, `HistoryEntry`, `AuthorshipInterval`, `Anchor`, `ShareToken`, `MentionResolveResult`, `DiffJSON`
 - `packages/testing/fixtures/` with at least the "Legal Contract" fixture loadable
 
@@ -247,7 +247,8 @@ Each lane = one beads issue. Format below is `br`-importable: id, title, deps, s
 - **id:** lash-a5, **title:** "M0/A5: repo governance — remote, branch protection, .gitignore, CODEOWNERS, PR template", **deps:** [], **owner:** gitty, **acceptance:** remote set, push works, `.gitignore` excludes test-results/output/session files
 - **id:** lash-a6, **title:** "M0/A6: test fixture loader + Legal Contract fixture", **deps:** [], **owner:** scribe, **acceptance:** `loadFixture('legal-contract')` returns parsed doc; harness shared with unit + e2e
 - **id:** lash-a7, **title:** "M0/A7: @lash/types data contracts (EditorOp, EditPatch, HistoryEntry, AuthorshipInterval, Anchor, ShareToken, MentionResolveResult, DiffJSON)", **deps:** [], **owner:** typegod, **acceptance:** typecheck clean; types exported from `@lash/types`
-- **id:** lash-a8, **title:** "M0/A8: scaffold 11 missing packages + split schema.ts and EditorWorkspace.tsx into modules/slots", **deps:** [lash-a1], **owner:** nextking, **acceptance:** all listed packages exist with `index.ts`; `pnpm typecheck` clean; schema modular
+- **id:** lash-a8, **title:** "M0/A8: scaffold 12 missing packages with typed stubs + tsconfig path aliases (collab-service, history, authorship, mentions, share, ai, doc-chat, tables-media, observability, storage, infra-scripts, **rbac**)", **deps:** [lash-a1], **owner:** nextking, **acceptance:** all 12 packages exist with `package.json` + `tsconfig.json` + `src/index.ts`; `pnpm typecheck` clean. (Schema/EditorWorkspace split was REASSIGNED to M1 prerequisite-before-B1 — see lash-b0.)
+- **id:** lash-a9, **title:** "M0/A9: address proconsult-m0 P0/P1 findings (architecture + correctness + infra; iterative review-fix loop until 0 P0/P1)", **deps:** [lash-a2, lash-a3, lash-a4, lash-a5, lash-a6, lash-a7, lash-a8], **owner:** typegod, **acceptance:** verification proconsult returns 0 P0/P1 (or P1s explicitly deferred with rationale recorded in plan.md / commit messages)
 
 ### M1
 

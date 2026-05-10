@@ -476,37 +476,35 @@ export const canonicalize = (value: unknown): string => {
   return JSON.stringify(normalize(value, ''));
 };
 
-/** Resolve a Web-Crypto-compatible subtle implementation across runtimes:
- *    - Browsers + Node 20+: `globalThis.crypto.subtle` is present.
- *    - jsdom (Vitest default for editor tests): `crypto` is present but
- *      `crypto.subtle` is NOT polyfilled — fall back to Node's webcrypto.
- *    - Older Node: also fall back to Node's webcrypto.
+/** Lookup of the platform Web Crypto subtle implementation.
  *
- *  The Node fallback is gated behind a Node-runtime check so browser bundlers
- *  (esbuild/rollup/webpack) can statically eliminate the `node:crypto`
- *  dynamic import via dead-code elimination when `process` is undefined.
- *  Cached after first resolution. */
+ *  `@lash/types` is a SHARED package — anything imported from here ends up
+ *  in browser bundles via apps/web. We therefore deliberately do NOT pull
+ *  `node:crypto` from this module: bundlers (esbuild/rollup/webpack) treat
+ *  every `import('node:crypto')` as a dependency edge regardless of any
+ *  `typeof process` runtime guard, so a `node:crypto` reference here would
+ *  leak into client chunks.
+ *
+ *  Runtime expectations:
+ *    - Browsers: `globalThis.crypto.subtle` is always present.
+ *    - Node 20+ (CI + dev): `globalThis.crypto` is the WebCrypto namespace.
+ *    - Vitest jsdom env: jsdom does NOT zero out `globalThis.crypto`, so
+ *      Node 20's webcrypto is reachable here too. (If a future jsdom upgrade
+ *      hides it, add a setup file at `vitest.config.ts:test.setupFiles` that
+ *      polyfills via `node:crypto.webcrypto` — that path stays in the test
+ *      build, not in client bundles.)
+ *
+ *  The cache is filled on first successful resolution. */
 let _subtleCache: SubtleCrypto | null = null;
-const resolveSubtle = async (): Promise<SubtleCrypto> => {
+const resolveSubtle = (): SubtleCrypto => {
   if (_subtleCache) return _subtleCache;
-  const native = (globalThis as { crypto?: { subtle?: SubtleCrypto } }).crypto?.subtle;
-  if (native && typeof native.digest === 'function') {
-    _subtleCache = native;
-    return native;
-  }
-  // Node-only fallback. The runtime guard lets browser bundlers tree-shake
-  // the dynamic import (when `process` is undefined the branch is provably
-  // unreachable, and esbuild/rollup elide the `node:crypto` chunk).
-  const isNode =
-    typeof process !== 'undefined' &&
-    typeof (process as { versions?: { node?: string } }).versions?.node === 'string';
-  if (!isNode) {
-    throw new Error('hashCanonical: SubtleCrypto.digest unavailable and not running on Node');
-  }
-  const mod = (await import('node:crypto')) as { webcrypto?: { subtle?: SubtleCrypto } };
-  const subtle = mod.webcrypto?.subtle;
+  const subtle = (globalThis as { crypto?: { subtle?: SubtleCrypto } }).crypto?.subtle;
   if (!subtle || typeof subtle.digest !== 'function') {
-    throw new Error('hashCanonical: no SubtleCrypto.digest available in this runtime');
+    throw new Error(
+      'hashCanonical: globalThis.crypto.subtle.digest is required. ' +
+        'Browsers and Node 18+ provide it natively. For test envs that strip ' +
+        'crypto, polyfill via a Vitest setup file using node:crypto.webcrypto.',
+    );
   }
   _subtleCache = subtle;
   return subtle;
@@ -514,11 +512,12 @@ const resolveSubtle = async (): Promise<SubtleCrypto> => {
 
 /** SHA-256 hex digest of `canonicalize(value)`. Single source of truth for
  *  parentSha, resultSha, EditPatch.baseVersion, and redactionPolicy hashes.
- *  Works in Node 20+, modern browsers, and jsdom (via node:crypto fallback). */
+ *  Works in Node 18+, modern browsers, and Vitest jsdom (which inherits
+ *  Node's globalThis.crypto). No `node:crypto` import — see resolveSubtle. */
 export const hashCanonical = async (value: unknown): Promise<string> => {
+  const subtle = resolveSubtle();
   const text = canonicalize(value);
   const data = new TextEncoder().encode(text);
-  const subtle = await resolveSubtle();
   const buf = await subtle.digest('SHA-256', data);
   const bytes = new Uint8Array(buf);
   let hex = '';
