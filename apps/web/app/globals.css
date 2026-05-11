@@ -549,3 +549,80 @@ li[data-type='taskItem'] input[type='checkbox'] {
 .lash-hidden-block {
   display: none !important;
 }
+
+/* Internal-doc chips — see packages/editor-core/src/extensions/chip.ts. */
+.lash-chip-wrapper {
+  position: relative;
+  display: inline-block;
+}
+
+.lash-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.05rem 0.45rem;
+  margin: 0 0.1rem;
+  border-radius: 999px;
+  background: rgba(99, 102, 241, 0.2);
+  color: #c7d2fe;
+  text-decoration: none;
+  font-weight: 500;
+  font-size: 0.9em;
+  border: 1px solid rgba(165, 180, 252, 0.35);
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.lash-chip:hover {
+  background: rgba(99, 102, 241, 0.35);
+  color: #e0e7ff;
+}
+
+.lash-chip-icon {
+  font-size: 0.85em;
+  width: 1em;
+  height: 1em;
+  background-size: contain;
+  background-position: center;
+  background-repeat: no-repeat;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.lash-chip-icon.has-image {
+  text-indent: -9999px;
+  overflow: hidden;
+}
+
+.lash-chip-label {
+  display: inline-block;
+}
+
+.lash-chip-preview {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  z-index: 30;
+  flex-direction: column;
+  gap: 0.25rem;
+  min-width: 12rem;
+  padding: 0.55rem 0.75rem;
+  border-radius: 8px;
+  background: #0f172a;
+  border: 1px solid rgba(99, 102, 241, 0.45);
+  box-shadow: 0 6px 14px rgba(0, 0, 0, 0.35);
+  color: #e2e8f0;
+  font-size: 0.85rem;
+  pointer-events: none;
+}
+
+.lash-chip-preview-title {
+  font-weight: 600;
+  color: #f8fafc;
+}
+
+.lash-chip-preview-editor {
+  font-size: 0.78rem;
+  color: #94a3b8;
+}

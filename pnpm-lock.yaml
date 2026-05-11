@@ -173,6 +173,8 @@ importers:
 
   packages/observability: {}
 
+  packages/rbac: {}
+
   packages/share: {}
 
   packages/storage: {}

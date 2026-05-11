@@ -1,21 +1,27 @@
 /**
  * @lash/editor-core/schema/chips — internal-link "chip" extensions.
- * Status: SLOT — to be filled by M1/B1 (chip-autoconvert/hover/revert).
  *
- * When implemented, this module exposes a `buildChipExtensions(options?)`
- * function that returns the chip Node + any plugins. The function is
- * called from ./index.ts after the base extensions so chips can layer on
- * top of links / paragraphs.
+ * Wires the `LashChip` Node into the editor schema. A chip is an inline
+ * atom node representing a resolved internal-doc link. The Node itself
+ * owns:
+ *  - parse/serialize rules (anchor with `data-chip-kind`)
+ *  - paste-rule that auto-converts internal-doc URLs into chip nodes
+ *  - NodeView with click-to-navigate + hover preview + `Cmd/Ctrl+K` revert
  *
- * Lane B1 owns this file.
+ * See `../extensions/chip.ts` for the implementation.
  */
 
 import type { Extensions } from '@tiptap/core';
 
+import { LashChip, type ChipResolveResult } from '../extensions/chip';
+
 export interface LashChipOptions {
   /** Resolver that returns chip metadata (title, icon, last editor) for a doc id. */
-  resolveDocChip?: (docId: string) => Promise<{ title: string; iconUrl?: string; lastEditor?: string } | null>;
+  resolveDocChip?: (docId: string) => Promise<ChipResolveResult | null>;
 }
 
-/** Returns an empty extensions array until M1/B1 lands. */
-export const buildChipExtensions = (_options?: LashChipOptions): Extensions => [];
+export const buildChipExtensions = (options?: LashChipOptions): Extensions => [
+  LashChip.configure({
+    resolveDocChip: options?.resolveDocChip,
+  }),
+];
