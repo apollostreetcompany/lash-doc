@@ -1,146 +1,169 @@
-# Lash — Release Notes (M0 + partial M1)
-
-Snapshot taken at consolidation of the M0 + M1 parallel-build session.
+# Lash — Release Notes (M0 + M1 complete)
 
 ## Status at HEAD
 
 - Branch: `main`
-- Latest commit: see `git log --oneline -1`
+- Latest commit: `1faddb8` (Merge M1/B1 chips)
 - All gates on `main`:
   - `pnpm lint` — 0 errors
   - `pnpm typecheck` — 0 errors
   - `pnpm test:unit` — 41 passed, 12 todo, 0 failures
-  - `pnpm test:e2e` — 23 passed, 1 failed (autosave-indicator — see Known Issues), 51 skipped
+  - `pnpm test:e2e` — **27 passed, 48 skipped (M2–M4 stubs), 0 failures**
   - `pnpm --filter @lash/web build` — production build green
 
 ## What landed in this session
 
-### M0 (Hygiene + Contracts + Scaffolds) — DONE, merged to `main`
+### M0 (Hygiene + Contracts + Scaffolds) — DONE, merged
 
-Twelve proconsult-fix iterations ([5373b71] → [77bcb4c]) converged on zero P0/P1
-across three independent review scopes (correctness, architecture, infra/governance).
+Twelve proconsult-fix iterations (5373b71 → 77bcb4c) converged on zero P0/P1
+across three independent review scopes (correctness, architecture,
+infra/governance).
 
-- **A1 — Lint clean.** 43 errors → 0. Added `argsIgnorePattern: '^_'`,
-  `ignoreRestSiblings: true`, spec-files-allow-`any`.
-- **A2 — Image NodeView fix.** `addNodeView` was using positional cast on a
-  props object; refactored to `(props: NodeViewRendererProps)` + split the
-  upload manager into `insert` (direct-dispatch, paste/drop) and
-  `insertIntoTransaction` (CM-tr-mutation, commands), with a deferred
-  `startUploadIfPlaceholderAlive` guard against editor-destroy + placeholder-undo.
-- **A3 — Outline caret-on-collapse.** Skip past nested headings via
-  `target.contentTo`; fall back to `target.from + 1` for last-heading edge.
-- **A4 — Step 06 close.** All 3 table specs (`select-open-close`, `copy-out`,
-  `paste-in`) green.
-- **A5 — Governance.** `.gitignore` excludes test-results / output / session
-  files. `CODEOWNERS` with documentation-not-enforcement banner. PR template
-  with skip/todo `[allow-skip:]` escape. CI guard with `grep_no_match_ok` helper
-  + base SHA preflight + `fetch-depth: 0`.
-- **A6 — Fixture infra.** `loadFixture()` + `RegisteredButMissingFixtureError`
-  + ENOENT-only swallow + repo-root marker-file ascent.
-- **A7 — `@lash/types` contracts (8 frozen shapes):** EditorOp (with
-  `pm_step` escape hatch + `assoc` mapping bias), HistoryEntry (REQUIRED
-  parentSha + audit + schemaVersion), Anchor (occurrence + nodeId/nodePath),
-  AuthorshipInterval (sourceEntryId/sourceOpIndex), ShareToken (jti +
-  redactionPolicyVersion + separate RevocationRecord), MentionResolveResult
-  (visible/anonymized discriminated union), EditPatch (citation union +
-  allowGlobal-requires-out-of-band-confirm), DiffJSON (discriminated span
-  union with entryId/opIndex/actorType/intent/redacted). Plus
-  `canonicalize` + `hashCanonical` with locked test vectors.
-- **A8 — 12 typed package scaffolds.** `collab-service`, `history`,
-  `authorship`, `mentions`, `share`, `ai`, `doc-chat`, `tables-media`,
-  `observability`, `storage`, `infra-scripts`, **`rbac`**. tsconfig paths wired.
-- **A9 — Proconsult-fix loop.** 12 iterations across correctness +
-  architecture + infra scopes, all returning "no P0/P1 issues found" at end.
+- **A1** Lint clean (43 → 0).
+- **A2** Image NodeView fix + CM-tr-mutation refactor + deferred-upload guard.
+- **A3** Outline caret-on-collapse with last-heading edge case.
+- **A4** Step 06 close (3 table specs green).
+- **A5** `.gitignore` + `CODEOWNERS` (banner) + PR template + CI guard
+  (`grep_no_match_ok` + base SHA preflight + `fetch-depth: 0`).
+- **A6** Fixture loader (`loadFixture`, `RegisteredButMissingFixtureError`,
+  marker-file ascent).
+- **A7** `@lash/types` (8 frozen shapes + `canonicalize` + `hashCanonical`
+  with locked test vectors).
+- **A8** 12 typed package scaffolds (`collab-service`, `history`, `authorship`,
+  `mentions`, `share`, `ai`, `doc-chat`, `tables-media`, `observability`,
+  `storage`, `infra-scripts`, **`rbac`**).
+- **A9** Twelve proconsult-fix iterations to zero P0/P1.
 
-### M1 lanes — partial, mostly merged
+### M1 lanes — ALL DONE, merged
 
-- **B0 — Schema/slot split.** Done. ✅ Merged. (`packages/editor-core/src/schema/`
-  split into `index.ts` + `base.ts` + slots for `chips`, `mentions`, `suggest`,
-  `ai`. `apps/web/components/editor/panels/` with 10 panel components, 5 stable
-  + 5 placeholders for future lanes.)
-- **B2 — Checklists.** Done. ✅ Merged. (proconsult-clean. `checklist-toggle`
-  + `checklist-nesting` e2e specs green with strict DOM structure assertions.
-  No editor-core changes needed — TaskList wiring in `base.ts` was correct.)
-- **B4 — Focus mode UI + a11y.** Done. ✅ Merged. (proconsult-clean.
-  `focus-mode-ui` + `focus-mode-a11y` green. Added Cmd/Ctrl+Shift+F keymap
-  with IME + repeat guards; TableCellPanel now hidden in focus mode.)
-- **B5 — Stabilization.** Done. ✅ Merged. (proconsult-clean. All 10
-  pre-existing e2e failures from M0 §Open now green: 3 outline selectors,
-  2 markdown, 1 focus-mode, 4 image. Plus an underlying outline-plugin fix
-  for `collapsedIntent` set surviving page-reload + setContent.)
+- **B0 — Schema/slot split.** `editor-core/src/schema/` split into
+  `index.ts` + `base.ts` + 4 feature slots. `apps/web/components/editor/`
+  refactored into 10 panel components (5 stable + 5 placeholder slots for
+  M2-M4). proconsult-clean. ✅
+- **B1 — Chips (basic).** `LashChip` Node with paste-rule auto-convert
+  of internal-doc URLs, NodeView with hover popover, Cmd/Ctrl+K revert to
+  plain link. Mock `resolveDocChip` wired in EditorWorkspace. 3 e2e specs
+  green (`chip-autoconvert`, `chip-hover`, `chip-revert`). ✅
+- **B2 — Checklists.** `checklist-toggle` + `checklist-nesting` specs green
+  with strict DOM-structure assertions. TaskList wiring in `base.ts` was
+  already correct; no editor-core changes needed. proconsult-clean. ✅
+- **B3 — Autosave.** `useAutosave` hook (`apps/web/lib/autosave.ts`) +
+  `AutosaveIndicator` panel. 500 ms-after-idle debounced flush, status
+  state machine (idle/pending/saving/saved/error), last-saved hover. 6
+  unit tests (autosave-latency under fake timers) + 1 e2e
+  (autosave-indicator) green. ✅
+- **B4 — Focus mode UI + a11y.** `focus-mode-ui` + `focus-mode-a11y` green.
+  `Cmd/Ctrl+Shift+F` keymap with IME composition + repeat guards.
+  TableCellPanel hidden in focus mode per agents.md A.4 ("toolbars hide").
+  2 proconsult iterations to zero P0/P1. ✅
+- **B5 — Stabilization.** All 10 pre-existing e2e failures from M0 §Open
+  green: 3 outline (selector + intent-set fix), 2 markdown, 1 focus-mode
+  (CSS `[hidden]` override), 4 image (`.ProseMirror` retarget + DnD
+  sequence + handleDrop items fallback + valid base64). proconsult-clean. ✅
 
-## In-flight at wrap-up
+## Phase 0 gate status (per agents.md)
 
-These two lanes had their agents spawned in worktrees but they accidentally
-wrote to the main repo working tree instead of their isolated worktrees.
-Their work was partially captured during the consolidation:
+Phase 0 = rich text + outline + markdown + images + tables + checklists +
+autosave + focus mode + basic chips.
 
-- **B1 — Chips (basic) — INCOMPLETE.** The agent's WIP is preserved on branch
-  `m1/b1-chips-leaked` (commit `5189fec`). It builds a `chip.ts` extension +
-  paste rule, hover preview NodeView, Cmd/Ctrl+K revert, 3 e2e specs.
-  **NOT MERGED** because the WIP has a build-time TS error
-  (`packages/editor-core/src/extensions/chip.ts:83:8 — Property 'setMeta'
-  does not exist on type 'never'`) and was not reviewed via proconsult.
-  Next step: fix the type error, add proconsult-B1, merge.
-- **B3 — Autosave indicator + latency — PARTIAL.** The B3 agent's
-  implementation files (`apps/web/lib/autosave.ts`, autosave-latency unit
-  test, AutosaveIndicator panel) were swept into the B4 merge via
-  `git add -A`. Unit tests pass (35 → 41 with the 6 new autosave-latency
-  vectors). The `autosave-indicator` e2e spec **FAILS** — the indicator
-  text doesn't surface within 500 ms of idle; root cause is likely a
-  wiring gap between `useAutosave` and the editor's transaction events
-  in the live Next build, not visible to typecheck/lint. NOT proconsult-reviewed.
-  Next step: debug the wiring + write proconsult-B3.
+| Acceptance area | Status |
+|---|---|
+| A.1 Headings & Collapse | ✅ 3/3 |
+| A.2 Markdown Hotkeys | ✅ unit-tested (`schema-validity`) |
+| A.3 Markdown Import/Export | ✅ 2/2 |
+| A.4 Focus Mode | ✅ 2/2 |
+| B.1 Table Cell Types | ✅ 2/2 |
+| B.2 Keyboard Navigation | ✅ 2/2 |
+| B.3 Copy/Paste Interop | ✅ 2/2 |
+| B.4 Large Table Perf | 🟡 skipped (M5/F4) |
+| B.5 Images | ✅ 4/4 |
+| B.6 Checklists | ✅ 2/2 |
+| C.1 Doc Links → Chips | ✅ 3/3 |
+| H.1 Autosave | ✅ 1 unit + 1 e2e |
 
-## Known issues at HEAD
-
-- **`autosave-indicator` e2e FAILS** (B3 partial above). All other tests
-  pass; the failure is contained to one spec. Marked as B3 follow-up.
-- **`m1/b1-chips-leaked` branch is build-broken**, intentionally left
-  unmerged for B1 follow-up.
+**Phase 0 ROLLOUT GATE — PASS** (with B.4 large-table-perf scoped to M5).
 
 ## Repo state
 
-- **Branches:**
-  - `main` — has M0 + B0 + B2 + B4 + B5 + the B3 implementation files
-    (sans working e2e) + image-resize flake fix.
-  - `m1/b1-chips-leaked` — B1 WIP (build-broken).
-  - `m0/hygiene-and-contracts`, `m1/b0-schema-slot-split`, `m1/b2-checklists`,
-    `m1/b4-focus-mode`, `m1/b5-stabilization` — historical lane branches,
-    safe to delete.
+### Branches on `main`'s history
 
-- **Agent worktrees** (`.claude/worktrees/agent-*/`) — gitignored and not
-  tracked. They contain isolated copies of M1 work; safe to delete after
-  merging via `git worktree prune`.
+```
+1faddb8 Merge M1/B1: chips
+683b051 M1/B3 v2: replace partial autosave files
+5e2799b M1/B1: chips
+9ea21ec docs: M0 + M1 consolidation release notes
+aa019fc fix(e2e): image-resize editor-ready wait
+0e14459 Merge M1/B2: checklists
+12f2227 M1/B4: keyboard handler hardening
+897d5f4 chore: gitignore worktrees
+44b5c25 M1/B4 v2: keymap + hide TableCellPanel
+26df789 M1/B2: checklists specs
+4df5975 M1/B4 v1: focus-mode-ui spec
+0c052bb M1/B5: stabilization
+d08946c M1/B0 polish: barrel exports
+440096e M1/B0: schema/slot split
+77bcb4c M0/A9 iter-12 …
+```
+
+### Lane branches (safe to delete; preserved for audit trail)
+
+- `m0/hygiene-and-contracts` — merged
+- `m1/b0-schema-slot-split` — merged
+- `m1/b1-chips` — merged (via 1faddb8)
+- `m1/b1-chips-leaked` — superseded by `m1/b1-chips`
+- `m1/b2-checklists` — merged
+- `m1/b3-autosave` — merged (files pulled via checkout into 683b051)
+- `m1/b4-focus-mode` — merged
+- `m1/b5-stabilization` — merged
+
+### Agent worktrees
+
+`.claude/worktrees/agent-*` — three worktrees from this session. Gitignored.
+Safe to `git worktree remove`.
 
 ## Next steps (post-consolidation)
 
-In rough priority order:
+In priority order:
 
-1. **Finish B1 chips.** Fix the `setMeta` type error in `chip.ts:83`, write
-   proconsult-B1, address findings, merge.
-2. **Finish B3 autosave.** Debug why the e2e indicator doesn't appear (likely
-   the autosave-indicator panel isn't subscribing to editor transactions in
-   the live render; check `useEffect` deps + Editor ref stability). Then
-   proconsult-B3, merge.
-3. **Phase 0 gate verification.** With B1 done, run full Phase 0 acceptance
-   per agents.md (rich text + outline + markdown + images + tables +
-   checklists + autosave + focus + chips). Document on `plan.md`.
-4. **Begin M2 lanes** (per plan.md DAG): C2 is the hub (history ops shape) —
-   it must commit before C1/C3/C4/C5 fork. C2 + C1 + offline (C6) own the
-   apps/realtime-gateway service, which doesn't exist yet — needs scaffolding.
-5. **Repo governance follow-ups:**
-   - Add a git remote + branch protection (currently local-only, tracked under
-     lash-a5).
-   - Bind CODEOWNERS to real GitHub teams.
-   - Untrack `test-results/.last-run.json` artifacts on a fresh local CI run.
+1. **proconsult retrospectively for B1 + B3.** The two agent-driven lanes
+   were merged without the per-lane proconsult-merge cycle that the other
+   lanes received. They're test-passing but their architecture hasn't been
+   independently reviewed. Spawn:
+   - `lash-m1-b1-chips` proconsult on `packages/editor-core/src/extensions/chip.ts`
+     + chip schema + 3 chip specs.
+   - `lash-m1-b3-autosave` proconsult on `apps/web/lib/autosave.ts` +
+     `AutosaveIndicator.tsx` + autosave-indicator e2e + autosave-latency unit.
+2. **Begin M2 lanes.** Per plan.md DAG: **C2** is the hub (history ops shape).
+   It must commit before C1/C3/C4/C5 fork. C2 + C1 + offline (C6) own the
+   `apps/realtime-gateway` service — needs scaffolding.
+3. **Repo governance follow-ups (tracked under lash-a5):**
+   - Configure git remote + branch protection on `main`.
+   - Bind `CODEOWNERS` to real GitHub teams.
+   - Untrack any test-results artifacts that creep back in.
 
-## Cleanup checklist (run before next session)
+## Known small follow-ups
+
+- `pnpm-lock.yaml` updated for the new `packages/rbac` workspace entry.
+- Chip extension stores `href` as a private attr alongside `refId`. D2 (chips
+  advanced) may want to derive `href` from `refId` instead.
+- B1 → image-resize fix propagation: the chip agent noted main has the
+  one-line fix at `aa019fc` that hadn't been on its branch base. Resolved
+  by main's merge order — no action needed.
+- The image-resize editor-ready wait was added to fix a parallel-run flake;
+  consider adding the same to other image specs for robustness (P2).
+- IME composition guard for autosave (`ime-autosave` test ID) is a B3 →
+  M5/F2 dependency; not implemented yet — current hook fires on every
+  transaction including IME-in-progress.
+
+## Cleanup checklist for next session
 
 ```bash
-git worktree list                              # see worktrees
-git worktree remove .claude/worktrees/agent-*  # if agents are done
+git worktree list
+git worktree remove .claude/worktrees/agent-a3c141edd3fce9a88
+git worktree remove .claude/worktrees/agent-a80c931312432b4d2
+git worktree remove .claude/worktrees/agent-a1f4ecfca4d56b221
+
 git branch -d m0/hygiene-and-contracts m1/b0-schema-slot-split \
-              m1/b2-checklists m1/b4-focus-mode m1/b5-stabilization
-# Keep m1/b1-chips-leaked until B1 lane resumes.
+              m1/b1-chips m1/b1-chips-leaked m1/b2-checklists \
+              m1/b3-autosave m1/b4-focus-mode m1/b5-stabilization
 ```
