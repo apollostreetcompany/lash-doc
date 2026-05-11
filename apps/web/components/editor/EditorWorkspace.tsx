@@ -96,6 +96,14 @@ export function EditorWorkspace() {
         image: {
           uploader: imageUploader,
         },
+        chips: {
+          // Mock chip resolver — returns a deterministic title for any
+          // lash.local/doc/<id> URL. Real implementation lands in D2.
+          resolveDocChip: async (docId) => ({
+            title: `Internal Doc ${docId}`,
+            lastEditor: 'Test User',
+          }),
+        },
       }),
     [handleLinkCommand, outlinePersistence, imageUploader],
   );
