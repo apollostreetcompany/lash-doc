@@ -291,6 +291,11 @@ export function EditorWorkspace() {
   // not editor state, and we need to toggle it regardless of editor focus.
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
+      // IME composition guard: keyCode === 229 covers older runtimes where
+      // isComposing can be false during composition (MDN recommendation).
+      if (event.isComposing || event.keyCode === 229) return;
+      // Holding the shortcut shouldn't flip focus mode repeatedly.
+      if (event.repeat) return;
       if (!event.shiftKey) return;
       const isModifier = event.metaKey || event.ctrlKey;
       if (!isModifier) return;
