@@ -25,6 +25,13 @@ export interface OutlineItem {
 }
 
 interface OutlinePluginState {
+  /** Intent set — every heading ID the user has chosen to collapse, even if
+   *  the corresponding heading is not yet present in the current doc (e.g.
+   *  after a fresh editor mount before `setContent`). Persisted as-is to
+   *  localStorage so collapse survives page reload + reload-of-content. */
+  collapsedIntent: Set<string>;
+  /** Filtered set — `collapsedIntent ∩ currentHeadingIds`. Used to compute
+   *  hidden decorations and the outline `.collapsed` flag. */
   collapsed: Set<string>;
   outline: OutlineItem[];
   decorations: DecorationSet;
@@ -169,12 +176,13 @@ const createHiddenDecorations = (doc: ProseMirrorNode, ranges: Array<{ from: num
 
 const computeOutlineState = (
   doc: ProseMirrorNode,
-  collapsed: Set<string>,
-): { collapsed: Set<string>; outline: OutlineItem[]; decorations: DecorationSet } => {
-  const { outline, collapsed: filteredCollapsed } = computeOutlineItems(doc, collapsed);
+  collapsedIntent: Set<string>,
+): OutlinePluginState => {
+  const { outline, collapsed: filteredCollapsed } = computeOutlineItems(doc, collapsedIntent);
   const hiddenRanges = buildHiddenRanges(doc, outline, filteredCollapsed);
   const decorations = createHiddenDecorations(doc, hiddenRanges);
   return {
+    collapsedIntent,
     collapsed: filteredCollapsed,
     outline,
     decorations,
@@ -214,19 +222,22 @@ const createOutlinePlugin = (config: OutlinePluginConfig) =>
         return computeOutlineState(state.doc, initialIds);
       },
       apply(tr, prevState) {
-        let collapsed = prevState.collapsed;
+        let collapsedIntent = prevState.collapsedIntent;
         const meta = tr.getMeta(OUTLINE_PLUGIN_KEY) as OutlineMeta | undefined;
         if (meta?.type === 'set-collapsed') {
-          collapsed = new Set(meta.collapsedIds);
+          collapsedIntent = new Set(meta.collapsedIds);
         }
         if (!tr.docChanged && !meta) {
           return prevState;
         }
-        const nextState = computeOutlineState(tr.doc, collapsed);
+        const nextState = computeOutlineState(tr.doc, collapsedIntent);
+        // Persist the INTENT set, not the filtered visible set, so collapse
+        // survives a page reload + setContent reload. (Filtering against
+        // currentHeadingIds happens at render time.)
         const shouldPersist =
-          meta?.type === 'set-collapsed' || !setsEqual(prevState.collapsed, nextState.collapsed);
+          meta?.type === 'set-collapsed' || !setsEqual(prevState.collapsedIntent, nextState.collapsedIntent);
         if (shouldPersist) {
-          config.persistence?.save(config.documentId, Array.from(nextState.collapsed));
+          config.persistence?.save(config.documentId, Array.from(nextState.collapsedIntent));
         }
         return nextState;
       },
@@ -262,7 +273,10 @@ export const OutlineManager = Extension.create<{ persistence?: OutlinePersistenc
             if (!pluginState) {
               return false;
             }
-            const collapsed = new Set(pluginState.collapsed);
+            // Toggle against the INTENT set so the persisted state includes
+            // headings the user collapsed even if they aren't currently in
+            // the doc (e.g. between reloads of the same document).
+            const collapsed = new Set(pluginState.collapsedIntent);
             let collapsedNow = false;
             if (collapsed.has(headingId)) {
               collapsed.delete(headingId);
@@ -298,7 +312,10 @@ export const OutlineManager = Extension.create<{ persistence?: OutlinePersistenc
             if (!pluginState) {
               return false;
             }
-            if (!pluginState.collapsed.size) {
+            // Check INTENT — `collapsed` is the filtered visible set; if the
+            // user has collapsed headings that aren't currently in the doc
+            // (e.g. between reloads), expand-all should clear those too.
+            if (!pluginState.collapsedIntent.size) {
               return true;
             }
             if (dispatch) {

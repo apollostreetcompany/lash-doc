@@ -316,9 +316,21 @@ const createUploadManager = (options: LashImageOptions): UploadManager => {
         return true;
       },
       handleDrop(view, event) {
-        const files = Array.from(event.dataTransfer?.files ?? []).filter((file) =>
-          file.type.startsWith('image/'),
-        );
+        // Some synthetic DragEvent payloads (Playwright tests, programmatic
+        // DataTransfer) populate `items` but not `files`. Read from both,
+        // preferring `files` when populated, otherwise extracting from items.
+        const dt = event.dataTransfer;
+        const candidates: File[] = Array.from(dt?.files ?? []);
+        if (!candidates.length && dt?.items) {
+          for (let i = 0; i < dt.items.length; i += 1) {
+            const item = dt.items[i];
+            if (item.kind === 'file') {
+              const f = item.getAsFile();
+              if (f) candidates.push(f);
+            }
+          }
+        }
+        const files = candidates.filter((file) => file.type.startsWith('image/'));
         if (!files.length) {
           return false;
         }

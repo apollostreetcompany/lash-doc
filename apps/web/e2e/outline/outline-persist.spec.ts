@@ -11,6 +11,14 @@ const SAMPLE_DOCUMENT = `
 `;
 
 const loadDocument = async (page: Page) => {
+  // Wait until the EditorWorkspace effect has bound `__lashEditor`, otherwise
+  // the setContent call below is a no-op against an undefined editor.
+  await page.waitForFunction(() => {
+    return Boolean(
+      (window as unknown as { __lashEditor?: unknown }).__lashEditor,
+    );
+  });
+
   await page.evaluate((html) => {
     const editor = (window as unknown as { __lashEditor?: { commands: { setContent: (content: string) => void } } }).__lashEditor;
     editor?.commands.setContent(html);
@@ -38,7 +46,7 @@ test.describe('outline-persist', () => {
     expect(headingId).toBeTruthy();
 
     await page.getByTestId(`outline-toggle-${headingId}`).click();
-    await expect(page.locator(`[data-heading-id="${headingId}"]`)).toHaveAttribute('data-collapsed', 'true');
+    await expect(page.locator(`.outline-entry[data-heading-id="${headingId}"]`)).toHaveAttribute('data-collapsed', 'true');
 
     await page.reload();
     await page.waitForLoadState('domcontentloaded');
@@ -48,6 +56,6 @@ test.describe('outline-persist', () => {
 
     const alphaParagraph = page.getByText('Alpha body one.', { exact: true });
     await expect(alphaParagraph).not.toBeVisible();
-    await expect(page.locator(`[data-heading-id="${headingId}"]`)).toHaveAttribute('data-collapsed', 'true');
+    await expect(page.locator(`.outline-entry[data-heading-id="${headingId}"]`)).toHaveAttribute('data-collapsed', 'true');
   });
 });

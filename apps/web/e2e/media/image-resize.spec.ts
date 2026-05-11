@@ -1,11 +1,13 @@
 import { expect, test } from '@playwright/test';
 
+// 1×1 transparent PNG — known-valid base64 (same fixture as image-clipboard).
 const BASE64_PNG =
-  'iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAAAP0lEQVR42mNkYGD4z0AEwDiq4T8DA8P/TxgwGAqkBpwGIg2MhiGEmQBUCzEWwhhG0QwDIjAIg0jAEAI4oBuFdc61UAAAAASUVORK5CYII=';
+  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M/wHwAE/wJ/lEpi/AAAAABJRU5ErkJggg==';
 
 const pasteImage = async (page: import('@playwright/test').Page) => {
   await page.evaluate(([base64]) => {
-    const host = document.querySelector('[data-testid="lash-editor-content"]');
+    // ProseMirror only listens for paste on its own contenteditable element.
+    const host = document.querySelector('.ProseMirror');
     if (!host) {
       return;
     }

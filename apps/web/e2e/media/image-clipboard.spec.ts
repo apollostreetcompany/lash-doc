@@ -5,7 +5,10 @@ const BASE64_PNG =
 
 const pasteImage = async (page: import('@playwright/test').Page) => {
   await page.evaluate(([base64]) => {
-    const editorHost = document.querySelector('[data-testid="lash-editor-content"]');
+    // ProseMirror only listens for paste/drop on its own contenteditable
+    // element (.ProseMirror). The wrapper [data-testid="lash-editor-content"]
+    // is a parent div that does not receive these handlers.
+    const editorHost = document.querySelector('.ProseMirror');
     if (!editorHost) {
       return;
     }

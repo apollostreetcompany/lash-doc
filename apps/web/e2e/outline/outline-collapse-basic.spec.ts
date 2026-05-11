@@ -13,6 +13,12 @@ const SAMPLE_DOCUMENT = `
 `;
 
 const loadDocument = async (page: Page) => {
+  await page.waitForFunction(() => {
+    return Boolean(
+      (window as unknown as { __lashEditor?: unknown }).__lashEditor,
+    );
+  });
+
   await page.evaluate((html) => {
     const editor = (window as unknown as { __lashEditor?: { commands: { setContent: (content: string) => void } } }).__lashEditor;
     editor?.commands.setContent(html);
@@ -47,7 +53,7 @@ test.describe('outline-collapse-basic', () => {
 
     await expect(alphaParagraph).not.toBeVisible();
 
-    const outlineEntry = page.locator(`[data-heading-id="${headingId}"]`);
+    const outlineEntry = page.locator(`.outline-entry[data-heading-id="${headingId}"]`);
     await expect(outlineEntry).toHaveAttribute('data-collapsed', 'true');
     await expect(page.getByTestId(`outline-toggle-${headingId}`)).toHaveAttribute('aria-expanded', 'false');
 

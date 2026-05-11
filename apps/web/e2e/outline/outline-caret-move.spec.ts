@@ -11,6 +11,12 @@ const SAMPLE_DOCUMENT = `
 `;
 
 const loadDocument = async (page: Page) => {
+  await page.waitForFunction(() => {
+    return Boolean(
+      (window as unknown as { __lashEditor?: unknown }).__lashEditor,
+    );
+  });
+
   await page.evaluate((html) => {
     const editor = (window as unknown as { __lashEditor?: { commands: { setContent: (content: string) => void } } }).__lashEditor;
     editor?.commands.setContent(html);
@@ -89,7 +95,7 @@ test.describe('outline-caret-move', () => {
 
     expect(selectionInfo).toBeTruthy();
     expect(selectionInfo!.slice).toContain(headingData!.betaTitle);
-    await expect(page.locator(`[data-heading-id="${headingData!.alphaId}"]`)).toHaveAttribute('data-collapsed', 'true');
+    await expect(page.locator(`.outline-entry[data-heading-id="${headingData!.alphaId}"]`)).toHaveAttribute('data-collapsed', 'true');
     await expect(page.getByText('Alpha body one.', { exact: true })).not.toBeVisible();
   });
 });

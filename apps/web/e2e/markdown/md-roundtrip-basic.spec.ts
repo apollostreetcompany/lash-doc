@@ -13,9 +13,12 @@ test.describe('md-roundtrip-basic', () => {
     await expect(heading).toBeVisible();
     await expect(page.getByRole('heading', { level: 2, name: 'Tasks' })).toBeVisible();
 
-    await expect(page.locator('ul[data-type="taskList"] li')).toHaveCount(2);
-    await expect(page.locator('ol li')).toHaveCount(2);
-    await expect(page.locator('img[alt="Architectural Diagram"]')).toBeVisible();
+    // Scope counts to the editor content; the outline panel renders an
+    // <ol class="outline-list"> with 3 heading entries which would otherwise
+    // be double-counted against `ol li`.
+    await expect(page.locator('.lash-editor-content ul[data-type="taskList"] li')).toHaveCount(2);
+    await expect(page.locator('.lash-editor-content ol li')).toHaveCount(2);
+    await expect(page.locator('.lash-editor-content img[alt="Architectural Diagram"]')).toBeVisible();
 
     const downloadPromise = page.waitForEvent('download');
     await page.getByTestId('markdown-export-button').click();

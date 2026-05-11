@@ -11,8 +11,11 @@ test.describe('md-table-import', () => {
 
     const table = page.locator('.lash-editor-content table');
     await expect(table).toBeVisible();
-    await expect(table.locator('thead tr th')).toHaveCount(2);
-    await expect(table.locator('tbody tr')).toHaveCount(3);
+    // TipTap's default table renders all rows in <tbody>; GFM header rows
+    // emit <th> cells in the first row but no separate <thead>. Assert
+    // structural shape (1 header row of <th> + 3 body rows of <td>).
+    await expect(table.locator('tr').first().locator('th')).toHaveCount(2);
+    await expect(table.locator('tr')).toHaveCount(4);
 
     const docHasTable = await page.evaluate(() => {
       const editor = (window as unknown as {
