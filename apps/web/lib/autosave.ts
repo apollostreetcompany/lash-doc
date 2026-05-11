@@ -71,9 +71,7 @@ const DEFAULT_DEBOUNCE_MS = 500;
  *   - Concurrent flushes are coalesced — if a save is in-flight when notify()
  *     fires again, the next save is rescheduled (no overlap).
  */
-export function createAutosaveScheduler(
-  opts: AutosaveSchedulerOptions,
-): AutosaveSchedulerHandle {
+export function createAutosaveScheduler(opts: AutosaveSchedulerOptions): AutosaveSchedulerHandle {
   const debounceMs = opts.debounceMs ?? DEFAULT_DEBOUNCE_MS;
   const now = opts.now ?? (() => new Date());
 
@@ -201,8 +199,14 @@ export function useAutosave(
   editor: Editor | null,
   opts: UseAutosaveOptions = {},
 ): UseAutosaveResult {
-  const [status, setStatus] = useState<AutosaveStatus>('idle');
-  const [lastSavedAt, setLastSavedAt] = useState<string | null>(null);
+  // Use a single state object so `status` and `lastSavedAt` always commit
+  // together. React 18 auto-batches multiple setters, but a single state
+  // shape makes the invariant impossible to violate (status='saved' with
+  // null lastSavedAt would be a render-tearing bug otherwise).
+  const [state, setState] = useState<{
+    status: AutosaveStatus;
+    lastSavedAt: string | null;
+  }>({ status: 'idle', lastSavedAt: null });
   const schedulerRef = useRef<AutosaveSchedulerHandle | null>(null);
 
   // Keep the latest onSave in a ref so we don't re-subscribe on every render.
@@ -214,7 +218,7 @@ export function useAutosave(
   useEffect(() => {
     if (!editor) {
       schedulerRef.current = null;
-      setStatus('idle');
+      setState({ status: 'idle', lastSavedAt: null });
       return;
     }
 
@@ -230,8 +234,12 @@ export function useAutosave(
         }
       },
       onStatusChange: (next, ctx) => {
-        setStatus(next);
-        setLastSavedAt(ctx.savedAt);
+        setState((prev) => ({
+          status: next,
+          // Preserve the prior timestamp when transitioning into states that
+          // don't carry one (e.g. 'pending' before the first save lands).
+          lastSavedAt: ctx.savedAt ?? prev.lastSavedAt,
+        }));
       },
     });
     schedulerRef.current = scheduler;
@@ -251,23 +259,23 @@ export function useAutosave(
     if (typeof window === 'undefined') return;
     if (opts.exposeOnWindow === false) return;
     window.__lashAutosave = {
-      status,
-      lastSavedAt,
+      status: state.status,
+      lastSavedAt: state.lastSavedAt,
       flush: async () => {
         await schedulerRef.current?.flush();
       },
     };
     return () => {
       if (typeof window === 'undefined') return;
-      if (window.__lashAutosave?.status === status) {
+      if (window.__lashAutosave?.status === state.status) {
         delete window.__lashAutosave;
       }
     };
-  }, [status, lastSavedAt, opts.exposeOnWindow]);
+  }, [state.status, state.lastSavedAt, opts.exposeOnWindow]);
 
   return {
-    status,
-    lastSavedAt,
+    status: state.status,
+    lastSavedAt: state.lastSavedAt,
     flush: async () => {
       await schedulerRef.current?.flush();
     },

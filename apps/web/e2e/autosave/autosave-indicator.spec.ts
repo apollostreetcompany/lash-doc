@@ -12,15 +12,17 @@ import { expect, test } from '@playwright/test';
  * persistence callback.
  */
 test.describe('autosave-indicator', () => {
-  test('shows "All changes saved" within ~500 ms of idle and exposes snapshot', async ({ page }) => {
+  test('shows "All changes saved" within ~500 ms of idle and exposes snapshot', async ({
+    page,
+  }) => {
     await page.goto('/');
 
     const editorContent = page.getByTestId('lash-editor-content');
     await editorContent.click();
 
     // Wait for the editor to be ready before typing.
-    await page.waitForFunction(
-      () => Boolean((window as unknown as { __lashEditor?: unknown }).__lashEditor),
+    await page.waitForFunction(() =>
+      Boolean((window as unknown as { __lashEditor?: unknown }).__lashEditor),
     );
 
     // Clear any prior save state so we observe the new save cleanly.
@@ -30,7 +32,7 @@ test.describe('autosave-indicator', () => {
 
     await page.keyboard.type('Autosave smoke test');
 
-    // The hook debounces 500 ms after the last keystroke; allow up to ~2 s
+    // The hook debounces 500 ms after the last keystroke; allow up to ~2.5 s
     // before asserting visibility (e2e SLO budget for the H.1 acceptance,
     // generous to cover Playwright + CI scheduler jitter).
     const indicator = page.getByTestId('autosave-indicator');
@@ -38,8 +40,11 @@ test.describe('autosave-indicator', () => {
     await expect(indicator).toContainText(/saved/i, { timeout: 2_500 });
 
     // Hover tooltip = absolute ISO timestamp recorded at save time.
-    const titleAttr = await indicator.getAttribute('title');
-    expect(titleAttr).toMatch(/\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/);
+    // Poll the title attribute — React may commit `status` and `lastSavedAt`
+    // in separate frames depending on scheduler timing.
+    await expect(indicator).toHaveAttribute('title', /\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/, {
+      timeout: 2_500,
+    });
 
     // The save callback wrote the doc snapshot to window.__lashLastSave.
     const lastSave = await page.evaluate(() => {
