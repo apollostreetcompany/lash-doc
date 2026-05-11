@@ -1,6 +1,13 @@
 export type { HeadingLevel, ToolbarCommandId } from './commands';
 export { lashCommands, runToolbarCommand } from './commands';
-export type { LashSchemaOptions } from './schema';
+export type {
+  LashSchemaOptions,
+  LashEditorOptions,
+  LashChipOptions,
+  LashMentionOptions,
+  LashSuggestOptions,
+  LashAiSchemaOptions,
+} from './schema';
 export { createLashEditorExtensions } from './schema';
 export type { ToolbarButtonSpec } from './toolbar';
 export { toolbarButtons, toolbarGroups, runToolbarAction, isToolbarButtonActive } from './toolbar';
