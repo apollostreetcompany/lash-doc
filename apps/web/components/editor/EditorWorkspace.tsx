@@ -286,6 +286,22 @@ export function EditorWorkspace() {
     setIsFocusMode((value) => !value);
   }, []);
 
+  // Cmd/Ctrl+Shift+F binding per agents.md keymap. Listening at the shell
+  // level (not via a TipTap extension) because focus mode is React state,
+  // not editor state, and we need to toggle it regardless of editor focus.
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (!event.shiftKey) return;
+      const isModifier = event.metaKey || event.ctrlKey;
+      if (!isModifier) return;
+      if (event.key !== 'F' && event.key !== 'f') return;
+      event.preventDefault();
+      setIsFocusMode((value) => !value);
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, []);
+
   const handleImportMarkdown = useCallback(() => {
     fileInputRef.current?.click();
   }, []);
@@ -368,7 +384,7 @@ export function EditorWorkspace() {
             onClick={handleToolbarClick}
           />
 
-          {isEditorReady && activeTableCell ? (
+          {isEditorReady && activeTableCell && !isFocusMode ? (
             <TableCellPanel
               active={activeTableCell}
               onSetCellType={handleSetTableCellType}

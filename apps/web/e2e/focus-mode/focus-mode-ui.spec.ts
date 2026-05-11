@@ -43,5 +43,48 @@ test.describe('focus-mode-ui', () => {
     await expect(toolbar).toBeVisible();
     await expect(outline).toHaveCount(1);
     await expect(shell).toHaveAttribute('data-focus-mode', 'false');
+
+    // Keyboard shortcut (agents.md keymap: Cmd/Ctrl+Shift+F) toggles focus mode.
+    const modKey = process.platform === 'darwin' ? 'Meta' : 'Control';
+    await page.keyboard.press(`${modKey}+Shift+F`);
+    await expect(shell).toHaveAttribute('data-focus-mode', 'true');
+    await expect(toggle).toHaveAttribute('aria-pressed', 'true');
+    await page.keyboard.press(`${modKey}+Shift+F`);
+    await expect(shell).toHaveAttribute('data-focus-mode', 'false');
+    await expect(toggle).toHaveAttribute('aria-pressed', 'false');
+  });
+
+  test('hides the active TableCellPanel when focus mode is on', async ({ page }) => {
+    await page.goto('/');
+    await page.waitForFunction(() =>
+      Boolean((window as unknown as { __lashEditor?: unknown }).__lashEditor),
+    );
+
+    // Insert a table and select a cell so TableCellPanel mounts.
+    await page.evaluate(() => {
+      const win = window as unknown as {
+        __lashInsertTable?: (rows?: number, cols?: number) => void;
+        __lashSelectTableCells?: (anchorRow: number, anchorCol: number) => boolean;
+      };
+      win.__lashInsertTable?.(2, 2);
+      win.__lashSelectTableCells?.(0, 0);
+    });
+
+    const tableCellPanel = page.locator('.lash-table-panel');
+    await expect(tableCellPanel).toBeVisible();
+
+    await page.getByTestId('focus-mode-toggle').click();
+    await expect(tableCellPanel).toHaveCount(0);
+
+    // a11y: the editor region inside the shell is still exposed by role.
+    // (The page also has a top-level <section aria-label="Document editor">;
+    // we scope to the editor-content wrapper to avoid the strict-mode match.)
+    await expect(page.locator('.lash-editor-content-wrapper')).toBeVisible();
+
+    // (Verifying re-show after exiting focus mode requires re-establishing
+    // the cell selection — clicking the toggle button moves browser focus
+    // out of the editor. The hide-on-toggle behavior above is the P1
+    // contract; re-show is implicit via the existing useEffect that
+    // updates activeTableCell from selectionUpdate.)
   });
 });
