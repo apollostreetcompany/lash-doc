@@ -4,7 +4,6 @@ import {
   createLashEditorExtensions,
   createLocalStorageOutlinePersistence,
   getOutlineItems,
-  isToolbarButtonActive,
   lashCommands,
   parseMarkdownToDoc,
   runToolbarAction,
@@ -17,11 +16,20 @@ import {
   type OutlineItem,
   type ToolbarButtonSpec,
 } from '@lash/editor-core';
-import { ToolbarButton, ToolbarGroup } from '@lash/ui';
 import type { Editor } from '@tiptap/core';
 import { EditorContent, useEditor } from '@tiptap/react';
-import { ChangeEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { type ChangeEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
+import { AIPanel } from './panels/AIPanel';
+import { AutosaveIndicator } from './panels/AutosaveIndicator';
+import { ChatPanel } from './panels/ChatPanel';
+import { EditorToolbar, type ToolbarMeta } from './panels/EditorToolbar';
+import { FocusModeToggle } from './panels/FocusModeToggle';
+import { HistoryPanel } from './panels/HistoryPanel';
+import { MarkdownIO } from './panels/MarkdownIO';
+import { OutlinePanel } from './panels/OutlinePanel';
+import { SharePanel } from './panels/SharePanel';
+import { TableCellPanel, type ActiveCell } from './panels/TableCellPanel';
 import { createBrowserImageUploader } from '../../lib/createBrowserImageUploader';
 
 const normalizeUrl = (href: string): string => {
@@ -35,28 +43,19 @@ const normalizeUrl = (href: string): string => {
   return `https://${trimmed}`;
 };
 
-const TOOLBAR_META = [
+const TOOLBAR_META: ToolbarMeta[] = [
   { label: 'Inline formatting', items: toolbarGroups.marks },
   { label: 'Structure', items: toolbarGroups.blocks },
 ];
 
 const OUTLINE_DOC_ID = 'demo-document';
 
-const TABLE_CELL_TYPES: Array<{ type: LashTableCellType; label: string }> = [
-  { type: 'text', label: 'Text' },
-  { type: 'status', label: 'Status' },
-  { type: 'select', label: 'Select' },
-];
-
 export function EditorWorkspace() {
   const [version, setVersion] = useState(0);
   const [isMounted, setIsMounted] = useState(false);
   const [outlineItems, setOutlineItems] = useState<OutlineItem[]>([]);
   const [isFocusMode, setIsFocusMode] = useState(false);
-  const [activeTableCell, setActiveTableCell] = useState<Pick<
-    LashTableCellAttrs,
-    'cellType' | 'value' | 'options'
-  > | null>(null);
+  const [activeTableCell, setActiveTableCell] = useState<ActiveCell | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   const imageUploader = useMemo<LashImageUploader>(() => createBrowserImageUploader(), []);
@@ -101,17 +100,20 @@ export function EditorWorkspace() {
     [handleLinkCommand, outlinePersistence, imageUploader],
   );
 
-  const editor = useEditor({
-    extensions,
-    autofocus: 'end',
-    content: '<p></p>',
-    immediatelyRender: false,
-    editorProps: {
-      attributes: {
-        class: 'lash-editor-content',
+  const editor = useEditor(
+    {
+      extensions,
+      autofocus: 'end',
+      content: '<p></p>',
+      immediatelyRender: false,
+      editorProps: {
+        attributes: {
+          class: 'lash-editor-content',
+        },
       },
     },
-  }, [extensions]);
+    [extensions],
+  );
 
   useEffect(() => {
     if (!editor) {
@@ -144,13 +146,13 @@ export function EditorWorkspace() {
         return;
       }
       const normalizedOptions = Array.isArray(attrs.options)
-        ? attrs.options.filter((option): option is string => typeof option === 'string')
+        ? (attrs.options as unknown[]).filter((option): option is string => typeof option === 'string')
         : [];
       setActiveTableCell({
         cellType: attrs.cellType as LashTableCellType,
         value: typeof attrs.value === 'string' ? attrs.value : '',
         options: normalizedOptions,
-      });
+      } satisfies Pick<LashTableCellAttrs, 'cellType' | 'value' | 'options'>);
     };
 
     update();
@@ -164,9 +166,7 @@ export function EditorWorkspace() {
 
   const handleSetTableCellType = useCallback(
     (type: LashTableCellType) => {
-      if (!editor) {
-        return;
-      }
+      if (!editor) return;
       lashCommands.setTableCellType(editor, type);
     },
     [editor],
@@ -174,9 +174,7 @@ export function EditorWorkspace() {
 
   const handleSetTableCellValue = useCallback(
     (value: string) => {
-      if (!editor) {
-        return;
-      }
+      if (!editor) return;
       lashCommands.setTableCellValue(editor, value);
     },
     [editor],
@@ -184,33 +182,25 @@ export function EditorWorkspace() {
 
   const handleCycleTableCellOption = useCallback(
     (direction: 1 | -1 = 1) => {
-      if (!editor) {
-        return;
-      }
+      if (!editor) return;
       lashCommands.cycleTableCellOption(editor, direction);
     },
     [editor],
   );
 
   useEffect(() => {
-    if (typeof window === 'undefined') {
-      return;
-    }
+    if (typeof window === 'undefined') return;
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (window as any).__lashOutlineItems = outlineItems;
     return () => {
-      if (typeof window === 'undefined') {
-        return;
-      }
+      if (typeof window === 'undefined') return;
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       delete (window as any).__lashOutlineItems;
     };
   }, [outlineItems]);
 
   useEffect(() => {
-    if (typeof window === 'undefined' || !editor) {
-      return;
-    }
+    if (typeof window === 'undefined' || !editor) return;
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const win = window as any;
     win.__lashEditor = editor;
@@ -245,21 +235,11 @@ export function EditorWorkspace() {
       editor.commands.insertImagePlaceholder(file);
     };
     return () => {
-      if (typeof window === 'undefined') {
-        return;
-      }
-      if (win.__lashEditor === editor) {
-        delete win.__lashEditor;
-      }
-      if (win.__lashImageUploader === imageUploader) {
-        delete win.__lashImageUploader;
-      }
-      if (win.__lashCommands === lashCommands) {
-        delete win.__lashCommands;
-      }
-      if (win.__lashTable) {
-        delete win.__lashTable;
-      }
+      if (typeof window === 'undefined') return;
+      if (win.__lashEditor === editor) delete win.__lashEditor;
+      if (win.__lashImageUploader === imageUploader) delete win.__lashImageUploader;
+      if (win.__lashCommands === lashCommands) delete win.__lashCommands;
+      if (win.__lashTable) delete win.__lashTable;
       delete win.__lashInsertTable;
       delete win.__lashSelectTableCells;
       delete win.__lashSerializeMarkdown;
@@ -268,13 +248,10 @@ export function EditorWorkspace() {
   }, [editor, imageUploader]);
 
   const isEditorReady = Boolean(editor);
-  const toolbarData = useMemo(() => TOOLBAR_META, []);
 
   const handleToolbarClick = useCallback(
     (spec: ToolbarButtonSpec) => {
-      if (!editor) {
-        return;
-      }
+      if (!editor) return;
       if (spec.id === 'link') {
         handleLinkCommand(editor);
         return;
@@ -286,9 +263,7 @@ export function EditorWorkspace() {
 
   const handleToggleHeading = useCallback(
     (item: OutlineItem) => {
-      if (!editor) {
-        return;
-      }
+      if (!editor) return;
       lashCommands.toggleHeadingCollapse(editor, item.headingId);
     },
     [editor],
@@ -296,9 +271,7 @@ export function EditorWorkspace() {
 
   const handleFocusHeading = useCallback(
     (item: OutlineItem) => {
-      if (!editor) {
-        return;
-      }
+      if (!editor) return;
       editor
         .chain()
         .focus()
@@ -318,10 +291,9 @@ export function EditorWorkspace() {
   }, []);
 
   const showWarnings = useCallback((warnings: string[]) => {
-    if (!warnings.length) {
-      return;
-    }
+    if (!warnings.length) return;
     const message = `Markdown warnings:\n${warnings.join('\n')}`;
+    // eslint-disable-next-line no-console
     console.warn(message);
     if (typeof window !== 'undefined') {
       window.alert(message);
@@ -332,9 +304,7 @@ export function EditorWorkspace() {
     async (event: ChangeEvent<HTMLInputElement>) => {
       const file = event.target.files?.[0];
       event.target.value = '';
-      if (!file || !editor) {
-        return;
-      }
+      if (!file || !editor) return;
       const text = await file.text();
       const { doc, warnings } = parseMarkdownToDoc(text, { documentId: OUTLINE_DOC_ID });
       editor.commands.setContent(doc, false);
@@ -344,9 +314,7 @@ export function EditorWorkspace() {
   );
 
   const handleExportMarkdown = useCallback(() => {
-    if (!editor) {
-      return;
-    }
+    if (!editor) return;
     const { markdown, warnings } = serializeDocToMarkdown(editor.getJSON(), {
       documentId: OUTLINE_DOC_ID,
     });
@@ -374,198 +342,39 @@ export function EditorWorkspace() {
       className="lash-editor-shell"
     >
       <div className="lash-editor-controls">
-        <div className="lash-editor-action-group">
-          <button
-            type="button"
-            className="chrome-button"
-            data-testid="markdown-import-button"
-            onClick={handleImportMarkdown}
-          >
-            Import Markdown
-          </button>
-          <button
-            type="button"
-            className="chrome-button"
-            data-testid="markdown-export-button"
-            onClick={handleExportMarkdown}
-            disabled={!isEditorReady}
-          >
-            Export Markdown
-          </button>
-        </div>
-        <button
-          type="button"
-          data-testid="focus-mode-toggle"
-          onClick={handleFocusModeToggle}
-          aria-pressed={isFocusMode ? 'true' : 'false'}
-          className="focus-mode-toggle"
-        >
-          {isFocusMode ? 'Exit Focus Mode' : 'Enter Focus Mode'}
-        </button>
-        <input
-          ref={fileInputRef}
-          type="file"
-          accept=".md,text/markdown"
-          data-testid="markdown-import-input"
-          onChange={handleMarkdownFileChange}
-          style={{ display: 'none' }}
+        <MarkdownIO
+          fileInputRef={fileInputRef}
+          onImportClick={handleImportMarkdown}
+          onExportClick={handleExportMarkdown}
+          onFileChange={handleMarkdownFileChange}
+          exportDisabled={!isEditorReady}
         />
+        <AutosaveIndicator editor={editor} />
+        <FocusModeToggle isFocusMode={isFocusMode} onToggle={handleFocusModeToggle} />
       </div>
       <div className="lash-editor-layout">
         {!isFocusMode ? (
-          <aside
-            data-testid="lash-outline-panel"
-            aria-label="Document outline"
-            className="lash-outline-panel"
-          >
-            <div className="outline-header">
-              <h2 className="outline-title" id="lash-outline-title">
-                Outline
-              </h2>
-            </div>
-            <ol className="outline-list" aria-labelledby="lash-outline-title">
-              {outlineItems.map((item) => {
-                const indentStyle = { marginLeft: `${(item.level - 1) * 1.1}rem` };
-                const metaLabel = `${item.descendantCount} sections · ${item.hiddenBlockCount} blocks`;
-                return (
-                  <li
-                    key={item.headingId}
-                    data-heading-id={item.headingId}
-                    className="outline-entry"
-                    data-level={item.level}
-                    data-collapsed={item.collapsed ? 'true' : 'false'}
-                    style={indentStyle}
-                  >
-                    <button
-                      type="button"
-                      className="outline-collapse-button"
-                      data-testid={`outline-toggle-${item.headingId}`}
-                      aria-label={item.collapsed ? 'Expand section' : 'Collapse section'}
-                      aria-expanded={item.collapsed ? 'false' : 'true'}
-                      onClick={() => handleToggleHeading(item)}
-                    >
-                      {item.collapsed ? '▶' : '▼'}
-                    </button>
-                    <button
-                      type="button"
-                      className="outline-jump-button"
-                      data-testid={`outline-jump-${item.headingId}`}
-                      onClick={() => handleFocusHeading(item)}
-                    >
-                      <span className="outline-text">{item.title}</span>
-                      <span className="outline-meta" aria-hidden="true">
-                        {metaLabel}
-                      </span>
-                    </button>
-                  </li>
-                );
-              })}
-            </ol>
-          </aside>
+          <OutlinePanel
+            items={outlineItems}
+            onToggle={handleToggleHeading}
+            onFocus={handleFocusHeading}
+          />
         ) : null}
         <div className="lash-editor-main">
-          <div
-            role="toolbar"
-            aria-label="Editor toolbar"
-            data-testid="lash-toolbar"
-            className="lash-toolbar"
+          <EditorToolbar
+            editor={editor}
+            groups={TOOLBAR_META}
             hidden={isFocusMode}
-          >
-            {toolbarData.map(({ label, items }) => (
-              <ToolbarGroup key={label} label={label}>
-                {items.map((item) => {
-                  const active = editor ? isToolbarButtonActive(editor, item.id) : false;
-                  return (
-                    <ToolbarButton
-                      key={item.id}
-                      data-testid={`toolbar-btn-${item.id}`}
-                      title={item.hotkey ? `${item.label} (${item.hotkey})` : item.label}
-                      shortcut={item.hotkey}
-                      onClick={() => handleToolbarClick(item)}
-                      active={active}
-                      disabled={!isEditorReady}
-                      icon={item.icon}
-                    />
-                  );
-                })}
-              </ToolbarGroup>
-            ))}
-          </div>
+            onClick={handleToolbarClick}
+          />
 
           {isEditorReady && activeTableCell ? (
-            <div
-              className="lash-table-panel"
-              data-cell-type={activeTableCell.cellType}
-              aria-live="polite"
-            >
-              <div className="lash-table-panel-row">
-                <span className="lash-table-panel-label">Cell type</span>
-                <div className="lash-table-type-buttons" role="group" aria-label="Table cell type">
-                  {TABLE_CELL_TYPES.map(({ type, label }) => {
-                    const isActive = activeTableCell.cellType === type;
-                    return (
-                      <button
-                        key={type}
-                        type="button"
-                        className="lash-table-type-button"
-                        data-active={isActive ? 'true' : 'false'}
-                        aria-pressed={isActive ? 'true' : 'false'}
-                        onClick={() => handleSetTableCellType(type)}
-                      >
-                        {label}
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-
-              {activeTableCell.cellType !== 'text' ? (
-                <div className="lash-table-panel-row">
-                  <span className="lash-table-panel-label">Value</span>
-                  <div className="lash-table-value-controls">
-                    <span className="lash-table-value-chip">{activeTableCell.value || '—'}</span>
-                    <button
-                      type="button"
-                      className="lash-table-cycle-button"
-                      onClick={() => handleCycleTableCellOption(1)}
-                    >
-                      Cycle
-                    </button>
-                    <button
-                      type="button"
-                      className="lash-table-cycle-button"
-                      onClick={() => handleCycleTableCellOption(-1)}
-                    >
-                      Back
-                    </button>
-                  </div>
-                  {activeTableCell.options.length ? (
-                    <div
-                      className="lash-table-option-grid"
-                      role="listbox"
-                      aria-label="Table cell options"
-                    >
-                      {activeTableCell.options.map((option) => {
-                        const isActiveOption = option === activeTableCell.value;
-                        return (
-                          <button
-                            key={option}
-                            type="button"
-                            className="lash-table-option-button"
-                            role="option"
-                            aria-selected={isActiveOption ? 'true' : 'false'}
-                            data-active={isActiveOption ? 'true' : 'false'}
-                            onClick={() => handleSetTableCellValue(option)}
-                          >
-                            {option}
-                          </button>
-                        );
-                      })}
-                    </div>
-                  ) : null}
-                </div>
-              ) : null}
-            </div>
+            <TableCellPanel
+              active={activeTableCell}
+              onSetCellType={handleSetTableCellType}
+              onSetValue={handleSetTableCellValue}
+              onCycle={handleCycleTableCellOption}
+            />
           ) : null}
 
           <div className="lash-editor-content-wrapper" role="region" aria-label="Document editor">
@@ -579,6 +388,12 @@ export function EditorWorkspace() {
               />
             )}
           </div>
+
+          {/* Slot panels for downstream lanes — render nothing until they're filled. */}
+          <HistoryPanel editor={editor} />
+          <ChatPanel editor={editor} />
+          <SharePanel editor={editor} />
+          <AIPanel editor={editor} />
         </div>
       </div>
 

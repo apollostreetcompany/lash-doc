@@ -1,19 +1,43 @@
+/**
+ * @lash/editor-core/schema/base — foundational TipTap extensions for Lash.
+ *
+ * This module owns the schema pieces that EVERY editor instance needs:
+ *  - Rich-text basics (paragraph, lists, marks) via TipTap StarterKit
+ *  - Custom heading with stable IDs
+ *  - Outline plugin (collapse + persistence)
+ *  - Image upload pipeline + NodeView
+ *  - Table extensions + interaction plugin (status/select cells, Tab nav)
+ *  - Task list / task item (checklists)
+ *  - Underline + Link
+ *  - Keyboard shortcuts (Mod-b/i/u, headings, etc.)
+ *
+ * Feature-specific schema lives in sibling modules (see ./index.ts):
+ *  - ./chips.ts     — internal-link chips (M1/B1)
+ *  - ./mentions.ts  — @user/@group/@date mentions (M3/D1)
+ *  - ./suggest.ts   — track-changes marks (M4/E4)
+ *  - ./ai.ts        — AI-emitted node attrs / labels (M4/E1+E2)
+ *
+ * Lanes that add new extensions touch ONLY their own sibling module +
+ * register their builder in ./index.ts. They do NOT edit base.ts unless
+ * they're modifying a foundational extension.
+ */
+
 import { Extension, type Editor, type Extensions } from '@tiptap/core';
 import LinkExtension from '@tiptap/extension-link';
 import TaskItemExtension from '@tiptap/extension-task-item';
 import TaskListExtension from '@tiptap/extension-task-list';
 import UnderlineExtension from '@tiptap/extension-underline';
-import { Plugin, PluginKey , TextSelection } from '@tiptap/pm/state';
+import { Plugin, PluginKey, TextSelection } from '@tiptap/pm/state';
 import StarterKitExtension from '@tiptap/starter-kit';
 
-import { LashHeading } from './extensions/heading';
-import { LashImage, type LashImageUploader } from './extensions/image';
+import { LashHeading } from '../extensions/heading';
+import { LashImage, type LashImageUploader } from '../extensions/image';
 import {
   createLashTableExtensions,
   type LashTableOptions,
   createLashTableInteractionPlugin,
-} from './extensions/table';
-import { OutlineManager, type OutlinePersistenceAdapter } from './plugins/outline';
+} from '../extensions/table';
+import { OutlineManager, type OutlinePersistenceAdapter } from '../plugins/outline';
 
 export interface LashSchemaOptions {
   onRequestLink?: (editor: Editor) => boolean;
@@ -54,7 +78,7 @@ const LashKeyboardShortcuts = Extension.create<LashSchemaOptions>({
   },
 });
 
-// Table navigation extension - must use keymap plugin for proper priority
+// Table navigation extension — must use a keymap plugin for proper priority.
 const LashTableNavigation = Extension.create({
   name: 'lashTableNavigation',
   addProseMirrorPlugins() {
@@ -62,38 +86,19 @@ const LashTableNavigation = Extension.create({
       new Plugin({
         key: new PluginKey('lashTableNavigation'),
         props: {
-          handleKeyDown: (view, event) => {
-            // Only handle Tab and Shift+Tab in table cells, let everything else pass through
+          handleKeyDown: (_view, event) => {
             if (event.key !== 'Tab') {
               return false;
             }
 
             const editor = this.editor as Editor;
-
-            // Prevent default Tab behavior
             event.preventDefault();
 
             if (event.shiftKey) {
-              // Shift+Tab: go to previous cell
-              return editor.chain()
+              return editor
+                .chain()
                 .goToPreviousCell()
                 .command(({ tr, dispatch: cmdDispatch }) => {
-                  // Place cursor at end of cell content after navigation
-                  if (cmdDispatch && tr.selection) {
-                    const { $from } = tr.selection;
-                    const endPos = $from.end($from.depth);
-                    const newSelection = TextSelection.create(tr.doc, endPos);
-                    tr.setSelection(newSelection);
-                  }
-                  return true;
-                })
-                .run();
-            } else {
-              // Tab: go to next cell
-              return editor.chain()
-                .goToNextCell()
-                .command(({ tr, dispatch: cmdDispatch }) => {
-                  // Place cursor at end of cell content after navigation
                   if (cmdDispatch && tr.selection) {
                     const { $from } = tr.selection;
                     const endPos = $from.end($from.depth);
@@ -104,6 +109,19 @@ const LashTableNavigation = Extension.create({
                 })
                 .run();
             }
+            return editor
+              .chain()
+              .goToNextCell()
+              .command(({ tr, dispatch: cmdDispatch }) => {
+                if (cmdDispatch && tr.selection) {
+                  const { $from } = tr.selection;
+                  const endPos = $from.end($from.depth);
+                  const newSelection = TextSelection.create(tr.doc, endPos);
+                  tr.setSelection(newSelection);
+                }
+                return true;
+              })
+              .run();
           },
         },
       }),
@@ -111,33 +129,23 @@ const LashTableNavigation = Extension.create({
   },
 });
 
-export const createLashEditorExtensions = (options?: LashSchemaOptions): Extensions => {
+export const buildBaseExtensions = (options?: LashSchemaOptions): Extensions => {
   const outlineOptions = options?.outline ?? {};
   const imageOptions = options?.image;
 
-  const extensions: Extensions = [
+  return [
     StarterKitExtension.configure({
-      heading: false, // We use custom LashHeading instead
-      bulletList: {
-        keepMarks: true,
-        keepAttributes: true,
-      },
-      orderedList: {
-        keepMarks: true,
-        keepAttributes: true,
-      },
+      heading: false,
+      bulletList: { keepMarks: true, keepAttributes: true },
+      orderedList: { keepMarks: true, keepAttributes: true },
       strike: false,
       blockquote: false,
       codeBlock: false,
       dropcursor: false,
       gapcursor: false,
       horizontalRule: false,
-      history: {
-        depth: 500,
-      },
-      code: {
-        HTMLAttributes: { class: 'lash-inline-code' },
-      },
+      history: { depth: 500 },
+      code: { HTMLAttributes: { class: 'lash-inline-code' } },
     }),
     LashHeading.configure({ levels: [1, 2, 3] }),
     OutlineManager.configure({
@@ -164,9 +172,7 @@ export const createLashEditorExtensions = (options?: LashSchemaOptions): Extensi
     LinkExtension.configure({
       openOnClick: false,
       linkOnPaste: true,
-      HTMLAttributes: {
-        rel: 'noopener noreferrer',
-      },
+      HTMLAttributes: { rel: 'noopener noreferrer' },
     }),
     LashKeyboardShortcuts.configure(options ?? {}),
     LashTableNavigation,
@@ -177,6 +183,4 @@ export const createLashEditorExtensions = (options?: LashSchemaOptions): Extensi
       },
     }),
   ];
-
-  return extensions;
 };
