@@ -28,6 +28,13 @@ const pasteImage = async (page: import('@playwright/test').Page) => {
 test.describe('image-resize', () => {
   test('adjusts width via slider and reflects attribute', async ({ page }) => {
     await page.goto('/');
+    // Wait for editor mount before configuring the upload mock + pasting,
+    // otherwise parallel-run flake: paste dispatches before the React
+    // editor has bound __lashEditor and the upload manager is missing.
+    await page.waitForFunction(() =>
+      Boolean((window as unknown as { __lashEditor?: unknown }).__lashEditor),
+    );
+    await page.locator('.ProseMirror').waitFor({ state: 'visible' });
     await page.evaluate(() => {
       (window as unknown as { __lashImageUploadMock?: Record<string, unknown> }).__lashImageUploadMock = {
         mode: 'alwaysSucceed',
