@@ -34,6 +34,10 @@ pnpm-debug.log*
 .DS_Store
 Thumbs.db
 
+# Claude Code agent worktrees (isolated working dirs for parallel agents).
+# These are real git worktrees living under .claude/ — never commit their state.
+.claude/worktrees/
+
 # Test outputs and ephemeral artifacts
 test-results/
 playwright-report/
