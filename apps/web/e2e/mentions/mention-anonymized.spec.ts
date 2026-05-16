@@ -1,6 +1,16 @@
-import { test } from '@playwright/test';
+import { expect, test, type Page } from '@playwright/test';
 
-// Acceptance stub generated from agents.md (Test ID: mention-anonymized.spec).
-test('mention-anonymized.spec', async () => {
-  test.skip(true, 'TODO acceptance scenario for `mention-anonymized.spec`.');
+const ready = async (page: Page) =>
+  page.waitForFunction(() =>
+    Boolean((window as unknown as { __lashEditor?: unknown }).__lashEditor),
+  );
+
+test('mention-anonymized', async ({ page }) => {
+  await page.goto('/');
+  await ready(page);
+
+  await page.getByTestId('lash-editor-content').click();
+  await page.keyboard.type('@Secret');
+
+  await expect(page.getByTestId('mention-anonymized')).toHaveText('@hidden-group');
 });

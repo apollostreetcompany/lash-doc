@@ -2,7 +2,7 @@
 
 ## Current State
 
-- Branch: `codex/feat/bead-8-share-rbac-redaction`
+- Branch: `codex/feat/bead-9-mentions-dates`
 - Last bead: Bead 0 - Restore Lash release gate and process scaffolding.
 - Last bead: Bead 1 - Local MVP run path.
 - Last bead: Bead 2 - Append-only history log and deterministic replay/diff foundation.
@@ -12,7 +12,8 @@
 - Last bead: Bead 6 - Filtered diffs and local suggest-mode accept/reject.
 - Last bead: Bead 7 - Doc Chat anchored threads, context, and filters.
 - Last bead: Bead 8 - Share links, RBAC decisions, audit, and redaction.
-- Current state: Ready for mention privacy/date chips.
+- Last bead: Bead 9 - Mentions, RBAC-hidden suggestions, and natural-date chips.
+- Current state: Ready for offline queue/presence, table performance, accessibility, cross-browser, and AI patch flow beads.
 - Local MVP remains available at `http://127.0.0.1:3000` in tmux session `lash-doc-web`.
 - Product decision: Riddle is optional/deferred. Do not implement Lash-Riddle integration until Riddle stabilizes as its own product.
 
@@ -36,6 +37,9 @@
 - Implemented local share signer, memory audit/revocation stores, RBAC policy decisions, and diff redaction helpers.
 - Rendered Share panel capability/audit/redaction state for comment/suggest/edit/expired links.
 - Replaced five share and two privacy acceptance stubs with real Playwright coverage.
+- Implemented local user/group mention providers through `@lash/rbac`, with hidden entities rendered only as anonymized tokens.
+- Added deterministic natural-date parsing for `@next Friday 3pm` with locale/timezone display and ISO storage.
+- Rendered a local Mention panel with suggestions and chips, and replaced five mention acceptance stubs with real Playwright coverage.
 
 ## Validation To Run
 
@@ -97,9 +101,17 @@
 - `pnpm run test:e2e` - pass, 52 passed, 23 skipped.
 - `make serve` - pass after Bead 8.
 - `make status` - pass after Bead 8; app running at `http://127.0.0.1:3000`.
+- `pnpm run lint` - pass after Bead 9.
+- `pnpm run typecheck` - pass after Bead 9.
+- `pnpm run test:unit` - pass, 60 passed, 7 todo/skipped.
+- `pnpm --filter @lash/web build` - pass after Bead 9.
+- `pnpm playwright test apps/web/e2e/mentions/mention-suggest.spec.ts apps/web/e2e/mentions/mention-insert.spec.ts apps/web/e2e/mentions/mention-rbac-hide.spec.ts apps/web/e2e/mentions/mention-anonymized.spec.ts apps/web/e2e/mentions/mention-privacy.spec.ts --workers=1` - pass, 5 passed.
+- `pnpm run test:e2e` - pass, 57 passed, 18 skipped.
+- `make serve` - pass after Bead 9.
+- `make status` - pass after Bead 9; app running at `http://127.0.0.1:3000`.
 
 ## Open Items
 
 - GitHub branch protection is UNCONFIRMED.
-- Next implementation bead should wire mention privacy/date chips.
+- Next implementation bead should target one of the remaining skipped areas: offline queue/presence, table perf, accessibility, cross-browser, or AI patch flow.
 - Use `make stop` to stop the local Lash server.

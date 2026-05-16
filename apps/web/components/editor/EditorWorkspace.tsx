@@ -30,6 +30,7 @@ import { EditorToolbar, type ToolbarMeta } from './panels/EditorToolbar';
 import { FocusModeToggle } from './panels/FocusModeToggle';
 import { HistoryPanel, type HistoryTimeFilter } from './panels/HistoryPanel';
 import { MarkdownIO } from './panels/MarkdownIO';
+import { MentionPanel } from './panels/MentionPanel';
 import { OutlinePanel } from './panels/OutlinePanel';
 import { SharePanel } from './panels/SharePanel';
 import { TableCellPanel, type ActiveCell } from './panels/TableCellPanel';
@@ -705,6 +706,7 @@ export function EditorWorkspace() {
           </div>
 
           {/* Slot panels for downstream lanes — render nothing until they're filled. */}
+          <MentionPanel editor={editor} currentText={editor ? editorText(editor) : ''} />
           <HistoryPanel
             editor={editor}
             entries={historyEntries}

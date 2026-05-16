@@ -6,7 +6,7 @@ Ship Lash v1 as the full collaborative editor spec in `agents.md`, with all acce
 
 ## Constraints/Assumptions
 
-- No direct commits to `main`; current branch `codex/feat/bead-8-share-rbac-redaction`.
+- No direct commits to `main`; current branch `codex/feat/bead-9-mentions-dates`.
 - Riddle integration is planning-only; do not touch `/Users/borker/dev/riddle`.
 - Current v1 path resumes from M2 after the Phase 0 gate is restored.
 - GitHub remote is `https://github.com/apollostreetcompany/lash-doc.git`; branch protection remains UNCONFIRMED.
@@ -19,6 +19,7 @@ Ship Lash v1 as the full collaborative editor spec in `agents.md`, with all acce
 4. Local history recording now waits for a 500 ms idle window so a normal typing session does not fragment into multiple history versions under load.
 5. Doc Chat starts as local in-memory product behavior: anchors, orphaning, context, and filters are validated before server/RBAC persistence lands.
 6. Share/RBAC starts with local signed links, capability decisions, audit events, and redaction placeholders before server persistence/API enforcement lands.
+7. Mentions/date chips start with local providers and deterministic natural-date parsing; visibility decisions route through `@lash/rbac`, hidden entities render anonymized, and no Riddle integration is introduced.
 
 ## State
 
@@ -38,14 +39,15 @@ Ship Lash v1 as the full collaborative editor spec in `agents.md`, with all acce
 - [x] Bead 6 - Filtered diffs and local suggest-mode accept/reject.
 - [x] Bead 7 - Doc Chat anchored threads, context, and filters.
 - [x] Bead 8 - Share links, RBAC decisions, audit, and redaction.
+- [x] Bead 9 - Mentions, RBAC-hidden suggestions, and natural-date chips.
 
 ### Now
 
-- Lash MVP with local history, blame gutter, filtered diffs, suggest-mode, Doc Chat anchors, and share/RBAC/redaction is running at `http://127.0.0.1:3000`; ready for mentions/date chips.
+- Lash MVP with local history, blame gutter, filtered diffs, suggest-mode, Doc Chat anchors, share/RBAC/redaction, and mention/date-chip behavior is running at `http://127.0.0.1:3000`.
 
 ### Next
 
-- Continue toward M3 with mention privacy/date chips.
+- Continue toward M3/M4 with offline queue/presence, table performance, accessibility, cross-browser, and AI patch flow.
 - Continue toward M4 with AI patch flow after doc chat/share contracts are stable.
 
 ## Open Questions
@@ -109,3 +111,12 @@ Ship Lash v1 as the full collaborative editor spec in `agents.md`, with all acce
 - `apps/web/e2e/share/share-audit.spec.ts`
 - `apps/web/e2e/privacy/history-redact.spec.ts`
 - `apps/web/e2e/privacy/chat-redact.spec.ts`
+- `packages/mentions/src/index.ts`
+- `packages/testing/unit/mentions/mention-date-parse.test.ts`
+- `packages/testing/unit/mentions/mention-date-locale.test.ts`
+- `apps/web/components/editor/panels/MentionPanel.tsx`
+- `apps/web/e2e/mentions/mention-suggest.spec.ts`
+- `apps/web/e2e/mentions/mention-insert.spec.ts`
+- `apps/web/e2e/mentions/mention-rbac-hide.spec.ts`
+- `apps/web/e2e/mentions/mention-anonymized.spec.ts`
+- `apps/web/e2e/mentions/mention-privacy.spec.ts`
