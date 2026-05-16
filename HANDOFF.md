@@ -2,10 +2,11 @@
 
 ## Current State
 
-- Branch: `codex/feat/bead-2-history-log`
+- Branch: `codex/feat/bead-3-history-ui`
 - Last bead: Bead 0 - Restore Lash release gate and process scaffolding.
 - Last bead: Bead 1 - Local MVP run path.
 - Last bead: Bead 2 - Append-only history log and deterministic replay/diff foundation.
+- Last bead: Bead 3 - Web history timeline, diff, and restore UI.
 - Current state: Ready for the next M2 bead.
 - Local MVP remains available at `http://127.0.0.1:3000` in tmux session `lash-doc-web`.
 - Product decision: Riddle is optional/deferred. Do not implement Lash-Riddle integration until Riddle stabilizes as its own product.
@@ -17,6 +18,7 @@
 - Added missing process scaffolding files required by the project rules.
 - Added local production-server scripts and Makefile targets for `make serve`, `make status`, and `make stop`.
 - Implemented M2 history foundation: append-only in-memory history store, deterministic replay/load/restore, deterministic text diff, and unit coverage.
+- Wired local history into the web editor: timeline, deterministic inserted/deleted diff spans, restore button, and real history e2e coverage.
 
 ## Validation To Run
 
@@ -38,9 +40,11 @@
 - `pnpm run test:unit` - pass, 48 passed, 11 todo/skipped.
 - `pnpm run build` - pass after stopping the local server and clearing generated `.next`.
 - `pnpm run test:e2e` - pass, 27 passed, 48 skipped.
+- `pnpm --filter @lash/web build && pnpm playwright test apps/web/e2e/history/history-open.spec.ts apps/web/e2e/history/history-diff.spec.ts apps/web/e2e/history/history-restore.spec.ts --workers=1` - pass, 3 passed.
+- `pnpm run test:e2e` - pass after Bead 3, 30 passed, 45 skipped.
 
 ## Open Items
 
 - GitHub branch protection is UNCONFIRMED.
-- Next implementation bead should wire the history foundation into the web timeline/restore UI.
+- Next implementation bead should continue M2 with authorship/blame or filtered diff integration.
 - Use `make stop` to stop the local Lash server.

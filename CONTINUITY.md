@@ -6,7 +6,7 @@ Ship Lash v1 as the full collaborative editor spec in `agents.md`, with all acce
 
 ## Constraints/Assumptions
 
-- No direct commits to `main`; current branch `codex/feat/bead-2-history-log`.
+- No direct commits to `main`; current branch `codex/feat/bead-3-history-ui`.
 - Riddle integration is planning-only; do not touch `/Users/borker/dev/riddle`.
 - Current v1 path resumes from M2 after the Phase 0 gate is restored.
 - GitHub remote is `https://github.com/apollostreetcompany/lash-doc.git`; branch protection remains UNCONFIRMED.
@@ -29,15 +29,16 @@ Ship Lash v1 as the full collaborative editor spec in `agents.md`, with all acce
 - [x] Bead 1 - Local MVP run path (`make serve`, `make status`, `make stop`).
 - [x] Verified live local editor typing/autosave against `http://127.0.0.1:3000`.
 - [x] Bead 2 - Append-only history log and deterministic replay/diff foundation.
+- [x] Bead 3 - Web history timeline, diff, and restore UI.
 
 ### Now
 
-- Lash MVP is running locally at `http://127.0.0.1:3000`; ready for the next M2 bead.
+- Lash MVP with local history UI is running at `http://127.0.0.1:3000`; ready for the next M2 bead.
 
 ### Next
 
 - Begin M2 hub: append-only history log + ops shape (`lash-c2`) after process gate is complete.
-- Continue M2 with history UI/timeline wiring, restore UI, and then authorship/diff integrations.
+- Continue M2 with authorship/blame and richer diff/filter integrations.
 
 ## Open Questions
 
@@ -64,3 +65,7 @@ Ship Lash v1 as the full collaborative editor spec in `agents.md`, with all acce
 - `packages/history/src/index.ts`
 - `packages/testing/unit/history/history-store.test.ts`
 - `packages/testing/unit/diff/diff-deterministic.test.ts`
+- `apps/web/components/editor/panels/HistoryPanel.tsx`
+- `apps/web/e2e/history/history-open.spec.ts`
+- `apps/web/e2e/history/history-diff.spec.ts`
+- `apps/web/e2e/history/history-restore.spec.ts`

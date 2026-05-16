@@ -17,11 +17,15 @@ import {
   type ActorRef,
   type DiffJSON,
   type DiffSpan,
+  type AttrChangedSpan,
+  type DeletedSpan,
   type DocumentId,
   type EditorOp,
   type HistoryAudit,
   type HistoryEntry,
+  type InsertedSpan,
   type Intent,
+  type UnchangedSpan,
 } from '@lash/types';
 
 export interface HistoryFilter {
@@ -275,7 +279,13 @@ export const createHistoryStore = (config: CreateHistoryStoreConfig = {}): Histo
 
 /** Deterministic diff between two history-rooted states. Implementation
  *  MUST be byte-identical across CI, dev, and prod (D.4 diff-deterministic). */
-const spanId = (span: Omit<DiffSpan, 'id'>, index: number): string =>
+type DiffSpanInput =
+  | Omit<UnchangedSpan, 'id'>
+  | Omit<InsertedSpan, 'id'>
+  | Omit<DeletedSpan, 'id'>
+  | Omit<AttrChangedSpan, 'id'>;
+
+const spanId = (span: DiffSpanInput, index: number): string =>
   `span:${index}:${canonicalize(span)}`;
 
 const textOf = (doc: unknown): string => toHistoryState(doc).text;
@@ -322,7 +332,7 @@ export const computeDiff = (fromSha: string, toSha: string, entries: HistoryEntr
     suffix += 1;
   }
 
-  const addSpan = (span: Omit<DiffSpan, 'id'>) => {
+  const addSpan = (span: DiffSpanInput) => {
     spans.push({ ...span, id: spanId(span, spans.length) } as DiffSpan);
   };
 

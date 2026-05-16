@@ -16,6 +16,8 @@ import {
   type OutlineItem,
   type ToolbarButtonSpec,
 } from '@lash/editor-core';
+import { EMPTY_HISTORY_DOC, createHistoryStore } from '@lash/history';
+import { createDocumentId, hashCanonical, type HistoryEntry } from '@lash/types';
 import type { Editor } from '@tiptap/core';
 import { EditorContent, useEditor } from '@tiptap/react';
 import { type ChangeEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -49,6 +51,41 @@ const TOOLBAR_META: ToolbarMeta[] = [
 ];
 
 const OUTLINE_DOC_ID = 'demo-document';
+const HISTORY_DOC_ID = createDocumentId(OUTLINE_DOC_ID);
+const HISTORY_SCHEMA_VERSION = 'lash-schema-v1';
+const HISTORY_ACTOR = { type: 'user', id: 'local-user' } as const;
+const HISTORY_AUDIT = { ua: 'lash-web/local-history' } as const;
+
+const textReplaceOp = (before: string, after: string) => {
+  let prefix = 0;
+  while (prefix < before.length && prefix < after.length && before[prefix] === after[prefix]) {
+    prefix += 1;
+  }
+  let suffix = 0;
+  while (
+    suffix < before.length - prefix &&
+    suffix < after.length - prefix &&
+    before[before.length - 1 - suffix] === after[after.length - 1 - suffix]
+  ) {
+    suffix += 1;
+  }
+  return {
+    op: 'replace_text' as const,
+    from: prefix,
+    to: before.length - suffix,
+    text: after.slice(prefix, after.length - suffix),
+  };
+};
+
+const editorText = (activeEditor: Editor): string => activeEditor.getText({ blockSeparator: '\n' });
+
+const textToContent = (text: string) => ({
+  type: 'doc',
+  content: text.split('\n').map((line) => ({
+    type: 'paragraph',
+    content: line ? [{ type: 'text', text: line }] : undefined,
+  })),
+});
 
 export function EditorWorkspace() {
   const [version, setVersion] = useState(0);
@@ -56,7 +93,15 @@ export function EditorWorkspace() {
   const [outlineItems, setOutlineItems] = useState<OutlineItem[]>([]);
   const [isFocusMode, setIsFocusMode] = useState(false);
   const [activeTableCell, setActiveTableCell] = useState<ActiveCell | null>(null);
+  const [historyEntries, setHistoryEntries] = useState<HistoryEntry[]>([]);
+  const [selectedHistoryEntryId, setSelectedHistoryEntryId] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const historyStoreRef = useRef(createHistoryStore());
+  const historyHeadRef = useRef<string | null>(null);
+  const historyTextRef = useRef('');
+  const historyQueueRef = useRef(Promise.resolve());
+  const historyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const applyingHistoryRef = useRef(false);
 
   const imageUploader = useMemo<LashImageUploader>(() => createBrowserImageUploader(), []);
 
@@ -143,6 +188,65 @@ export function EditorWorkspace() {
 
   useEffect(() => {
     if (!editor) {
+      setHistoryEntries([]);
+      setSelectedHistoryEntryId(null);
+      historyHeadRef.current = null;
+      historyTextRef.current = '';
+      historyQueueRef.current = Promise.resolve();
+      return;
+    }
+
+    let disposed = false;
+    hashCanonical(EMPTY_HISTORY_DOC).then((emptySha) => {
+      if (disposed) return;
+      historyHeadRef.current = emptySha;
+      historyTextRef.current = editorText(editor);
+    });
+
+    const recordHistory = () => {
+      if (applyingHistoryRef.current) return;
+      if (historyTimerRef.current) {
+        clearTimeout(historyTimerRef.current);
+      }
+      historyTimerRef.current = setTimeout(() => {
+        historyQueueRef.current = historyQueueRef.current.then(async () => {
+          const before = historyTextRef.current;
+          const after = editorText(editor);
+          const expectedParentSha = historyHeadRef.current;
+          if (!expectedParentSha || before === after) return;
+          const result = await historyStoreRef.current.append({
+            docId: HISTORY_DOC_ID,
+            actor: HISTORY_ACTOR,
+            expectedParentSha,
+            schemaVersion: HISTORY_SCHEMA_VERSION,
+            ops: [textReplaceOp(before, after)],
+            intent: 'edit',
+            audit: HISTORY_AUDIT,
+          });
+          if (!result.ok) return;
+          historyHeadRef.current = result.entry.resultSha;
+          historyTextRef.current = after;
+          const entries = await historyStoreRef.current.list(HISTORY_DOC_ID);
+          if (disposed) return;
+          setHistoryEntries(entries);
+          setSelectedHistoryEntryId(result.entry.id);
+        });
+      }, 120);
+    };
+
+    editor.on('transaction', recordHistory);
+    return () => {
+      disposed = true;
+      if (historyTimerRef.current) {
+        clearTimeout(historyTimerRef.current);
+        historyTimerRef.current = null;
+      }
+      editor.off('transaction', recordHistory);
+    };
+  }, [editor]);
+
+  useEffect(() => {
+    if (!editor) {
       setActiveTableCell(null);
       return;
     }
@@ -154,7 +258,9 @@ export function EditorWorkspace() {
         return;
       }
       const normalizedOptions = Array.isArray(attrs.options)
-        ? (attrs.options as unknown[]).filter((option): option is string => typeof option === 'string')
+        ? (attrs.options as unknown[]).filter(
+            (option): option is string => typeof option === 'string',
+          )
         : [];
       setActiveTableCell({
         cellType: attrs.cellType as LashTableCellType,
@@ -233,10 +339,7 @@ export function EditorWorkspace() {
     ) => selectTableCells(editor, anchorRow, anchorCol, headRow, headCol);
     win.__lashSerializeMarkdown = () =>
       serializeDocToMarkdown(editor.getJSON(), { documentId: OUTLINE_DOC_ID }).markdown;
-    win.__lashInsertImageFromArrayBuffer = async (
-      buffer: ArrayBuffer,
-      mimeType = 'image/png',
-    ) => {
+    win.__lashInsertImageFromArrayBuffer = async (buffer: ArrayBuffer, mimeType = 'image/png') => {
       const file = new File([buffer], `import-${Date.now()}.${mimeType.split('/')[1] ?? 'png'}`, {
         type: mimeType,
       });
@@ -293,6 +396,35 @@ export function EditorWorkspace() {
   const handleFocusModeToggle = useCallback(() => {
     setIsFocusMode((value) => !value);
   }, []);
+
+  const handleSelectHistoryEntry = useCallback((entryId: string) => {
+    setSelectedHistoryEntryId(entryId);
+  }, []);
+
+  const handleRestoreHistoryEntry = useCallback(
+    async (entry: HistoryEntry) => {
+      if (!editor) return;
+      const result = await historyStoreRef.current.restore(
+        HISTORY_DOC_ID,
+        entry.resultSha,
+        HISTORY_ACTOR,
+        HISTORY_AUDIT,
+      );
+      if (!result.ok) return;
+      const restored = await historyStoreRef.current.loadAt(HISTORY_DOC_ID, result.entry.resultSha);
+      const text =
+        typeof restored === 'object' && restored && 'text' in restored ? String(restored.text) : '';
+      applyingHistoryRef.current = true;
+      editor.commands.setContent(textToContent(text), false);
+      applyingHistoryRef.current = false;
+      historyHeadRef.current = result.entry.resultSha;
+      historyTextRef.current = text;
+      const entries = await historyStoreRef.current.list(HISTORY_DOC_ID);
+      setHistoryEntries(entries);
+      setSelectedHistoryEntryId(result.entry.id);
+    },
+    [editor],
+  );
 
   // Cmd/Ctrl+Shift+F binding per agents.md keymap. Listening at the shell
   // level (not via a TipTap extension) because focus mode is React state,
@@ -419,7 +551,13 @@ export function EditorWorkspace() {
           </div>
 
           {/* Slot panels for downstream lanes — render nothing until they're filled. */}
-          <HistoryPanel editor={editor} />
+          <HistoryPanel
+            editor={editor}
+            entries={historyEntries}
+            selectedEntryId={selectedHistoryEntryId}
+            onSelect={handleSelectHistoryEntry}
+            onRestore={handleRestoreHistoryEntry}
+          />
           <ChatPanel editor={editor} />
           <SharePanel editor={editor} />
           <AIPanel editor={editor} />
