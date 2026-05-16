@@ -43,7 +43,10 @@ export type Target =
  *  is a refusal with a machine-readable reason for audit. */
 export type Decision =
   | { allow: true }
-  | { allow: false; reason: 'no-access' | 'expired' | 'revoked' | 'scope-mismatch' | 'redacted' | 'rate-limited' };
+  | {
+      allow: false;
+      reason: 'no-access' | 'expired' | 'revoked' | 'scope-mismatch' | 'redacted' | 'rate-limited';
+    };
 
 export interface PolicyContext {
   /** ISO-8601 ts at decision time (used for share-link expiry checks). */
@@ -57,13 +60,40 @@ export interface PolicyEngine {
   capabilitiesForScope(scope: ShareScope): readonly Capability[];
 }
 
-export const createPolicyEngine = (_config: {
+export const createPolicyEngine = (config: {
   /** Adapter that loads share-link revocations by `jti`. */
   revocations: { isRevoked(jti: string): Promise<boolean> };
   /** Adapter that loads mention/group visibility for a user. */
   visibility: { canSee(userId: string, target: Target): Promise<boolean> };
 }): PolicyEngine => {
-  throw new Error('createPolicyEngine: not implemented (M3/D3)');
+  return {
+    capabilitiesForScope,
+    async decide(subject, cap, target, ctx) {
+      if (subject.type === 'anonymous') {
+        return { allow: false, reason: 'no-access' };
+      }
+
+      if (subject.type === 'share-link') {
+        if (subject.token.expiresAt && subject.token.expiresAt <= ctx.now) {
+          return { allow: false, reason: 'expired' };
+        }
+        if (await config.revocations.isRevoked(subject.token.jti)) {
+          return { allow: false, reason: 'revoked' };
+        }
+        return capabilitiesForScope(subject.token.scope).includes(cap)
+          ? { allow: true }
+          : { allow: false, reason: 'scope-mismatch' };
+      }
+
+      if (target.kind === 'mention' || target.kind === 'chip') {
+        return (await config.visibility.canSee(subject.id, target))
+          ? { allow: true }
+          : { allow: false, reason: 'redacted' };
+      }
+
+      return { allow: true };
+    },
+  };
 };
 
 /** Pure helper — exposed standalone so callers don't need a full engine
@@ -73,9 +103,23 @@ export const capabilitiesForScope = (scope: ShareScope): readonly Capability[] =
     case 'view':
       return ['doc.read', 'doc.history.read', 'mention.see', 'chip.preview'];
     case 'comment':
-      return ['doc.read', 'doc.history.read', 'mention.see', 'chip.preview', 'doc.comment'];
+      return [
+        'doc.read',
+        'doc.history.read',
+        'mention.see',
+        'chip.preview',
+        'doc.comment',
+        'doc.suggest',
+      ];
     case 'suggest':
-      return ['doc.read', 'doc.history.read', 'mention.see', 'chip.preview', 'doc.comment', 'doc.suggest'];
+      return [
+        'doc.read',
+        'doc.history.read',
+        'mention.see',
+        'chip.preview',
+        'doc.comment',
+        'doc.suggest',
+      ];
     case 'edit':
       return [
         'doc.read',

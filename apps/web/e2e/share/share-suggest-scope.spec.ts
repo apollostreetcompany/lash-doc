@@ -1,6 +1,11 @@
-import { test } from '@playwright/test';
+import { expect, test } from '@playwright/test';
 
-// Acceptance stub generated from agents.md (Test ID: share-suggest-scope.spec).
-test('share-suggest-scope.spec', async () => {
-  test.skip(true, 'TODO acceptance scenario for `share-suggest-scope.spec`.');
+test('share-suggest-scope', async ({ page }) => {
+  await page.goto('/');
+  await page.getByTestId('share-create-suggest').click();
+
+  await expect(page.getByTestId('share-validation')).toContainText('Access granted: suggest');
+  await expect(page.getByTestId('share-can-comment')).toContainText('yes');
+  await expect(page.getByTestId('share-can-suggest')).toContainText('yes');
+  await expect(page.getByTestId('share-can-edit')).toContainText('no');
 });

@@ -1,6 +1,10 @@
-import { test } from '@playwright/test';
+import { expect, test } from '@playwright/test';
 
-// Acceptance stub generated from agents.md (Test ID: share-audit.spec).
-test('share-audit.spec', async () => {
-  test.skip(true, 'TODO acceptance scenario for `share-audit.spec`.');
+test('share-audit', async ({ page }) => {
+  await page.goto('/');
+  await page.getByTestId('share-create-comment').click();
+
+  await expect(page.getByTestId('share-audit-count')).toContainText('2 audit events');
+  await expect(page.getByTestId('share-audit-event').first()).toContainText('share-link.created');
+  await expect(page.getByTestId('share-audit-event').last()).toContainText('share-link.access');
 });

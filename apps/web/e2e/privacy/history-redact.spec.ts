@@ -1,6 +1,8 @@
-import { test } from '@playwright/test';
+import { expect, test } from '@playwright/test';
 
-// Acceptance stub generated from agents.md (Test ID: history-redact.spec).
-test('history-redact.spec', async () => {
-  test.skip(true, 'TODO acceptance scenario for `history-redact.spec`.');
+test('history-redact', async ({ page }) => {
+  await page.goto('/');
+  await page.getByTestId('share-create-comment').click();
+
+  await expect(page.getByTestId('history-redaction')).toContainText('history redacted 1 of 1');
 });

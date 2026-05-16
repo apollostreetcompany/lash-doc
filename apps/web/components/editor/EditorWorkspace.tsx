@@ -727,7 +727,7 @@ export function EditorWorkspace() {
             baseVersion={historyHeadRef.current}
             currentText={editor ? editorText(editor) : ''}
           />
-          <SharePanel editor={editor} />
+          <SharePanel editor={editor} docId={HISTORY_DOC_ID} />
           <AIPanel editor={editor} />
         </div>
       </div>

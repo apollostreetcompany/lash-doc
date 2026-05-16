@@ -2,7 +2,7 @@
 
 ## Current State
 
-- Branch: `codex/feat/bead-7-doc-chat-anchors`
+- Branch: `codex/feat/bead-8-share-rbac-redaction`
 - Last bead: Bead 0 - Restore Lash release gate and process scaffolding.
 - Last bead: Bead 1 - Local MVP run path.
 - Last bead: Bead 2 - Append-only history log and deterministic replay/diff foundation.
@@ -11,7 +11,8 @@
 - Last bead: Bead 5 - Blame gutter UI and history filter-by-author.
 - Last bead: Bead 6 - Filtered diffs and local suggest-mode accept/reject.
 - Last bead: Bead 7 - Doc Chat anchored threads, context, and filters.
-- Current state: Ready for share/RBAC/redaction and mention privacy/date chips.
+- Last bead: Bead 8 - Share links, RBAC decisions, audit, and redaction.
+- Current state: Ready for mention privacy/date chips.
 - Local MVP remains available at `http://127.0.0.1:3000` in tmux session `lash-doc-web`.
 - Product decision: Riddle is optional/deferred. Do not implement Lash-Riddle integration until Riddle stabilizes as its own product.
 
@@ -32,6 +33,9 @@
 - Implemented local Doc Chat anchor mapping and in-memory thread store with unit coverage.
 - Rendered Doc Chat panel with selection-anchored threads, original/current context, orphan markers, and author/AI filters.
 - Replaced six Doc Chat acceptance stubs with real Playwright coverage.
+- Implemented local share signer, memory audit/revocation stores, RBAC policy decisions, and diff redaction helpers.
+- Rendered Share panel capability/audit/redaction state for comment/suggest/edit/expired links.
+- Replaced five share and two privacy acceptance stubs with real Playwright coverage.
 
 ## Validation To Run
 
@@ -85,9 +89,17 @@
 - `pnpm run test:e2e` - pass, 45 passed, 30 skipped.
 - `make serve` - pass after Bead 7.
 - `make status` - pass after Bead 7; app running at `http://127.0.0.1:3000`.
+- `pnpm run lint` - pass after Bead 8.
+- `pnpm run typecheck` - pass after Bead 8.
+- `pnpm run test:unit` - pass, 58 passed, 9 todo/skipped.
+- `pnpm --filter @lash/web build` - pass after Bead 8.
+- `pnpm playwright test apps/web/e2e/share/share-comment-scope.spec.ts apps/web/e2e/share/share-suggest-scope.spec.ts apps/web/e2e/share/share-edit-scope.spec.ts apps/web/e2e/share/share-expiry.spec.ts apps/web/e2e/share/share-audit.spec.ts apps/web/e2e/privacy/history-redact.spec.ts apps/web/e2e/privacy/chat-redact.spec.ts --workers=1` - pass, 7 passed.
+- `pnpm run test:e2e` - pass, 52 passed, 23 skipped.
+- `make serve` - pass after Bead 8.
+- `make status` - pass after Bead 8; app running at `http://127.0.0.1:3000`.
 
 ## Open Items
 
 - GitHub branch protection is UNCONFIRMED.
-- Next implementation bead should wire share/RBAC/redaction or mention privacy/date chips.
+- Next implementation bead should wire mention privacy/date chips.
 - Use `make stop` to stop the local Lash server.

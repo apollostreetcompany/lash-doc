@@ -9,6 +9,8 @@ const nextConfig = {
     '@lash/doc-chat',
     '@lash/editor-core',
     '@lash/history',
+    '@lash/rbac',
+    '@lash/share',
     '@lash/types',
     '@lash/ui',
   ],
