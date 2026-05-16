@@ -47,7 +47,8 @@ main {
 }
 
 .chrome-button,
-.focus-mode-toggle {
+.focus-mode-toggle,
+.suggest-mode-toggle {
   appearance: none;
   background: rgba(59, 130, 246, 0.16);
   border: 1px solid rgba(59, 130, 246, 0.35);
@@ -64,8 +65,10 @@ main {
 }
 
 .focus-mode-toggle[aria-pressed='true'],
+.suggest-mode-toggle[data-active='true'],
 .chrome-button:focus-visible,
-.focus-mode-toggle:focus-visible {
+.focus-mode-toggle:focus-visible,
+.suggest-mode-toggle:focus-visible {
   background: rgba(59, 130, 246, 0.3);
   border-color: rgba(59, 130, 246, 0.6);
 }
@@ -221,9 +224,38 @@ main {
   font-size: 0.95rem;
 }
 
+.history-filter-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.history-filter-button {
+  appearance: none;
+  border: 1px solid rgba(148, 163, 184, 0.25);
+  border-radius: 7px;
+  background: rgba(30, 41, 59, 0.55);
+  color: inherit;
+  cursor: pointer;
+  font-size: 0.76rem;
+  padding: 0.3rem 0.5rem;
+}
+
+.history-filter-button[data-active='true'] {
+  border-color: rgba(59, 130, 246, 0.65);
+  background: rgba(59, 130, 246, 0.18);
+}
+
+.history-filter-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
 .history-panel-count,
 .history-diff-meta,
-.history-empty {
+.history-empty,
+.history-filter-count,
+.history-suggestion-status {
   font-size: 0.78rem;
   color: rgba(226, 232, 240, 0.7);
 }
@@ -305,7 +337,22 @@ main {
   background: rgba(248, 113, 113, 0.16);
 }
 
-.history-restore-button {
+.history-diff-insert[data-intent='suggest'] {
+  border-bottom: 1px solid rgba(34, 197, 94, 0.9);
+}
+
+.history-diff-delete[data-intent='suggest'] {
+  text-decoration-thickness: 2px;
+}
+
+.history-diff-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.history-restore-button,
+.history-suggestion-button {
   justify-self: start;
   appearance: none;
   border: 1px solid rgba(34, 197, 94, 0.5);
@@ -314,6 +361,11 @@ main {
   color: inherit;
   cursor: pointer;
   padding: 0.45rem 0.75rem;
+}
+
+.history-suggestion-button {
+  border-color: rgba(59, 130, 246, 0.45);
+  background: rgba(59, 130, 246, 0.14);
 }
 
 .lash-editor-content-wrapper {

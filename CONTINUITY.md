@@ -6,7 +6,7 @@ Ship Lash v1 as the full collaborative editor spec in `agents.md`, with all acce
 
 ## Constraints/Assumptions
 
-- No direct commits to `main`; current branch `codex/feat/bead-5-blame-ui`.
+- No direct commits to `main`; current branch `codex/feat/bead-6-suggest-diff-filters`.
 - Riddle integration is planning-only; do not touch `/Users/borker/dev/riddle`.
 - Current v1 path resumes from M2 after the Phase 0 gate is restored.
 - GitHub remote is `https://github.com/apollostreetcompany/lash-doc.git`; branch protection remains UNCONFIRMED.
@@ -16,6 +16,7 @@ Ship Lash v1 as the full collaborative editor spec in `agents.md`, with all acce
 1. Riddle remains optional and independent for now; Lash v1 should not depend on it.
 2. Future Riddle integration, if requested, should enter through Lash's stable operation/history contracts rather than special-case mutation.
 3. Bead 0 restores the Lash gate and missing process scaffolding before M2 work resumes.
+4. Local history recording now waits for a 500 ms idle window so a normal typing session does not fragment into multiple history versions under load.
 
 ## State
 
@@ -32,15 +33,16 @@ Ship Lash v1 as the full collaborative editor spec in `agents.md`, with all acce
 - [x] Bead 3 - Web history timeline, diff, and restore UI.
 - [x] Bead 4 - Authorship interval-map foundation.
 - [x] Bead 5 - Blame gutter UI and history filter-by-author.
+- [x] Bead 6 - Filtered diffs and local suggest-mode accept/reject.
 
 ### Now
 
-- Lash MVP with local history and blame gutter UI is running at `http://127.0.0.1:3000`; ready for filtered diff/suggest-mode work.
+- Lash MVP with local history, blame gutter, filtered diffs, and suggest-mode accept/reject is running at `http://127.0.0.1:3000`; ready for doc chat and share/RBAC work.
 
 ### Next
 
-- Continue M2 with richer diff filter integrations and suggest/track-changes mode.
-- Continue toward M2/M3 with doc chat, share/RBAC, offline collaboration, and AI patch flow after the diff/authorship path is stable.
+- Continue toward M3 with doc chat anchors/history context and share/RBAC/redaction.
+- Continue toward M4 with AI patch flow after doc chat/share contracts are stable.
 
 ## Open Questions
 
@@ -77,3 +79,9 @@ Ship Lash v1 as the full collaborative editor spec in `agents.md`, with all acce
 - `apps/web/e2e/authorship/blame-gutter.spec.ts`
 - `apps/web/e2e/authorship/blame-hover.spec.ts`
 - `apps/web/e2e/authorship/blame-filter.spec.ts`
+- `apps/web/e2e/diff/diff-filter-author.spec.ts`
+- `apps/web/e2e/diff/diff-filter-time.spec.ts`
+- `apps/web/e2e/diff/diff-share-link.spec.ts`
+- `apps/web/e2e/suggest-mode/suggest-visuals.spec.ts`
+- `apps/web/e2e/suggest-mode/suggest-accept.spec.ts`
+- `apps/web/e2e/suggest-mode/suggest-reject.spec.ts`

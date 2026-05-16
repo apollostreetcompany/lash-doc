@@ -2,14 +2,15 @@
 
 ## Current State
 
-- Branch: `codex/feat/bead-5-blame-ui`
+- Branch: `codex/feat/bead-6-suggest-diff-filters`
 - Last bead: Bead 0 - Restore Lash release gate and process scaffolding.
 - Last bead: Bead 1 - Local MVP run path.
 - Last bead: Bead 2 - Append-only history log and deterministic replay/diff foundation.
 - Last bead: Bead 3 - Web history timeline, diff, and restore UI.
 - Last bead: Bead 4 - Authorship interval-map foundation.
 - Last bead: Bead 5 - Blame gutter UI and history filter-by-author.
-- Current state: Ready for richer diff filter integrations and suggest/track-changes mode.
+- Last bead: Bead 6 - Filtered diffs and local suggest-mode accept/reject.
+- Current state: Ready for doc chat anchors/history context and share/RBAC/redaction.
 - Local MVP remains available at `http://127.0.0.1:3000` in tmux session `lash-doc-web`.
 - Product decision: Riddle is optional/deferred. Do not implement Lash-Riddle integration until Riddle stabilizes as its own product.
 
@@ -24,6 +25,9 @@
 - Implemented authorship interval map with insertion/delete/replacement mapping, dominant author per line, and deterministic property-style interval invariants.
 - Wired line-level authorship into the web editor blame gutter, added hover titles, and connected gutter clicks to the history author filter.
 - Replaced the blame gutter/hover/filter acceptance stubs with real Playwright coverage.
+- Added local history author/time filters, copyable filtered-diff links, and real filtered-diff e2e coverage.
+- Added local suggest mode that records `intent: suggest`, renders pending/accepted suggestion state in history diffs, and supports accept/reject via append-only history entries.
+- Increased local history recording debounce to 500 ms so loaded browser runs do not split one typing session into accidental single-character versions.
 
 ## Validation To Run
 
@@ -60,9 +64,18 @@
 - `pnpm run test:e2e` - pass, 33 passed, 42 skipped.
 - `make serve` - pass after Bead 5.
 - `make status` - pass after Bead 5; app running at `http://127.0.0.1:3000`.
+- `pnpm run lint` - pass after Bead 6.
+- `pnpm run typecheck` - pass after Bead 6.
+- `pnpm run test:unit` - pass, 52 passed, 9 todo/skipped.
+- `pnpm --filter @lash/web build` - pass after Bead 6.
+- `pnpm playwright test apps/web/e2e/diff/diff-filter-author.spec.ts apps/web/e2e/diff/diff-filter-time.spec.ts apps/web/e2e/diff/diff-share-link.spec.ts apps/web/e2e/suggest-mode/suggest-visuals.spec.ts apps/web/e2e/suggest-mode/suggest-accept.spec.ts apps/web/e2e/suggest-mode/suggest-reject.spec.ts --workers=1` - pass, 6 passed.
+- `pnpm playwright test apps/web/e2e/autosave/autosave-indicator.spec.ts apps/web/e2e/diff/diff-filter-author.spec.ts apps/web/e2e/history/history-restore.spec.ts --workers=1` - pass, 3 passed.
+- `pnpm run test:e2e` - pass, 39 passed, 36 skipped.
+- `make serve` - pass after Bead 6.
+- `make status` - pass after Bead 6; app running at `http://127.0.0.1:3000`.
 
 ## Open Items
 
 - GitHub branch protection is UNCONFIRMED.
-- Next implementation bead should wire richer diff filters and suggest/track-changes mode.
+- Next implementation bead should wire doc chat anchors/history context or share/RBAC/redaction.
 - Use `make stop` to stop the local Lash server.
