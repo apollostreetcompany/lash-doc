@@ -31,6 +31,7 @@ import { FocusModeToggle } from './panels/FocusModeToggle';
 import { HistoryPanel, type HistoryTimeFilter } from './panels/HistoryPanel';
 import { MarkdownIO } from './panels/MarkdownIO';
 import { MentionPanel } from './panels/MentionPanel';
+import { OfflinePanel } from './panels/OfflinePanel';
 import { OutlinePanel } from './panels/OutlinePanel';
 import { SharePanel } from './panels/SharePanel';
 import { TableCellPanel, type ActiveCell } from './panels/TableCellPanel';
@@ -57,7 +58,7 @@ const HISTORY_DOC_ID = createDocumentId(OUTLINE_DOC_ID);
 const HISTORY_SCHEMA_VERSION = 'lash-schema-v1';
 const HISTORY_ACTOR = { type: 'user', id: 'local-user' } as const;
 const HISTORY_AUDIT = { ua: 'lash-web/local-history' } as const;
-const HISTORY_RECORD_DEBOUNCE_MS = 500;
+const HISTORY_RECORD_DEBOUNCE_MS = 900;
 
 const textReplaceOp = (before: string, after: string) => {
   let prefix = 0;
@@ -707,6 +708,7 @@ export function EditorWorkspace() {
 
           {/* Slot panels for downstream lanes — render nothing until they're filled. */}
           <MentionPanel editor={editor} currentText={editor ? editorText(editor) : ''} />
+          <OfflinePanel editor={editor} />
           <HistoryPanel
             editor={editor}
             entries={historyEntries}

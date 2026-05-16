@@ -2,7 +2,7 @@
 
 ## Current State
 
-- Branch: `codex/feat/bead-9-mentions-dates`
+- Branch: `codex/feat/bead-10-offline-presence`
 - Last bead: Bead 0 - Restore Lash release gate and process scaffolding.
 - Last bead: Bead 1 - Local MVP run path.
 - Last bead: Bead 2 - Append-only history log and deterministic replay/diff foundation.
@@ -13,7 +13,8 @@
 - Last bead: Bead 7 - Doc Chat anchored threads, context, and filters.
 - Last bead: Bead 8 - Share links, RBAC decisions, audit, and redaction.
 - Last bead: Bead 9 - Mentions, RBAC-hidden suggestions, and natural-date chips.
-- Current state: Ready for offline queue/presence, table performance, accessibility, cross-browser, and AI patch flow beads.
+- Last bead: Bead 10 - Offline queue, reconnect merge, and presence resume.
+- Current state: Ready for table performance, accessibility, cross-browser, and AI patch flow beads.
 - Local MVP remains available at `http://127.0.0.1:3000` in tmux session `lash-doc-web`.
 - Product decision: Riddle is optional/deferred. Do not implement Lash-Riddle integration until Riddle stabilizes as its own product.
 
@@ -30,7 +31,7 @@
 - Replaced the blame gutter/hover/filter acceptance stubs with real Playwright coverage.
 - Added local history author/time filters, copyable filtered-diff links, and real filtered-diff e2e coverage.
 - Added local suggest mode that records `intent: suggest`, renders pending/accepted suggestion state in history diffs, and supports accept/reject via append-only history entries.
-- Increased local history recording debounce to 500 ms so loaded browser runs do not split one typing session into accidental single-character versions.
+- Increased local history recording debounce to 900 ms so loaded browser runs do not split one typing session into accidental single-character versions.
 - Implemented local Doc Chat anchor mapping and in-memory thread store with unit coverage.
 - Rendered Doc Chat panel with selection-anchored threads, original/current context, orphan markers, and author/AI filters.
 - Replaced six Doc Chat acceptance stubs with real Playwright coverage.
@@ -40,6 +41,9 @@
 - Implemented local user/group mention providers through `@lash/rbac`, with hidden entities rendered only as anonymized tokens.
 - Added deterministic natural-date parsing for `@next Friday 3pm` with locale/timezone display and ISO storage.
 - Rendered a local Mention panel with suggestions and chips, and replaced five mention acceptance stubs with real Playwright coverage.
+- Implemented a local deterministic collab room with offline queueing, replay, queue-depth observers, and presence pause/resume states.
+- Rendered an Offline panel that queues editor ops while disconnected, replays them into a local merged text snapshot on reconnect, and exposes presence status.
+- Replaced three offline acceptance stubs with real Playwright coverage and added unit coverage for queue replay and presence state.
 
 ## Validation To Run
 
@@ -109,9 +113,18 @@
 - `pnpm run test:e2e` - pass, 57 passed, 18 skipped.
 - `make serve` - pass after Bead 9.
 - `make status` - pass after Bead 9; app running at `http://127.0.0.1:3000`.
+- `pnpm run lint` - pass after Bead 10.
+- `pnpm run typecheck` - pass after Bead 10.
+- `pnpm run test:unit` - pass, 62 passed, 7 todo/skipped.
+- `pnpm --filter @lash/web build` - pass after Bead 10.
+- `pnpm playwright test apps/web/e2e/offline/offline-queue.spec.ts apps/web/e2e/offline/offline-merge.spec.ts apps/web/e2e/offline/presence-resume.spec.ts --workers=1` - pass, 3 passed.
+- `pnpm --filter @lash/web build && pnpm playwright test apps/web/e2e/suggest-mode/suggest-visuals.spec.ts apps/web/e2e/suggest-mode/suggest-accept.spec.ts apps/web/e2e/suggest-mode/suggest-reject.spec.ts apps/web/e2e/offline/offline-queue.spec.ts apps/web/e2e/offline/offline-merge.spec.ts apps/web/e2e/offline/presence-resume.spec.ts --workers=1` - pass, 6 passed.
+- `pnpm run test:e2e` - pass, 60 passed, 15 skipped.
+- `make serve` - pass after Bead 10.
+- `make status` - pass after Bead 10; app running at `http://127.0.0.1:3000`.
 
 ## Open Items
 
 - GitHub branch protection is UNCONFIRMED.
-- Next implementation bead should target one of the remaining skipped areas: offline queue/presence, table perf, accessibility, cross-browser, or AI patch flow.
+- Next implementation bead should target one of the remaining skipped areas: table perf, accessibility, cross-browser, or AI patch flow.
 - Use `make stop` to stop the local Lash server.

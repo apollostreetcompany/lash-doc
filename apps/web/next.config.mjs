@@ -5,6 +5,7 @@ const nextConfig = {
     typedRoutes: true,
   },
   transpilePackages: [
+    '@lash/collab-service',
     '@lash/authorship',
     '@lash/doc-chat',
     '@lash/editor-core',
