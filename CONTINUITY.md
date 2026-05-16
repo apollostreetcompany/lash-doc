@@ -6,7 +6,7 @@ Ship Lash v1 as the full collaborative editor spec in `agents.md`, with all acce
 
 ## Constraints/Assumptions
 
-- No direct commits to `main`; current branch `codex/feat/bead-10-offline-presence`.
+- No direct commits to `main`; current branch `codex/feat/bead-11-table-performance`.
 - Riddle integration is planning-only; do not touch `/Users/borker/dev/riddle`.
 - Current v1 path resumes from M2 after the Phase 0 gate is restored.
 - GitHub remote is `https://github.com/apollostreetcompany/lash-doc.git`; branch protection remains UNCONFIRMED.
@@ -21,6 +21,7 @@ Ship Lash v1 as the full collaborative editor spec in `agents.md`, with all acce
 6. Share/RBAC starts with local signed links, capability decisions, audit events, and redaction placeholders before server persistence/API enforcement lands.
 7. Mentions/date chips start with local providers and deterministic natural-date parsing; visibility decisions route through `@lash/rbac`, hidden entities render anonymized, and no Riddle integration is introduced.
 8. Offline queue/presence starts with a local deterministic collab room: edits queue while offline, replay on reconnect into the semantic op pipeline, and presence state resumes without introducing a websocket runtime yet.
+9. Large table performance is guarded with scroll containment, fixed/min column sizing, and a 100x20 browser perf spec for insert, scroll, selection, and commit responsiveness.
 
 ## State
 
@@ -42,14 +43,15 @@ Ship Lash v1 as the full collaborative editor spec in `agents.md`, with all acce
 - [x] Bead 8 - Share links, RBAC decisions, audit, and redaction.
 - [x] Bead 9 - Mentions, RBAC-hidden suggestions, and natural-date chips.
 - [x] Bead 10 - Offline queue, reconnect merge, and presence resume.
+- [x] Bead 11 - Large table 100x20 performance gate.
 
 ### Now
 
-- Lash MVP with local history, blame gutter, filtered diffs, suggest-mode, Doc Chat anchors, share/RBAC/redaction, mention/date-chip behavior, and local offline queue/presence is running at `http://127.0.0.1:3000`.
+- Lash MVP with local history, blame gutter, filtered diffs, suggest-mode, Doc Chat anchors, share/RBAC/redaction, mention/date-chip behavior, local offline queue/presence, and large-table perf coverage is running at `http://127.0.0.1:3000`.
 
 ### Next
 
-- Continue toward M3/M4 with table performance, accessibility, cross-browser, and AI patch flow.
+- Continue toward M3/M4 with accessibility, cross-browser, and AI patch flow.
 - Continue toward M4 with AI patch flow after doc chat/share contracts are stable.
 
 ## Open Questions
@@ -128,3 +130,4 @@ Ship Lash v1 as the full collaborative editor spec in `agents.md`, with all acce
 - `apps/web/e2e/offline/offline-queue.spec.ts`
 - `apps/web/e2e/offline/offline-merge.spec.ts`
 - `apps/web/e2e/offline/presence-resume.spec.ts`
+- `apps/web/e2e/tables/table-perf-100x20.spec.ts`
