@@ -30,6 +30,8 @@ Ship Lash v1 as the full collaborative editor spec in `agents.md`, with all acce
 14. CI's skip/todo guard must fetch PR branch refs with ancestry and compute an explicit merge base; shallow endpoint-SHA fetches can make `BASE_SHA...HEAD_SHA` fail even when the PR branch contains the base.
 15. Programmatic table perf selections should avoid forced scroll when the caller already controls viewport position, and table-cell panel state should be deduplicated so selection and transaction events do not trigger duplicate React renders for identical cell attrs.
 16. Default-branch protection now requires strict `build-and-test`; release work should keep PR branches green before merge.
+17. Large-table perf tests should assert synchronous dispatch budgets separately from animation-frame settling so CI worker contention does not masquerade as operation latency.
+18. Local history recording debounce is 1800 ms after loaded full-suite runs showed 900 ms could still split a normal typed phrase into multiple history entries.
 
 ## State
 
@@ -58,10 +60,11 @@ Ship Lash v1 as the full collaborative editor spec in `agents.md`, with all acce
 - [x] Bead 15 - QA convergence, selection stability, and IME autosave unit gates.
 - [x] Bead 16 - Release readiness docs and CI skip/todo guard hardening.
 - [x] Bead 17 - Table selection performance stabilization.
+- [x] Bead 18 - Branch protection finalization and release ledger update.
 
 ### Now
 
-- Bead 18 - Branch protection finalization and release ledger update. PR #1 CI passed on `fc497bf`; branch protection now requires strict `build-and-test`.
+- Bead 19 - CI stability follow-up for table perf measurement and suggest-mode history debounce after the final docs-only CI rerun exposed loaded-run timing noise.
 
 ### Next
 
@@ -176,3 +179,5 @@ Ship Lash v1 as the full collaborative editor spec in `agents.md`, with all acce
 - `RELEASE_NOTES.md`
 - `DEPLOYMENT.md`
 - `packages/editor-core/src/table/helpers.ts`
+- `apps/web/e2e/tables/table-perf-100x20.spec.ts`
+- `MISTAKES.md`

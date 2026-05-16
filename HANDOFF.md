@@ -21,8 +21,9 @@
 - Last bead: Bead 15 - QA convergence, selection stability, and IME autosave unit gates.
 - Last bead: Bead 16 - Release readiness docs and CI skip/todo guard hardening.
 - Last bead: Bead 17 - Table selection performance stabilization.
-- Current bead: Bead 18 - Branch protection finalization and release ledger update.
-- Current state: Unit and e2e gates pass with no skips/todos; PR #1 CI passed on `fc497bf`, and branch protection now requires strict `build-and-test`.
+- Last bead: Bead 18 - Branch protection finalization and release ledger update.
+- Current bead: Bead 19 - CI stability follow-up for table perf measurement and suggest-mode history debounce.
+- Current state: Unit and e2e gates pass with no skips/todos; branch protection requires strict `build-and-test`. The final docs-only CI rerun failed only because the table perf test still folded frame-settle delay into the strict selection operation budget.
 - Local MVP is available at `http://127.0.0.1:3000` in tmux session `lash-doc-web`.
 - Product decision: Riddle is optional/deferred. Do not implement Lash-Riddle integration until Riddle stabilizes as its own product.
 
@@ -67,6 +68,8 @@
 - Hardened CI's skip/todo guard to fetch PR branch refs with ancestry, verify both endpoint SHAs, compute an explicit merge base, and diff `MERGE_BASE..HEAD_SHA`.
 - Removed forced scroll from the programmatic table selection path used by perf gates, and deduplicated identical active-cell state so selection/transaction events do not trigger duplicate table-panel renders.
 - Configured default-branch protection with strict required `build-and-test`, admin enforcement, and no force-push/delete.
+- Split the 100x20 table perf gate into strict dispatch budgets and separate frame-settle budgets so CI scheduler contention does not hide the actual operation latency.
+- Raised local history recording debounce to 1800 ms after a loaded 5-worker full e2e run split one suggest-mode typed phrase into two history entries.
 
 ## Validation To Run
 
@@ -205,6 +208,14 @@
 - `make status` - pass after Bead 17; app running at `http://127.0.0.1:3000`.
 - GitHub Actions `build-and-test` for PR #1 on `fc497bf` - pass, 3m8s.
 - Branch protection API check - pass: strict `build-and-test`, admin enforcement enabled, force-push/delete disabled.
+- `pnpm exec prettier --write apps/web/components/editor/EditorWorkspace.tsx apps/web/e2e/tables/table-perf-100x20.spec.ts MISTAKES.md` - pass after Bead 19.
+- `pnpm --filter @lash/web build && pnpm playwright test apps/web/e2e/tables/table-perf-100x20.spec.ts apps/web/e2e/suggest-mode/suggest-visuals.spec.ts apps/web/e2e/suggest-mode/suggest-accept.spec.ts apps/web/e2e/suggest-mode/suggest-reject.spec.ts --workers=1` - pass after Bead 19, 4 passed.
+- `pnpm run lint` - pass after Bead 19.
+- `pnpm run typecheck` - pass after Bead 19.
+- `pnpm run test:unit` - pass, 73 passed after Bead 19.
+- `pnpm run test:e2e` - pass, 75 passed after Bead 19.
+- `make serve` - pass after Bead 19.
+- `make status` - pass after Bead 19; app running at `http://127.0.0.1:3000`.
 
 ## Open Items
 

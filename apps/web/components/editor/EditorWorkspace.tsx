@@ -59,7 +59,7 @@ const HISTORY_DOC_ID = createDocumentId(OUTLINE_DOC_ID);
 const HISTORY_SCHEMA_VERSION = 'lash-schema-v1';
 const HISTORY_ACTOR = { type: 'user', id: 'local-user' } as const;
 const HISTORY_AUDIT = { ua: 'lash-web/local-history' } as const;
-const HISTORY_RECORD_DEBOUNCE_MS = 900;
+const HISTORY_RECORD_DEBOUNCE_MS = 1800;
 const AI_AUDIT = { ua: 'lash-local-ai-editor' };
 
 const textReplaceOp = (before: string, after: string) => {

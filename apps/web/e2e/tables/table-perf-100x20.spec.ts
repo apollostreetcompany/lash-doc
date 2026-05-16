@@ -51,14 +51,18 @@ test('table-perf-100x20', async ({ page }) => {
 
     const selectStart = performance.now();
     const selected = win.__lashSelectTableCells?.(99, 19) ?? false;
+    const selectDispatchMs = performance.now() - selectStart;
+    const selectFrameStart = performance.now();
     await nextFrame();
-    const selectMs = performance.now() - selectStart;
+    const selectFrameMs = performance.now() - selectFrameStart;
 
     const commitStart = performance.now();
     const typed = win.__lashTable?.setCellType('status') ?? false;
     const valued = win.__lashTable?.setCellValue('Done') ?? false;
+    const commitDispatchMs = performance.now() - commitStart;
+    const commitFrameStart = performance.now();
     await nextFrame();
-    const commitMs = performance.now() - commitStart;
+    const commitFrameMs = performance.now() - commitFrameStart;
 
     const doc = win.__lashEditor?.state.doc.toJSON();
     const table = doc?.content?.find((node: { type: string }) => node.type === 'table');
@@ -68,7 +72,19 @@ test('table-perf-100x20', async ({ page }) => {
       0,
     );
 
-    return { insertMs, scrollMs, selectMs, commitMs, selected, typed, valued, rows, cells };
+    return {
+      insertMs,
+      scrollMs,
+      selectDispatchMs,
+      selectFrameMs,
+      commitDispatchMs,
+      commitFrameMs,
+      selected,
+      typed,
+      valued,
+      rows,
+      cells,
+    };
   });
 
   expect(metrics.rows).toBe(100);
@@ -78,6 +94,8 @@ test('table-perf-100x20', async ({ page }) => {
   expect(metrics.valued).toBe(true);
   expect(metrics.insertMs).toBeLessThan(2_500);
   expect(metrics.scrollMs).toBeLessThan(120);
-  expect(metrics.selectMs).toBeLessThan(120);
-  expect(metrics.commitMs).toBeLessThan(150);
+  expect(metrics.selectDispatchMs).toBeLessThan(50);
+  expect(metrics.selectFrameMs).toBeLessThan(250);
+  expect(metrics.commitDispatchMs).toBeLessThan(80);
+  expect(metrics.commitFrameMs).toBeLessThan(250);
 });
