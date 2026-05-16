@@ -1,6 +1,9 @@
-import { test } from '@playwright/test';
+import { expect, test } from '@playwright/test';
 
-// Acceptance stub generated from agents.md (Test ID: cb-chrome.spec).
-test('cb-chrome.spec', async () => {
-  test.skip(true, 'TODO acceptance scenario for `cb-chrome.spec`.');
+import { runEditorCompatibilitySmoke } from './helpers';
+
+test('cb-chrome', async ({ page, browserName }) => {
+  expect(test.info().project.name).toBe('cb-chrome');
+  expect(browserName).toBe('chromium');
+  await runEditorCompatibilitySmoke(page, 'Chrome');
 });

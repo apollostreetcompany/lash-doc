@@ -2,7 +2,7 @@
 
 ## Current State
 
-- Branch: `codex/feat/bead-13-ai-patch-flow`
+- Branch: `codex/test/bead-14-cross-browser-gates`
 - Last bead: Bead 0 - Restore Lash release gate and process scaffolding.
 - Last bead: Bead 1 - Local MVP run path.
 - Last bead: Bead 2 - Append-only history log and deterministic replay/diff foundation.
@@ -17,7 +17,8 @@
 - Last bead: Bead 11 - Large table 100x20 performance gate.
 - Last bead: Bead 12 - Screen-reader headings, diff announcements, and thread navigation.
 - Last bead: Bead 13 - AI patch validation, accept/reject flow, labeling, and citations.
-- Current state: Ready for cross-browser verification.
+- Last bead: Bead 14 - Cross-browser Playwright project gates.
+- Current state: E2E acceptance gates pass with no skips; remaining known gaps are unit-level QA/IME todos.
 - Local MVP is available at `http://127.0.0.1:3000` in tmux session `lash-doc-web`.
 - Product decision: Riddle is optional/deferred. Do not implement Lash-Riddle integration until Riddle stabilizes as its own product.
 
@@ -54,6 +55,8 @@
 - Rendered the AI Editor panel with patch generation, patch JSON review, rationale, accept/reject, invalid-patch rejection/fallback messaging, global-edit confirmation, AI labels, and document citations.
 - Wired accepted AI patches through the append-only history pipeline as AI-authored `intent: ai` entries.
 - Replaced six AI e2e stubs and three AI unit todos with real coverage.
+- Added Playwright projects for focused Chrome, Edge-UA Chromium, Firefox, WebKit/Safari, and iPad WebKit acceptance gates without multiplying the full suite across every browser.
+- Replaced five cross-browser e2e stubs with real editor smoke coverage.
 
 ## Validation To Run
 
@@ -158,9 +161,16 @@
 - `pnpm run test:e2e` - pass, 70 passed, 5 skipped.
 - `make serve` - pass after Bead 13.
 - `make status` - pass after Bead 13; app running at `http://127.0.0.1:3000`.
+- `pnpm playwright test apps/web/e2e/cross-browser --workers=1` - pass, 5 passed.
+- `pnpm run lint` - pass after Bead 14.
+- `pnpm run typecheck` - pass after Bead 14.
+- `pnpm run test:unit` - pass, 68 passed, 4 todo/skipped.
+- `pnpm run test:e2e` - pass, 75 passed.
+- `make serve` - pass after Bead 14.
+- `make status` - pass after Bead 14; app running at `http://127.0.0.1:3000`.
 
 ## Open Items
 
 - GitHub branch protection is UNCONFIRMED.
-- Next implementation bead should target remaining cross-browser acceptance stubs.
+- Next implementation bead should target remaining unit-level QA/IME todos.
 - Use `make stop` to stop the local Lash server.

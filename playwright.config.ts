@@ -22,7 +22,33 @@ export default defineConfig({
   projects: [
     {
       name: 'chromium',
+      testIgnore: /cross-browser\//,
       use: { ...devices['Desktop Chrome'] },
+    },
+    {
+      name: 'cb-chrome',
+      testMatch: /cross-browser\/cb-chrome\.spec\.ts/,
+      use: { ...devices['Desktop Chrome'] },
+    },
+    {
+      name: 'cb-edge',
+      testMatch: /cross-browser\/cb-edge\.spec\.ts/,
+      use: { ...devices['Desktop Edge'] },
+    },
+    {
+      name: 'cb-firefox',
+      testMatch: /cross-browser\/cb-firefox\.spec\.ts/,
+      use: { ...devices['Desktop Firefox'] },
+    },
+    {
+      name: 'cb-safari',
+      testMatch: /cross-browser\/cb-safari\.spec\.ts/,
+      use: { ...devices['Desktop Safari'] },
+    },
+    {
+      name: 'cb-ipad',
+      testMatch: /cross-browser\/cb-ipad\.spec\.ts/,
+      use: { ...devices['iPad Pro 11'] },
     },
   ],
 });

@@ -1,6 +1,12 @@
-import { test } from '@playwright/test';
+import { expect, test } from '@playwright/test';
 
-// Acceptance stub generated from agents.md (Test ID: cb-safari.spec).
-test('cb-safari.spec', async () => {
-  test.skip(true, 'TODO acceptance scenario for `cb-safari.spec`.');
+import { runEditorCompatibilitySmoke } from './helpers';
+
+test('cb-safari', async ({ page, browserName }) => {
+  expect(test.info().project.name).toBe('cb-safari');
+  expect(browserName).toBe('webkit');
+  await runEditorCompatibilitySmoke(page, 'Safari');
+
+  const userAgent = await page.evaluate(() => navigator.userAgent);
+  expect(userAgent).toContain('Safari/');
 });
