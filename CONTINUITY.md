@@ -74,7 +74,7 @@ Success criteria:
 - [x] PR #1 merged into `main` as `7bf032debe1931d068f009ee735b95bd5c43b5c1`.
 - [x] Main push CI passed: run `25955018685`, workflow `CI`, `build-and-test`.
 - [x] PR #2 merged into `main` as `c6ee96e796602834d6795e84d404bf962486ad40`.
-- [x] Final main push CI passed: run `25955266966`, workflow `CI`, `build-and-test`.
+- [x] Audited main push CI passed: run `25955266966`, workflow `CI`, `build-and-test`.
 
 ### Now
 
@@ -111,4 +111,4 @@ Success criteria:
 - `make status`
 - GitHub PR #1: `https://github.com/apollostreetcompany/lash-doc/pull/1`
 - GitHub PR #2: `https://github.com/apollostreetcompany/lash-doc/pull/2`
-- Final main CI run: `https://github.com/apollostreetcompany/lash-doc/actions/runs/25955266966`
+- Audited main CI run: `https://github.com/apollostreetcompany/lash-doc/actions/runs/25955266966`
