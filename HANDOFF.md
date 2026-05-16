@@ -3,10 +3,12 @@
 ## Current State
 
 - Default branch: `main`.
-- Release branch for final cleanup: `codex/chore/bead-20-final-release-audit`.
-- Latest merged release commit on `main`: `7bf032debe1931d068f009ee735b95bd5c43b5c1` (`Release Lash v1 collaborative editor gates`).
+- Current local branch: `main`.
+- Product release commit on `main`: `7bf032debe1931d068f009ee735b95bd5c43b5c1` (`Release Lash v1 collaborative editor gates`).
+- Audited release-audit commit on `main`: `c6ee96e796602834d6795e84d404bf962486ad40`.
 - PR #1 is merged: `https://github.com/apollostreetcompany/lash-doc/pull/1`.
-- Main push CI is green: run `25955018685`, workflow `CI`, job `build-and-test`.
+- PR #2 is merged: `https://github.com/apollostreetcompany/lash-doc/pull/2`.
+- Audited main push CI is green: run `25955266966`, workflow `CI`, job `build-and-test`.
 - Branch protection on `main` is configured with strict required `build-and-test`, admin enforcement, and no force-push/delete.
 - Local product server is running at `http://127.0.0.1:3000` in tmux session `lash-doc-web`.
 - Product decision: Riddle is optional/deferred. Do not implement Lash-Riddle integration until Riddle stabilizes as its own product and default Zed integration.
@@ -43,7 +45,7 @@
 - `pnpm run test:e2e` - pass, 75 passed.
 - `pnpm run build` - pass.
 - `make serve` / `make status` - pass, local app available at `http://127.0.0.1:3000`.
-- Main CI `build-and-test` - pass on `7bf032debe1931d068f009ee735b95bd5c43b5c1`.
+- Main CI `build-and-test` - pass on `c6ee96e796602834d6795e84d404bf962486ad40`.
 - Acceptance coverage audit - 86 `agents.md` Test IDs, 98 unit/e2e files, no missing IDs.
 - Skip/todo audit - no `test.todo`, `test.skip`, `describe.skip`, `TODO acceptance`, or `.only(` matches in `apps/web/e2e` or `packages/testing/unit`.
 - Riddle audit - only planning/docs references; no Lash-Riddle runtime integration code.
