@@ -10,7 +10,7 @@ Ship Lash v1 as the full local collaborative editor product described in `agents
 - Default branch: `main`.
 - PR #1: `https://github.com/apollostreetcompany/lash-doc/pull/1`, product release merge at `2026-05-16T06:25:59Z`.
 - PR #2: `https://github.com/apollostreetcompany/lash-doc/pull/2`, final release-audit merge at `2026-05-16T06:42:19Z`.
-- Current main commit: `c6ee96e796602834d6795e84d404bf962486ad40`.
+- Audited release-audit commit: `c6ee96e796602834d6795e84d404bf962486ad40`.
 - Main CI: run `25955266966`, workflow `CI`, event `push`, branch `main`, conclusion `success`.
 - Branch protection: strict required `build-and-test`, admin enforcement enabled, force-push/delete disabled.
 - Local server: `make status` reports `http://127.0.0.1:3000` running in tmux session `lash-doc-web`.
@@ -22,7 +22,7 @@ Ship Lash v1 as the full local collaborative editor product described in `agents
 - `pnpm run test:unit` - pass, 73 passed.
 - `pnpm run test:e2e` - pass, 75 passed.
 - `pnpm run build` - pass.
-- Main GitHub Actions `build-and-test` - pass on `c6ee96e796602834d6795e84d404bf962486ad40`.
+- Main GitHub Actions `build-and-test` - pass on audited release-audit commit `c6ee96e796602834d6795e84d404bf962486ad40`.
 - Acceptance coverage script - 86 `agents.md` Test IDs, 98 unit/e2e files, no missing IDs.
 - Skip/todo guard - no `test.todo`, `test.skip`, `describe.skip`, `TODO acceptance`, or `.only(` matches in `apps/web/e2e` or `packages/testing/unit`.
 - Bead ledger - beads 0 through 20 recorded in `handoff/beads.jsonl`.

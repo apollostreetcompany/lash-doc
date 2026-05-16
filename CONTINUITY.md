@@ -43,7 +43,7 @@ Success criteria:
 18. Local history recording debounce is 1800 ms after loaded full-suite runs showed 900 ms could still split a normal typed phrase into multiple history entries.
 19. Decision 18 supersedes the 900 ms value in Decision 4; keep the 1800 ms debounce until a measured browser run supports lowering it.
 20. Bead 20 closes the release with a post-merge audit artifact instead of adding product code; Riddle stays out of implementation.
-21. Lash v1 is complete for the current local product objective after PR #2 merged and `main` CI passed on `c6ee96e796602834d6795e84d404bf962486ad40`.
+21. Lash v1 is complete for the current local product objective after the release-audit cleanup merged and protected `main` CI passed.
 
 ## State
 

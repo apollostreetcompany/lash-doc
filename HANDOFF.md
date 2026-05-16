@@ -5,10 +5,10 @@
 - Default branch: `main`.
 - Current local branch: `main`.
 - Product release commit on `main`: `7bf032debe1931d068f009ee735b95bd5c43b5c1` (`Release Lash v1 collaborative editor gates`).
-- Final release-audit commit on `main`: `c6ee96e796602834d6795e84d404bf962486ad40`.
+- Audited release-audit commit on `main`: `c6ee96e796602834d6795e84d404bf962486ad40`.
 - PR #1 is merged: `https://github.com/apollostreetcompany/lash-doc/pull/1`.
 - PR #2 is merged: `https://github.com/apollostreetcompany/lash-doc/pull/2`.
-- Final main push CI is green: run `25955266966`, workflow `CI`, job `build-and-test`.
+- Audited main push CI is green: run `25955266966`, workflow `CI`, job `build-and-test`.
 - Branch protection on `main` is configured with strict required `build-and-test`, admin enforcement, and no force-push/delete.
 - Local product server is running at `http://127.0.0.1:3000` in tmux session `lash-doc-web`.
 - Product decision: Riddle is optional/deferred. Do not implement Lash-Riddle integration until Riddle stabilizes as its own product and default Zed integration.
