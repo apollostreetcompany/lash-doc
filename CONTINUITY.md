@@ -6,7 +6,7 @@ Ship Lash v1 as the full collaborative editor spec in `agents.md`, with all acce
 
 ## Constraints/Assumptions
 
-- No direct commits to `main`; current branch `codex/feat/bead-12-a11y-screen-reader`.
+- No direct commits to `main`; current branch `codex/feat/bead-13-ai-patch-flow`.
 - Riddle integration is planning-only; do not touch `/Users/borker/dev/riddle`.
 - Current v1 path resumes from M2 after the Phase 0 gate is restored.
 - GitHub remote is `https://github.com/apollostreetcompany/lash-doc.git`; branch protection remains UNCONFIRMED.
@@ -23,6 +23,7 @@ Ship Lash v1 as the full collaborative editor spec in `agents.md`, with all acce
 8. Offline queue/presence starts with a local deterministic collab room: edits queue while offline, replay on reconnect into the semantic op pipeline, and presence state resumes without introducing a websocket runtime yet.
 9. Large table performance is guarded with scroll containment, fixed/min column sizing, and a 100x20 browser perf spec for insert, scroll, selection, and commit responsiveness.
 10. Screen-reader acceptance starts with semantic landmarks and accessible names for document headings, outline navigation, diff announcements, and chat threads; this remains local UI coverage, not a Riddle integration point.
+11. AI editor starts as a deterministic local `EditPatch` flow: generated patches are validated, staged for accept/reject, applied through append-only history with `intent: ai`, labeled in diffs, and cited by document ranges.
 
 ## State
 
@@ -46,15 +47,15 @@ Ship Lash v1 as the full collaborative editor spec in `agents.md`, with all acce
 - [x] Bead 10 - Offline queue, reconnect merge, and presence resume.
 - [x] Bead 11 - Large table 100x20 performance gate.
 - [x] Bead 12 - Screen-reader headings, diff announcements, and thread navigation.
+- [x] Bead 13 - AI patch validation, accept/reject flow, labeling, and citations.
 
 ### Now
 
-- Lash MVP with local history, blame gutter, filtered diffs, suggest-mode, Doc Chat anchors, share/RBAC/redaction, mention/date-chip behavior, local offline queue/presence, large-table perf coverage, and screen-reader accessibility gates is running at `http://127.0.0.1:3000`.
+- Lash MVP with local history, blame gutter, filtered diffs, suggest-mode, Doc Chat anchors, share/RBAC/redaction, mention/date-chip behavior, local offline queue/presence, large-table perf coverage, screen-reader accessibility gates, and local AI patch flow is running at `http://127.0.0.1:3000`.
 
 ### Next
 
-- Continue toward M3/M4 with cross-browser and AI patch flow.
-- Continue toward M4 with AI patch flow after doc chat/share contracts are stable.
+- Continue toward M3/M4 with cross-browser verification.
 
 ## Open Questions
 
@@ -139,3 +140,14 @@ Ship Lash v1 as the full collaborative editor spec in `agents.md`, with all acce
 - `apps/web/e2e/a11y/sr-headings.spec.ts`
 - `apps/web/e2e/a11y/sr-diff-announce.spec.ts`
 - `apps/web/e2e/a11y/sr-thread-nav.spec.ts`
+- `packages/ai/src/index.ts`
+- `packages/testing/unit/ai/ai-scope-selection.test.ts`
+- `packages/testing/unit/ai/ai-invalid-reject.test.ts`
+- `packages/testing/unit/ai/ai-fallback.test.ts`
+- `apps/web/components/editor/panels/AIPanel.tsx`
+- `apps/web/e2e/ai/ai-patch-apply.spec.ts`
+- `apps/web/e2e/ai/ai-labeling.spec.ts`
+- `apps/web/e2e/ai/ai-rationale.spec.ts`
+- `apps/web/e2e/ai/ai-chat-citation.spec.ts`
+- `apps/web/e2e/ai/ai-citation-jump.spec.ts`
+- `apps/web/e2e/ai/ai-scope-global-confirm.spec.ts`

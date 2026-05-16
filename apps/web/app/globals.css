@@ -478,6 +478,85 @@ main {
   font-size: 0.82rem;
 }
 
+.lash-ai-panel {
+  background: rgba(15, 23, 42, 0.45);
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  border-radius: 10px;
+  padding: 0.85rem;
+  display: grid;
+  gap: 0.75rem;
+}
+
+.ai-panel-header,
+.ai-controls,
+.ai-review-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.ai-panel-header {
+  justify-content: space-between;
+}
+
+.ai-panel-title {
+  margin: 0;
+  font-size: 0.95rem;
+}
+
+.ai-label,
+.ai-status,
+.ai-rationale,
+.ai-fallback,
+.ai-chat-answer,
+.ai-confirm-control {
+  font-size: 0.82rem;
+  color: rgba(226, 232, 240, 0.78);
+}
+
+.ai-confirm-control {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+}
+
+.ai-action-button,
+.ai-citation-button {
+  appearance: none;
+  border: 1px solid rgba(59, 130, 246, 0.4);
+  border-radius: 7px;
+  background: rgba(59, 130, 246, 0.14);
+  color: inherit;
+  cursor: pointer;
+  font-size: 0.76rem;
+  padding: 0.3rem 0.55rem;
+}
+
+.ai-action-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.ai-review,
+.ai-chat-answer {
+  display: grid;
+  gap: 0.5rem;
+  border-top: 1px solid rgba(148, 163, 184, 0.18);
+  padding-top: 0.7rem;
+}
+
+.ai-patch-json {
+  max-height: 13rem;
+  overflow: auto;
+  margin: 0;
+  padding: 0.65rem;
+  border-radius: 7px;
+  background: rgba(2, 6, 23, 0.44);
+  color: rgba(226, 232, 240, 0.86);
+  font-size: 0.72rem;
+}
+
 .lash-share-panel {
   background: rgba(15, 23, 42, 0.45);
   border: 1px solid rgba(148, 163, 184, 0.2);

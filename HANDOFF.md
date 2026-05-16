@@ -2,7 +2,7 @@
 
 ## Current State
 
-- Branch: `codex/feat/bead-12-a11y-screen-reader`
+- Branch: `codex/feat/bead-13-ai-patch-flow`
 - Last bead: Bead 0 - Restore Lash release gate and process scaffolding.
 - Last bead: Bead 1 - Local MVP run path.
 - Last bead: Bead 2 - Append-only history log and deterministic replay/diff foundation.
@@ -16,7 +16,8 @@
 - Last bead: Bead 10 - Offline queue, reconnect merge, and presence resume.
 - Last bead: Bead 11 - Large table 100x20 performance gate.
 - Last bead: Bead 12 - Screen-reader headings, diff announcements, and thread navigation.
-- Current state: Ready for cross-browser and AI patch flow beads.
+- Last bead: Bead 13 - AI patch validation, accept/reject flow, labeling, and citations.
+- Current state: Ready for cross-browser verification.
 - Local MVP is available at `http://127.0.0.1:3000` in tmux session `lash-doc-web`.
 - Product decision: Riddle is optional/deferred. Do not implement Lash-Riddle integration until Riddle stabilizes as its own product.
 
@@ -49,6 +50,10 @@
 - Added large-table scroll containment/fixed sizing and replaced the 100x20 table performance stub with a browser perf gate for insert, scroll, select, and commit.
 - Added semantic outline navigation, screen-reader diff announcements, and keyboard-focusable named chat threads.
 - Replaced three screen-reader acceptance stubs with Playwright coverage for heading landmarks, diff live-region descriptions, and thread/message navigation.
+- Implemented the local `@lash/ai` validator for selection scope, unsafe ops, schema-safe node/mark checks, doc-wide confirmation, no-op fallback suggestions, and deterministic text-op application.
+- Rendered the AI Editor panel with patch generation, patch JSON review, rationale, accept/reject, invalid-patch rejection/fallback messaging, global-edit confirmation, AI labels, and document citations.
+- Wired accepted AI patches through the append-only history pipeline as AI-authored `intent: ai` entries.
+- Replaced six AI e2e stubs and three AI unit todos with real coverage.
 
 ## Validation To Run
 
@@ -144,9 +149,18 @@
 - `pnpm run test:e2e` - pass, 64 passed, 11 skipped.
 - `make serve` - pass after Bead 12.
 - `make status` - pass after Bead 12; app running at `http://127.0.0.1:3000`.
+- `pnpm vitest run packages/testing/unit/ai/ai-scope-selection.test.ts packages/testing/unit/ai/ai-invalid-reject.test.ts packages/testing/unit/ai/ai-fallback.test.ts` - failed first for unimplemented helpers, then pass after implementation, 6 passed.
+- `pnpm --filter @lash/web build` - pass after Bead 13.
+- `pnpm playwright test apps/web/e2e/ai/ai-patch-apply.spec.ts apps/web/e2e/ai/ai-labeling.spec.ts apps/web/e2e/ai/ai-rationale.spec.ts apps/web/e2e/ai/ai-chat-citation.spec.ts apps/web/e2e/ai/ai-citation-jump.spec.ts apps/web/e2e/ai/ai-scope-global-confirm.spec.ts --workers=1` - pass, 6 passed.
+- `pnpm run lint` - pass after Bead 13.
+- `pnpm run typecheck` - pass after Bead 13.
+- `pnpm run test:unit` - pass, 68 passed, 4 todo/skipped.
+- `pnpm run test:e2e` - pass, 70 passed, 5 skipped.
+- `make serve` - pass after Bead 13.
+- `make status` - pass after Bead 13; app running at `http://127.0.0.1:3000`.
 
 ## Open Items
 
 - GitHub branch protection is UNCONFIRMED.
-- Next implementation bead should target one of the remaining skipped areas: cross-browser or AI patch flow.
+- Next implementation bead should target remaining cross-browser acceptance stubs.
 - Use `make stop` to stop the local Lash server.

@@ -1,5 +1,6 @@
 'use client';
 
+import { applyTextOperations } from '@lash/ai';
 import { createAuthorshipMap } from '@lash/authorship';
 import {
   createLashEditorExtensions,
@@ -18,7 +19,7 @@ import {
   type ToolbarButtonSpec,
 } from '@lash/editor-core';
 import { EMPTY_HISTORY_DOC, createHistoryStore } from '@lash/history';
-import { createDocumentId, hashCanonical, type HistoryEntry } from '@lash/types';
+import { createDocumentId, hashCanonical, type EditPatch, type HistoryEntry } from '@lash/types';
 import type { Editor } from '@tiptap/core';
 import { EditorContent, useEditor } from '@tiptap/react';
 import { type ChangeEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -59,6 +60,7 @@ const HISTORY_SCHEMA_VERSION = 'lash-schema-v1';
 const HISTORY_ACTOR = { type: 'user', id: 'local-user' } as const;
 const HISTORY_AUDIT = { ua: 'lash-web/local-history' } as const;
 const HISTORY_RECORD_DEBOUNCE_MS = 900;
+const AI_AUDIT = { ua: 'lash-local-ai-editor' };
 
 const textReplaceOp = (before: string, after: string) => {
   let prefix = 0;
@@ -544,6 +546,47 @@ export function EditorWorkspace() {
     [editor],
   );
 
+  const handleApplyAiPatch = useCallback(
+    async (patch: EditPatch): Promise<{ ok: true } | { ok: false; reason: string }> => {
+      if (!editor) return { ok: false, reason: 'editor unavailable' };
+      const expectedParentSha = historyHeadRef.current;
+      if (!expectedParentSha) return { ok: false, reason: 'history unavailable' };
+      if (patch.baseVersion !== expectedParentSha)
+        return { ok: false, reason: 'base version stale' };
+      const before = editorText(editor);
+      if (before !== historyTextRef.current) {
+        return { ok: false, reason: 'pending local history flush' };
+      }
+
+      const after = applyTextOperations(before, patch.operations);
+      const result = await historyStoreRef.current.append({
+        docId: HISTORY_DOC_ID,
+        actor: patch.author,
+        expectedParentSha,
+        schemaVersion: patch.schemaVersion,
+        ops: patch.operations,
+        intent: 'ai',
+        audit: AI_AUDIT,
+      });
+      if (!result.ok) return { ok: false, reason: result.reason };
+
+      applyingHistoryRef.current = true;
+      try {
+        editor.commands.setContent(textToContent(after), false);
+      } finally {
+        applyingHistoryRef.current = false;
+      }
+      historyHeadRef.current = result.entry.resultSha;
+      historyTextRef.current = after;
+      const entries = await historyStoreRef.current.list(HISTORY_DOC_ID);
+      setHistoryEntries(entries);
+      setSelectedHistoryEntryId(result.entry.id);
+      setBlameLines(blameFor(entries, after));
+      return { ok: true };
+    },
+    [editor],
+  );
+
   // Cmd/Ctrl+Shift+F binding per agents.md keymap. Listening at the shell
   // level (not via a TipTap extension) because focus mode is React state,
   // not editor state, and we need to toggle it regardless of editor focus.
@@ -732,7 +775,14 @@ export function EditorWorkspace() {
             currentText={editor ? editorText(editor) : ''}
           />
           <SharePanel editor={editor} docId={HISTORY_DOC_ID} />
-          <AIPanel editor={editor} />
+          <AIPanel
+            editor={editor}
+            docId={HISTORY_DOC_ID}
+            baseVersion={historyHeadRef.current}
+            currentText={editor ? editorText(editor) : ''}
+            schemaVersion={HISTORY_SCHEMA_VERSION}
+            onApplyPatch={handleApplyAiPatch}
+          />
         </div>
       </div>
 

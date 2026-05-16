@@ -18,6 +18,7 @@ export default defineConfig({
       '@lash/mentions': path.resolve(__dirname, 'packages/mentions/src'),
       '@lash/rbac': path.resolve(__dirname, 'packages/rbac/src'),
       '@lash/share': path.resolve(__dirname, 'packages/share/src'),
+      '@lash/ai': path.resolve(__dirname, 'packages/ai/src'),
       '@lash/ui': path.resolve(__dirname, 'packages/ui/src'),
       '@lash/types': path.resolve(__dirname, 'packages/types/src'),
       '@lash/testing': path.resolve(__dirname, 'packages/testing'),
