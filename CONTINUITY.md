@@ -6,10 +6,10 @@ Ship Lash v1 as the full collaborative editor spec in `agents.md`, with all acce
 
 ## Constraints/Assumptions
 
-- No direct commits to `main`; current branch `codex/fix/bead-0-restore-lash-gate`.
+- No direct commits to `main`; current branch `codex/feat/bead-2-history-log`.
 - Riddle integration is planning-only; do not touch `/Users/borker/dev/riddle`.
 - Current v1 path resumes from M2 after the Phase 0 gate is restored.
-- GitHub remote/branch protection are still UNCONFIRMED/missing locally.
+- GitHub remote is `https://github.com/apollostreetcompany/lash-doc.git`; branch protection remains UNCONFIRMED.
 
 ## Key Decisions
 
@@ -28,18 +28,20 @@ Ship Lash v1 as the full collaborative editor spec in `agents.md`, with all acce
 - [x] Bead 0 - Restore Lash release gate and process scaffolding.
 - [x] Bead 1 - Local MVP run path (`make serve`, `make status`, `make stop`).
 - [x] Verified live local editor typing/autosave against `http://127.0.0.1:3000`.
+- [x] Bead 2 - Append-only history log and deterministic replay/diff foundation.
 
 ### Now
 
-- Lash MVP is running locally at `http://127.0.0.1:3000` in tmux session `lash-doc-web`.
+- Lash MVP is running locally at `http://127.0.0.1:3000`; ready for the next M2 bead.
 
 ### Next
 
 - Begin M2 hub: append-only history log + ops shape (`lash-c2`) after process gate is complete.
+- Continue M2 with history UI/timeline wiring, restore UI, and then authorship/diff integrations.
 
 ## Open Questions
 
-- UNCONFIRMED: GitHub remote and branch protection setup.
+- UNCONFIRMED: GitHub branch protection setup.
 - UNCONFIRMED: Whether retrospective review for M1/B1 and M1/B3 is still required before M2.
 - Repo-wide `pnpm run format` currently fails on 80 pre-existing files outside this bead; targeted source/new process files pass Prettier check, and legacy Markdown was kept minimally edited to avoid unrelated churn.
 
@@ -59,3 +61,6 @@ Ship Lash v1 as the full collaborative editor spec in `agents.md`, with all acce
 - `make status`
 - `make stop`
 - `pnpm playwright test apps/web/e2e/smoke/home.spec.ts apps/web/e2e/autosave/autosave-indicator.spec.ts --workers=1`
+- `packages/history/src/index.ts`
+- `packages/testing/unit/history/history-store.test.ts`
+- `packages/testing/unit/diff/diff-deterministic.test.ts`
