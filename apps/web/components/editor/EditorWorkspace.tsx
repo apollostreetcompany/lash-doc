@@ -91,6 +91,19 @@ const blameFor = (entries: HistoryEntry[], text: string) => {
   return map.blameByLine(text);
 };
 
+const sameStringArray = (left: string[], right: string[]) =>
+  left.length === right.length && left.every((value, index) => value === right[index]);
+
+const sameActiveCell = (left: ActiveCell | null, right: ActiveCell | null) => {
+  if (left === right) return true;
+  if (!left || !right) return false;
+  return (
+    left.cellType === right.cellType &&
+    left.value === right.value &&
+    sameStringArray(left.options, right.options)
+  );
+};
+
 const textToContent = (text: string) => ({
   type: 'doc',
   content: text.split('\n').map((line) => ({
@@ -122,6 +135,7 @@ export function EditorWorkspace() {
   const historyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const applyingHistoryRef = useRef(false);
   const suggestModeRef = useRef(false);
+  const activeTableCellRef = useRef<ActiveCell | null>(null);
 
   const imageUploader = useMemo<LashImageUploader>(() => createBrowserImageUploader(), []);
 
@@ -276,14 +290,23 @@ export function EditorWorkspace() {
 
   useEffect(() => {
     if (!editor) {
+      activeTableCellRef.current = null;
       setActiveTableCell(null);
       return;
     }
 
+    const publishActiveCell = (next: ActiveCell | null) => {
+      if (sameActiveCell(activeTableCellRef.current, next)) {
+        return;
+      }
+      activeTableCellRef.current = next;
+      setActiveTableCell(next);
+    };
+
     const update = () => {
       const attrs = lashCommands.getTableCellAttrs(editor);
       if (!attrs) {
-        setActiveTableCell(null);
+        publishActiveCell(null);
         return;
       }
       const normalizedOptions = Array.isArray(attrs.options)
@@ -291,7 +314,7 @@ export function EditorWorkspace() {
             (option): option is string => typeof option === 'string',
           )
         : [];
-      setActiveTableCell({
+      publishActiveCell({
         cellType: attrs.cellType as LashTableCellType,
         value: typeof attrs.value === 'string' ? attrs.value : '',
         options: normalizedOptions,
@@ -365,7 +388,10 @@ export function EditorWorkspace() {
       anchorCol: number,
       headRow = anchorRow,
       headCol = anchorCol,
-    ) => selectTableCells(editor, anchorRow, anchorCol, headRow, headCol);
+    ) =>
+      selectTableCells(editor, anchorRow, anchorCol, headRow, headCol, {
+        scrollIntoView: false,
+      });
     win.__lashSerializeMarkdown = () =>
       serializeDocToMarkdown(editor.getJSON(), { documentId: OUTLINE_DOC_ID }).markdown;
     win.__lashInsertImageFromArrayBuffer = async (buffer: ArrayBuffer, mimeType = 'image/png') => {

@@ -28,6 +28,7 @@ Ship Lash v1 as the full collaborative editor spec in `agents.md`, with all acce
 12. Cross-browser acceptance is now project-scoped in Playwright: the full Chromium suite runs once, and Chrome, Edge-UA Chromium, Firefox, WebKit/Safari, and iPad WebKit each run a focused editor smoke gate.
 13. IME autosave is guarded by an explicit composition gate: transactions during composition do not schedule saves until `compositionend`, and only the final composed snapshot is persisted.
 14. CI's skip/todo guard must fetch PR branch refs with ancestry and compute an explicit merge base; shallow endpoint-SHA fetches can make `BASE_SHA...HEAD_SHA` fail even when the PR branch contains the base.
+15. Programmatic table perf selections should avoid forced scroll when the caller already controls viewport position, and table-cell panel state should be deduplicated so selection and transaction events do not trigger duplicate React renders for identical cell attrs.
 
 ## State
 
@@ -54,10 +55,11 @@ Ship Lash v1 as the full collaborative editor spec in `agents.md`, with all acce
 - [x] Bead 13 - AI patch validation, accept/reject flow, labeling, and citations.
 - [x] Bead 14 - Cross-browser Playwright project gates.
 - [x] Bead 15 - QA convergence, selection stability, and IME autosave unit gates.
+- [x] Bead 16 - Release readiness docs and CI skip/todo guard hardening.
 
 ### Now
 
-- Bead 16 - Release readiness and CI hardening for PR #1. Local product gates are green; GitHub Actions initially failed before product tests because the skip/todo guard could not find a merge base.
+- Bead 17 - Table selection performance stabilization after PR #1 CI found `table-perf-100x20` selection at 126.5 ms against a 120 ms gate on GitHub Actions.
 
 ### Next
 
@@ -172,3 +174,4 @@ Ship Lash v1 as the full collaborative editor spec in `agents.md`, with all acce
 - `.github/workflows/ci.yml`
 - `RELEASE_NOTES.md`
 - `DEPLOYMENT.md`
+- `packages/editor-core/src/table/helpers.ts`

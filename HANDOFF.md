@@ -19,8 +19,9 @@
 - Last bead: Bead 13 - AI patch validation, accept/reject flow, labeling, and citations.
 - Last bead: Bead 14 - Cross-browser Playwright project gates.
 - Last bead: Bead 15 - QA convergence, selection stability, and IME autosave unit gates.
-- Current bead: Bead 16 - Release readiness and CI hardening for PR #1.
-- Current state: Unit and e2e gates pass with no skips/todos; GitHub Actions failed before product tests because the skip/todo guard used a three-dot diff without a locally available merge base.
+- Last bead: Bead 16 - Release readiness docs and CI skip/todo guard hardening.
+- Current bead: Bead 17 - Table selection performance stabilization.
+- Current state: Unit and e2e gates pass with no skips/todos; PR #1 CI now reaches product tests, and the only remote failure was `table-perf-100x20` selection at 126.5 ms against the 120 ms gate.
 - Local MVP is available at `http://127.0.0.1:3000` in tmux session `lash-doc-web`.
 - Product decision: Riddle is optional/deferred. Do not implement Lash-Riddle integration until Riddle stabilizes as its own product.
 
@@ -63,6 +64,7 @@
 - Replaced the remaining QA/IME unit todos with convergence, selection-anchor stability, IME autosave, and IME composition coverage.
 - Opened PR #1 against `codex/fix/bead-0-restore-lash-gate`; branch protection was checked and is not configured on the default branch.
 - Hardened CI's skip/todo guard to fetch PR branch refs with ancestry, verify both endpoint SHAs, compute an explicit merge base, and diff `MERGE_BASE..HEAD_SHA`.
+- Removed forced scroll from the programmatic table selection path used by perf gates, and deduplicated identical active-cell state so selection/transaction events do not trigger duplicate table-panel renders.
 
 ## Validation To Run
 
@@ -191,9 +193,17 @@
 - `pnpm run build` - pass after Bead 16.
 - `make serve` - pass after Bead 16.
 - `make status` - pass after Bead 16; app running at `http://127.0.0.1:3000`.
+- `pnpm exec prettier --write apps/web/components/editor/EditorWorkspace.tsx packages/editor-core/src/table/helpers.ts` - pass after Bead 17.
+- `pnpm --filter @lash/web build && pnpm playwright test apps/web/e2e/tables/table-perf-100x20.spec.ts --workers=1` - pass after Bead 17, 1 passed.
+- `pnpm run lint` - pass after Bead 17.
+- `pnpm run typecheck` - pass after Bead 17.
+- `pnpm run test:unit` - pass, 73 passed after Bead 17.
+- `pnpm run test:e2e` - pass, 75 passed after Bead 17.
+- `make serve` - pass after Bead 17.
+- `make status` - pass after Bead 17; app running at `http://127.0.0.1:3000`.
 
 ## Open Items
 
 - GitHub branch protection is UNCONFIRMED; configure required `build-and-test` checks if permissions allow after CI is green.
-- Next step should be re-running PR #1 CI and updating bead evidence.
+- Next step should be re-running PR #1 CI and configuring required `build-and-test` checks if permissions allow after CI is green.
 - Use `make stop` to stop the local Lash server.
