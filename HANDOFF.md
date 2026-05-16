@@ -2,7 +2,7 @@
 
 ## Current State
 
-- Branch: `codex/test/bead-14-cross-browser-gates`
+- Branch: `codex/test/bead-15-qa-ime-unit-gates`
 - Last bead: Bead 0 - Restore Lash release gate and process scaffolding.
 - Last bead: Bead 1 - Local MVP run path.
 - Last bead: Bead 2 - Append-only history log and deterministic replay/diff foundation.
@@ -18,7 +18,8 @@
 - Last bead: Bead 12 - Screen-reader headings, diff announcements, and thread navigation.
 - Last bead: Bead 13 - AI patch validation, accept/reject flow, labeling, and citations.
 - Last bead: Bead 14 - Cross-browser Playwright project gates.
-- Current state: E2E acceptance gates pass with no skips; remaining known gaps are unit-level QA/IME todos.
+- Last bead: Bead 15 - QA convergence, selection stability, and IME autosave unit gates.
+- Current state: Unit and e2e gates pass with no skips/todos; ready for release readiness/merge preparation.
 - Local MVP is available at `http://127.0.0.1:3000` in tmux session `lash-doc-web`.
 - Product decision: Riddle is optional/deferred. Do not implement Lash-Riddle integration until Riddle stabilizes as its own product.
 
@@ -57,6 +58,8 @@
 - Replaced six AI e2e stubs and three AI unit todos with real coverage.
 - Added Playwright projects for focused Chrome, Edge-UA Chromium, Firefox, WebKit/Safari, and iPad WebKit acceptance gates without multiplying the full suite across every browser.
 - Replaced five cross-browser e2e stubs with real editor smoke coverage.
+- Added an IME-aware autosave transaction gate and wired it into `useAutosave` so composition transactions wait until `compositionend`.
+- Replaced the remaining QA/IME unit todos with convergence, selection-anchor stability, IME autosave, and IME composition coverage.
 
 ## Validation To Run
 
@@ -168,9 +171,16 @@
 - `pnpm run test:e2e` - pass, 75 passed.
 - `make serve` - pass after Bead 14.
 - `make status` - pass after Bead 14; app running at `http://127.0.0.1:3000`.
+- `pnpm vitest run packages/testing/unit/qa/multi-client-converge.test.ts packages/testing/unit/qa/selection-stability.test.ts packages/testing/unit/ime/ime-autosave.test.ts packages/testing/unit/ime/ime-composition.test.ts` - pass, 5 passed.
+- `pnpm run lint` - pass after Bead 15.
+- `pnpm run typecheck` - pass after Bead 15.
+- `pnpm run test:unit` - pass, 73 passed.
+- `pnpm run test:e2e` - pass, 75 passed.
+- `make serve` - pass after Bead 15.
+- `make status` - pass after Bead 15; app running at `http://127.0.0.1:3000`.
 
 ## Open Items
 
 - GitHub branch protection is UNCONFIRMED.
-- Next implementation bead should target remaining unit-level QA/IME todos.
+- Next step should be release readiness/merge preparation.
 - Use `make stop` to stop the local Lash server.

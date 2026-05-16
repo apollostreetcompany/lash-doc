@@ -6,7 +6,7 @@ Ship Lash v1 as the full collaborative editor spec in `agents.md`, with all acce
 
 ## Constraints/Assumptions
 
-- No direct commits to `main`; current branch `codex/test/bead-14-cross-browser-gates`.
+- No direct commits to `main`; current branch `codex/test/bead-15-qa-ime-unit-gates`.
 - Riddle integration is planning-only; do not touch `/Users/borker/dev/riddle`.
 - Current v1 path resumes from M2 after the Phase 0 gate is restored.
 - GitHub remote is `https://github.com/apollostreetcompany/lash-doc.git`; branch protection remains UNCONFIRMED.
@@ -25,6 +25,7 @@ Ship Lash v1 as the full collaborative editor spec in `agents.md`, with all acce
 10. Screen-reader acceptance starts with semantic landmarks and accessible names for document headings, outline navigation, diff announcements, and chat threads; this remains local UI coverage, not a Riddle integration point.
 11. AI editor starts as a deterministic local `EditPatch` flow: generated patches are validated, staged for accept/reject, applied through append-only history with `intent: ai`, labeled in diffs, and cited by document ranges.
 12. Cross-browser acceptance is now project-scoped in Playwright: the full Chromium suite runs once, and Chrome, Edge-UA Chromium, Firefox, WebKit/Safari, and iPad WebKit each run a focused editor smoke gate.
+13. IME autosave is guarded by an explicit composition gate: transactions during composition do not schedule saves until `compositionend`, and only the final composed snapshot is persisted.
 
 ## State
 
@@ -50,14 +51,15 @@ Ship Lash v1 as the full collaborative editor spec in `agents.md`, with all acce
 - [x] Bead 12 - Screen-reader headings, diff announcements, and thread navigation.
 - [x] Bead 13 - AI patch validation, accept/reject flow, labeling, and citations.
 - [x] Bead 14 - Cross-browser Playwright project gates.
+- [x] Bead 15 - QA convergence, selection stability, and IME autosave unit gates.
 
 ### Now
 
-- Lash MVP with local history, blame gutter, filtered diffs, suggest-mode, Doc Chat anchors, share/RBAC/redaction, mention/date-chip behavior, local offline queue/presence, large-table perf coverage, screen-reader accessibility gates, local AI patch flow, and cross-browser e2e gates is running at `http://127.0.0.1:3000`.
+- Lash MVP with local history, blame gutter, filtered diffs, suggest-mode, Doc Chat anchors, share/RBAC/redaction, mention/date-chip behavior, local offline queue/presence, large-table perf coverage, screen-reader accessibility gates, local AI patch flow, cross-browser e2e gates, and QA/IME unit gates is running at `http://127.0.0.1:3000`.
 
 ### Next
 
-- Resolve remaining unit-level QA/IME todos: multi-client convergence, selection stability, IME composition, and IME autosave.
+- Release readiness pass: confirm branch protection/CI status, review deployment docs, and prepare merge/release notes.
 
 ## Open Questions
 
@@ -160,3 +162,8 @@ Ship Lash v1 as the full collaborative editor spec in `agents.md`, with all acce
 - `apps/web/e2e/cross-browser/cb-firefox.spec.ts`
 - `apps/web/e2e/cross-browser/cb-safari.spec.ts`
 - `apps/web/e2e/cross-browser/cb-ipad.spec.ts`
+- `apps/web/lib/autosave.ts`
+- `packages/testing/unit/qa/multi-client-converge.test.ts`
+- `packages/testing/unit/qa/selection-stability.test.ts`
+- `packages/testing/unit/ime/ime-autosave.test.ts`
+- `packages/testing/unit/ime/ime-composition.test.ts`
