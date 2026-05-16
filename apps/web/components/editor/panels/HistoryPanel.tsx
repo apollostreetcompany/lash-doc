@@ -11,9 +11,11 @@ export interface HistoryPanelProps {
   editor: Editor | null;
   entries: HistoryEntry[];
   selectedEntryId: string | null;
+  authorFilter: string | null;
   open?: boolean;
   onSelect: (entryId: string) => void;
   onRestore: (entry: HistoryEntry) => void;
+  onClearAuthorFilter: () => void;
 }
 
 const renderSpan = (span: DiffSpan) => {
@@ -42,14 +44,19 @@ export function HistoryPanel({
   editor,
   entries,
   selectedEntryId,
+  authorFilter,
   open = true,
   onSelect,
   onRestore,
+  onClearAuthorFilter,
 }: HistoryPanelProps) {
   if (!open) return null;
 
+  const visibleEntries = authorFilter
+    ? entries.filter((entry) => entry.actor.id === authorFilter)
+    : entries;
   const selectedEntry =
-    entries.find((entry) => entry.id === selectedEntryId) ?? entries.at(-1) ?? null;
+    visibleEntries.find((entry) => entry.id === selectedEntryId) ?? visibleEntries.at(-1) ?? null;
   const diff = selectedEntry
     ? computeDiff(selectedEntry.parentSha, selectedEntry.resultSha, entries)
     : null;
@@ -59,13 +66,22 @@ export function HistoryPanel({
       <div className="history-panel-header">
         <h2 className="history-panel-title">History</h2>
         <span className="history-panel-count" data-testid="history-count">
-          {entries.length} {entries.length === 1 ? 'version' : 'versions'}
+          {visibleEntries.length} {visibleEntries.length === 1 ? 'version' : 'versions'}
         </span>
       </div>
 
-      {entries.length ? (
+      {authorFilter ? (
+        <div className="history-filter" data-testid="history-filter-author">
+          <span>Filtered by {authorFilter}</span>
+          <button type="button" onClick={onClearAuthorFilter}>
+            Clear
+          </button>
+        </div>
+      ) : null}
+
+      {visibleEntries.length ? (
         <ol className="history-version-list" data-testid="history-version-list">
-          {entries.map((entry) => {
+          {visibleEntries.map((entry) => {
             const selected = selectedEntry?.id === entry.id;
             return (
               <li key={entry.id}>

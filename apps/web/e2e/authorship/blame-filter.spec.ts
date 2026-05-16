@@ -1,6 +1,16 @@
-import { test } from '@playwright/test';
+import { expect, test } from '@playwright/test';
 
-// Acceptance stub generated from agents.md (Test ID: blame-filter.spec).
-test('blame-filter.spec', async () => {
-  test.skip(true, 'TODO acceptance scenario for `blame-filter.spec`.');
+test('blame-filter', async ({ page }) => {
+  await page.goto('/');
+  await page.waitForFunction(() =>
+    Boolean((window as unknown as { __lashEditor?: unknown }).__lashEditor),
+  );
+
+  await page.getByTestId('lash-editor-content').click();
+  await page.keyboard.type('Filter attribution');
+
+  await expect(page.getByTestId('history-version')).toHaveCount(1);
+  await page.getByTestId('blame-line').first().click();
+  await expect(page.getByTestId('history-filter-author')).toContainText('local-user');
+  await expect(page.getByTestId('history-version')).toHaveCount(1);
 });

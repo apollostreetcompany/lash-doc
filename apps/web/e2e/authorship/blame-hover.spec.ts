@@ -1,6 +1,16 @@
-import { test } from '@playwright/test';
+import { expect, test } from '@playwright/test';
 
-// Acceptance stub generated from agents.md (Test ID: blame-hover.spec).
-test('blame-hover.spec', async () => {
-  test.skip(true, 'TODO acceptance scenario for `blame-hover.spec`.');
+test('blame-hover', async ({ page }) => {
+  await page.goto('/');
+  await page.waitForFunction(() =>
+    Boolean((window as unknown as { __lashEditor?: unknown }).__lashEditor),
+  );
+
+  await page.getByTestId('lash-editor-content').click();
+  await page.keyboard.type('Hover attribution');
+
+  await expect(page.getByTestId('blame-line').first()).toHaveAttribute(
+    'title',
+    /Line 1: local-user/,
+  );
 });

@@ -1,5 +1,6 @@
 'use client';
 
+import { createAuthorshipMap } from '@lash/authorship';
 import {
   createLashEditorExtensions,
   createLocalStorageOutlinePersistence,
@@ -79,6 +80,12 @@ const textReplaceOp = (before: string, after: string) => {
 
 const editorText = (activeEditor: Editor): string => activeEditor.getText({ blockSeparator: '\n' });
 
+const blameFor = (entries: HistoryEntry[], text: string) => {
+  const map = createAuthorshipMap();
+  entries.forEach((entry) => map.recordEntry(entry));
+  return map.blameByLine(text);
+};
+
 const textToContent = (text: string) => ({
   type: 'doc',
   content: text.split('\n').map((line) => ({
@@ -95,6 +102,10 @@ export function EditorWorkspace() {
   const [activeTableCell, setActiveTableCell] = useState<ActiveCell | null>(null);
   const [historyEntries, setHistoryEntries] = useState<HistoryEntry[]>([]);
   const [selectedHistoryEntryId, setSelectedHistoryEntryId] = useState<string | null>(null);
+  const [historyAuthorFilter, setHistoryAuthorFilter] = useState<string | null>(null);
+  const [blameLines, setBlameLines] = useState<Array<{ line: number; authorId: string | null }>>(
+    [],
+  );
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const historyStoreRef = useRef(createHistoryStore());
   const historyHeadRef = useRef<string | null>(null);
@@ -190,6 +201,8 @@ export function EditorWorkspace() {
     if (!editor) {
       setHistoryEntries([]);
       setSelectedHistoryEntryId(null);
+      setHistoryAuthorFilter(null);
+      setBlameLines([]);
       historyHeadRef.current = null;
       historyTextRef.current = '';
       historyQueueRef.current = Promise.resolve();
@@ -230,6 +243,7 @@ export function EditorWorkspace() {
           if (disposed) return;
           setHistoryEntries(entries);
           setSelectedHistoryEntryId(result.entry.id);
+          setBlameLines(blameFor(entries, after));
         });
       }, 120);
     };
@@ -401,6 +415,10 @@ export function EditorWorkspace() {
     setSelectedHistoryEntryId(entryId);
   }, []);
 
+  const handleBlameLineClick = useCallback((authorId: string | null) => {
+    setHistoryAuthorFilter(authorId);
+  }, []);
+
   const handleRestoreHistoryEntry = useCallback(
     async (entry: HistoryEntry) => {
       if (!editor) return;
@@ -422,6 +440,7 @@ export function EditorWorkspace() {
       const entries = await historyStoreRef.current.list(HISTORY_DOC_ID);
       setHistoryEntries(entries);
       setSelectedHistoryEntryId(result.entry.id);
+      setBlameLines(blameFor(entries, text));
     },
     [editor],
   );
@@ -542,11 +561,40 @@ export function EditorWorkspace() {
             {!isMounted || !isEditorReady ? (
               <div className="editor-loading">Loading editor...</div>
             ) : (
-              <EditorContent
-                editor={editor}
-                data-testid="lash-editor-content"
-                className="lash-editor-content"
-              />
+              <div className="lash-editor-with-blame">
+                <div
+                  className="lash-blame-gutter"
+                  data-testid="blame-gutter"
+                  aria-label="Blame gutter"
+                >
+                  {blameLines.length ? (
+                    blameLines.map((line) => (
+                      <button
+                        key={line.line}
+                        type="button"
+                        className="lash-blame-line"
+                        data-testid="blame-line"
+                        data-author-id={line.authorId ?? ''}
+                        title={
+                          line.authorId
+                            ? `Line ${line.line}: ${line.authorId}`
+                            : `Line ${line.line}: unattributed`
+                        }
+                        onClick={() => handleBlameLineClick(line.authorId)}
+                      >
+                        {line.authorId ?? '-'}
+                      </button>
+                    ))
+                  ) : (
+                    <span className="lash-blame-empty">-</span>
+                  )}
+                </div>
+                <EditorContent
+                  editor={editor}
+                  data-testid="lash-editor-content"
+                  className="lash-editor-content"
+                />
+              </div>
             )}
           </div>
 
@@ -555,8 +603,10 @@ export function EditorWorkspace() {
             editor={editor}
             entries={historyEntries}
             selectedEntryId={selectedHistoryEntryId}
+            authorFilter={historyAuthorFilter}
             onSelect={handleSelectHistoryEntry}
             onRestore={handleRestoreHistoryEntry}
+            onClearAuthorFilter={() => setHistoryAuthorFilter(null)}
           />
           <ChatPanel editor={editor} />
           <SharePanel editor={editor} />
