@@ -1,9 +1,8 @@
 /**
  * @lash/doc-chat — selection-anchored threads, history-aware context, filters.
- * Status: SCAFFOLD — implement in M3/D4 (threads/anchors), M4/E3 (AI citations).
  */
 
-import type { DocumentId, Anchor, EditorOp, ActorRef } from '@lash/types';
+import type { ActorRef, Anchor, DocumentId, EditorOp } from '@lash/types';
 
 export interface ChatMessage {
   id: string;
@@ -31,37 +30,164 @@ export interface ThreadStore {
   list(docId: DocumentId, filter?: ChatThread['filters']): Promise<ChatThread[]>;
 }
 
-/** Inputs needed for deterministic anchor recovery.
- *
- *  Just `anchor + ops` is insufficient: when `anchor.token.text` repeats in
- *  the doc, deciding which occurrence survives an edit requires knowing the
- *  doc state and the producing history entries' step maps. Implementations
- *  walk the ops via PM Step semantics (see `PmStepOp` rule in @lash/types)
- *  to maintain occurrence counts. */
 export interface MapAnchorInput {
   anchor: Anchor;
   /** Doc JSON at `anchor.baseVersion`. */
   baseDoc: unknown;
   /** Ops applied since `anchor.baseVersion`, in order. */
   ops: EditorOp[];
-  /** Doc JSON after `ops` are applied. Used to resolve the "current"
-   *  occurrence index when text disambiguation is needed. */
+  /** Doc JSON after `ops` are applied. */
   currentDoc: unknown;
-  /** sha256 of `currentDoc` (typically the most recent HistoryEntry.resultSha
-   *  at the time of the call). The returned `Anchor.baseVersion` is set to
-   *  this so downstream consumers can deterministically diff/render. */
+  /** sha256 of `currentDoc`. */
   targetVersion: string;
 }
 
-/** Map an anchor through a sequence of ops, marking it orphaned if its range
- *  is destroyed. Uses the anchor's `token` (text + occurrence + nodeId/
- *  nodePath + assoc) for recovery. The result's `baseVersion` advances to
- *  whatever the caller treats as the post-ops version (typically the latest
- *  HistoryEntry.resultSha). */
-export const mapAnchor = (_input: MapAnchorInput): Anchor => {
-  throw new Error('mapAnchor: not implemented (M3/D4)');
+const textOf = (doc: unknown): string => {
+  if (typeof doc === 'string') return doc;
+  if (doc && typeof doc === 'object' && 'text' in doc) {
+    return String((doc as { text: unknown }).text ?? '');
+  }
+  return '';
+};
+
+const occurrenceIndex = (text: string, needle: string, from: number): number => {
+  if (!needle) return 0;
+  let count = 0;
+  let index = text.indexOf(needle);
+  while (index !== -1 && index < from) {
+    count += 1;
+    index = text.indexOf(needle, index + needle.length);
+  }
+  return count;
+};
+
+const findOccurrence = (text: string, needle: string, occurrence: number): number => {
+  if (!needle) return -1;
+  let index = text.indexOf(needle);
+  let count = 0;
+  while (index !== -1) {
+    if (count === occurrence) return index;
+    count += 1;
+    index = text.indexOf(needle, index + needle.length);
+  }
+  return -1;
+};
+
+export const createAnchor = (input: {
+  baseVersion: string;
+  docText: string;
+  from: number;
+  to: number;
+}): Anchor => {
+  const from = Math.max(0, Math.min(input.from, input.docText.length));
+  const to = Math.max(from, Math.min(input.to, input.docText.length));
+  const selectedText = input.docText.slice(from, to);
+  return {
+    baseVersion: input.baseVersion,
+    from,
+    to,
+    token: {
+      before: input.docText.slice(Math.max(0, from - 40), from),
+      after: input.docText.slice(to, Math.min(input.docText.length, to + 40)),
+      text: selectedText,
+      occurrence: occurrenceIndex(input.docText, selectedText, from),
+      confidence: selectedText ? 1 : 0,
+    },
+  };
+};
+
+export const mapAnchor = (input: MapAnchorInput): Anchor => {
+  const currentText = textOf(input.currentDoc);
+  const selectedText = input.anchor.token.text;
+  const nextFrom = findOccurrence(currentText, selectedText, input.anchor.token.occurrence);
+  if (nextFrom >= 0) {
+    return {
+      ...input.anchor,
+      baseVersion: input.targetVersion,
+      from: nextFrom,
+      to: nextFrom + selectedText.length,
+      orphaned: false,
+      token: {
+        ...input.anchor.token,
+        before: currentText.slice(Math.max(0, nextFrom - 40), nextFrom),
+        after: currentText.slice(
+          nextFrom + selectedText.length,
+          Math.min(currentText.length, nextFrom + selectedText.length + 40),
+        ),
+        confidence: 1,
+      },
+    };
+  }
+
+  const pinned = Math.max(0, Math.min(input.anchor.from, currentText.length));
+  return {
+    ...input.anchor,
+    baseVersion: input.targetVersion,
+    from: pinned,
+    to: pinned,
+    orphaned: true,
+    token: {
+      ...input.anchor.token,
+      confidence: 0,
+    },
+  };
 };
 
 export const createThreadStore = (_config: { adapter: 'memory' | 'postgres' }): ThreadStore => {
-  throw new Error('createThreadStore: not implemented (M3/D4)');
+  const threads = new Map<string, ChatThread>();
+  let threadSeq = 0;
+  let messageSeq = 0;
+
+  return {
+    async create(docId, anchor) {
+      threadSeq += 1;
+      const thread: ChatThread = {
+        id: `thread:${threadSeq}`,
+        docId,
+        anchor: { ...anchor, token: { ...anchor.token } },
+        messages: [],
+        filters: {},
+      };
+      threads.set(thread.id, thread);
+      return {
+        ...thread,
+        messages: [],
+        anchor: { ...thread.anchor, token: { ...thread.anchor.token } },
+      };
+    },
+    async reply(threadId, message) {
+      const thread = threads.get(threadId);
+      if (!thread) {
+        throw new Error(`doc-chat.reply: unknown thread ${threadId}`);
+      }
+      messageSeq += 1;
+      const saved: ChatMessage = {
+        ...message,
+        id: `message:${messageSeq}`,
+        threadId,
+      };
+      thread.messages.push(saved);
+      return { ...saved };
+    },
+    async list(docId, filter = {}) {
+      return Array.from(threads.values())
+        .filter((thread) => thread.docId === docId)
+        .filter((thread) => {
+          if (filter.authorId) {
+            return thread.messages.some((message) => message.author.id === filter.authorId);
+          }
+          if (filter.ai !== undefined) {
+            return filter.ai
+              ? thread.messages.some((message) => message.author.type === 'ai')
+              : thread.messages.every((message) => message.author.type !== 'ai');
+          }
+          return true;
+        })
+        .map((thread) => ({
+          ...thread,
+          anchor: { ...thread.anchor, token: { ...thread.anchor.token } },
+          messages: thread.messages.map((message) => ({ ...message })),
+        }));
+    },
+  };
 };

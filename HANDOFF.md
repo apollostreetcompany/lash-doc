@@ -2,7 +2,7 @@
 
 ## Current State
 
-- Branch: `codex/feat/bead-6-suggest-diff-filters`
+- Branch: `codex/feat/bead-7-doc-chat-anchors`
 - Last bead: Bead 0 - Restore Lash release gate and process scaffolding.
 - Last bead: Bead 1 - Local MVP run path.
 - Last bead: Bead 2 - Append-only history log and deterministic replay/diff foundation.
@@ -10,7 +10,8 @@
 - Last bead: Bead 4 - Authorship interval-map foundation.
 - Last bead: Bead 5 - Blame gutter UI and history filter-by-author.
 - Last bead: Bead 6 - Filtered diffs and local suggest-mode accept/reject.
-- Current state: Ready for doc chat anchors/history context and share/RBAC/redaction.
+- Last bead: Bead 7 - Doc Chat anchored threads, context, and filters.
+- Current state: Ready for share/RBAC/redaction and mention privacy/date chips.
 - Local MVP remains available at `http://127.0.0.1:3000` in tmux session `lash-doc-web`.
 - Product decision: Riddle is optional/deferred. Do not implement Lash-Riddle integration until Riddle stabilizes as its own product.
 
@@ -28,6 +29,9 @@
 - Added local history author/time filters, copyable filtered-diff links, and real filtered-diff e2e coverage.
 - Added local suggest mode that records `intent: suggest`, renders pending/accepted suggestion state in history diffs, and supports accept/reject via append-only history entries.
 - Increased local history recording debounce to 500 ms so loaded browser runs do not split one typing session into accidental single-character versions.
+- Implemented local Doc Chat anchor mapping and in-memory thread store with unit coverage.
+- Rendered Doc Chat panel with selection-anchored threads, original/current context, orphan markers, and author/AI filters.
+- Replaced six Doc Chat acceptance stubs with real Playwright coverage.
 
 ## Validation To Run
 
@@ -73,9 +77,17 @@
 - `pnpm run test:e2e` - pass, 39 passed, 36 skipped.
 - `make serve` - pass after Bead 6.
 - `make status` - pass after Bead 6; app running at `http://127.0.0.1:3000`.
+- `pnpm run lint` - pass after Bead 7.
+- `pnpm run typecheck` - pass after Bead 7.
+- `pnpm run test:unit` - pass, 55 passed, 9 todo/skipped.
+- `pnpm --filter @lash/web build` - pass after Bead 7.
+- `pnpm playwright test apps/web/e2e/doc-chat/chat-anchor-map.spec.ts apps/web/e2e/doc-chat/chat-current-context.spec.ts apps/web/e2e/doc-chat/chat-history-context.spec.ts apps/web/e2e/doc-chat/chat-orphan.spec.ts apps/web/e2e/doc-chat/chat-filter-author.spec.ts apps/web/e2e/doc-chat/chat-filter-ai.spec.ts --workers=1` - pass, 6 passed.
+- `pnpm run test:e2e` - pass, 45 passed, 30 skipped.
+- `make serve` - pass after Bead 7.
+- `make status` - pass after Bead 7; app running at `http://127.0.0.1:3000`.
 
 ## Open Items
 
 - GitHub branch protection is UNCONFIRMED.
-- Next implementation bead should wire doc chat anchors/history context or share/RBAC/redaction.
+- Next implementation bead should wire share/RBAC/redaction or mention privacy/date chips.
 - Use `make stop` to stop the local Lash server.

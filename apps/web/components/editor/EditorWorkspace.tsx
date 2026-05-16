@@ -721,7 +721,12 @@ export function EditorWorkspace() {
             onAcceptSuggestion={handleAcceptSuggestion}
             onRejectSuggestion={handleRejectSuggestion}
           />
-          <ChatPanel editor={editor} />
+          <ChatPanel
+            editor={editor}
+            docId={HISTORY_DOC_ID}
+            baseVersion={historyHeadRef.current}
+            currentText={editor ? editorText(editor) : ''}
+          />
           <SharePanel editor={editor} />
           <AIPanel editor={editor} />
         </div>

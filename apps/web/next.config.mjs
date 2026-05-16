@@ -6,6 +6,7 @@ const nextConfig = {
   },
   transpilePackages: [
     '@lash/authorship',
+    '@lash/doc-chat',
     '@lash/editor-core',
     '@lash/history',
     '@lash/types',
