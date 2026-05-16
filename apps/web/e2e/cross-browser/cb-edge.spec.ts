@@ -1,6 +1,12 @@
-import { test } from '@playwright/test';
+import { expect, test } from '@playwright/test';
 
-// Acceptance stub generated from agents.md (Test ID: cb-edge.spec).
-test('cb-edge.spec', async () => {
-  test.skip(true, 'TODO acceptance scenario for `cb-edge.spec`.');
+import { runEditorCompatibilitySmoke } from './helpers';
+
+test('cb-edge', async ({ page, browserName }) => {
+  expect(test.info().project.name).toBe('cb-edge');
+  expect(browserName).toBe('chromium');
+  await runEditorCompatibilitySmoke(page, 'Edge');
+
+  const userAgent = await page.evaluate(() => navigator.userAgent);
+  expect(userAgent).toContain('Edg/');
 });

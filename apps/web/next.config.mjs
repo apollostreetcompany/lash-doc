@@ -4,7 +4,18 @@ const nextConfig = {
   experimental: {
     typedRoutes: true,
   },
-  transpilePackages: ['@lash/editor-core', '@lash/ui'],
+  transpilePackages: [
+    '@lash/collab-service',
+    '@lash/authorship',
+    '@lash/doc-chat',
+    '@lash/editor-core',
+    '@lash/history',
+    '@lash/mentions',
+    '@lash/rbac',
+    '@lash/share',
+    '@lash/types',
+    '@lash/ui',
+  ],
 };
 
 export default nextConfig;

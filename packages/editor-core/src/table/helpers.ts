@@ -9,23 +9,27 @@ export const selectTableCells = (
   anchorCol: number,
   headRow = anchorRow,
   headCol = anchorCol,
+  options: { scrollIntoView?: boolean } = {},
 ): boolean => {
   const { state, view } = editor;
   if (!view) {
     return false;
   }
 
-  const resolvedTable = findTable(state.selection.$from) ?? (() => {
-    let located: { pos: number; start: number; node: Parameters<typeof TableMap.get>[0] } | null = null;
-    state.doc.descendants((node, pos) => {
-      if (node.type.name === 'table') {
-        located = { pos, start: pos + 1, node };
-        return false;
-      }
-      return true;
-    });
-    return located;
-  })();
+  const resolvedTable =
+    findTable(state.selection.$from) ??
+    (() => {
+      let located: { pos: number; start: number; node: Parameters<typeof TableMap.get>[0] } | null =
+        null;
+      state.doc.descendants((node, pos) => {
+        if (node.type.name === 'table') {
+          located = { pos, start: pos + 1, node };
+          return false;
+        }
+        return true;
+      });
+      return located;
+    })();
 
   if (!resolvedTable) {
     return false;
@@ -51,7 +55,10 @@ export const selectTableCells = (
     resolvedTable.start + headCellPos,
   );
 
-  const tr = state.tr.setSelection(selection).scrollIntoView();
+  let tr = state.tr.setSelection(selection);
+  if (options.scrollIntoView ?? true) {
+    tr = tr.scrollIntoView();
+  }
   view.dispatch(tr);
   return true;
 };

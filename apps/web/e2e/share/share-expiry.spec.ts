@@ -1,6 +1,9 @@
-import { test } from '@playwright/test';
+import { expect, test } from '@playwright/test';
 
-// Acceptance stub generated from agents.md (Test ID: share-expiry.spec).
-test('share-expiry.spec', async () => {
-  test.skip(true, 'TODO acceptance scenario for `share-expiry.spec`.');
+test('share-expiry', async ({ page }) => {
+  await page.goto('/');
+  await page.getByTestId('share-create-expired').click();
+
+  await expect(page.getByTestId('share-validation')).toContainText('Denied: expired');
+  await expect(page.getByTestId('share-audit-event').last()).toContainText('share-link.expired');
 });

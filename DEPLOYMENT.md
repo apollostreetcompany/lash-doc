@@ -14,11 +14,12 @@
 - For local manual use, run `make serve`. It starts the production build in the background at `http://127.0.0.1:3000` after checking the port and writing `.lash-web.pid` / `.lash-web.log`.
 - Use `make status` to verify the local server and `make stop` when finished.
 - Check port `3000` before introducing or changing a local web server binding. Set `PORT=3001 make serve` if `3000` is occupied.
+- Stop the local server before running `pnpm run build` or `pnpm run test:e2e`; `next build` rewrites `apps/web/.next` and can conflict with a running `next start`.
 
 ## Deploy Assumptions
 
 - No deployment target is configured in this checkout.
-- GitHub remote and required checks are UNCONFIRMED locally.
+- GitHub remote is configured; branch protection is configured on the default branch with strict required `build-and-test`, admin enforcement, and no force-push/delete.
 - Container/runtime binding assumptions are not yet applicable; record them here before the first deploy-affecting bead.
 
 ## Rollback

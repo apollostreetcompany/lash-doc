@@ -37,7 +37,7 @@ test.describe('autosave-indicator', () => {
     // generous to cover Playwright + CI scheduler jitter).
     const indicator = page.getByTestId('autosave-indicator');
     await expect(indicator).toBeVisible({ timeout: 2_500 });
-    await expect(indicator).toContainText(/saved/i, { timeout: 2_500 });
+    await expect(indicator).toContainText(/All changes saved/i, { timeout: 2_500 });
 
     // Hover tooltip = absolute ISO timestamp recorded at save time.
     // Poll the title attribute — React may commit `status` and `lastSavedAt`
@@ -47,6 +47,12 @@ test.describe('autosave-indicator', () => {
     });
 
     // The save callback wrote the doc snapshot to window.__lashLastSave.
+    await page.waitForFunction(() =>
+      Boolean(
+        (window as unknown as { __lashLastSave?: { savedAt: string; docJson: unknown } })
+          .__lashLastSave,
+      ),
+    );
     const lastSave = await page.evaluate(() => {
       const win = window as unknown as {
         __lashLastSave?: { savedAt: string; docJson: unknown };

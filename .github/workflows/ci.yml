@@ -39,6 +39,10 @@ jobs:
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
+          HEAD_REF: ${{ github.event.pull_request.head.ref }}
+          HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
+          BASE_REPO: ${{ github.repository }}
           PR_BODY: ${{ github.event.pull_request.body }}
         run: |
           set -euo pipefail
@@ -72,12 +76,17 @@ jobs:
             exit 0
           fi
 
-          # Endpoint-object availability defense; merge-base availability is
-          # provided by `fetch-depth: 0` on the checkout step above. These
-          # fetches alone do NOT guarantee a usable three-dot diff against a
-          # shallow cache.
-          git fetch --no-tags --depth=1 origin "$BASE_SHA" 2>/dev/null || true
-          git fetch --no-tags --depth=1 origin "$HEAD_SHA" 2>/dev/null || true
+          # Endpoint-object and merge-base availability defense. On pull_request
+          # events, checkout can leave the job with the synthetic merge commit
+          # but without enough ancestry for BASE_SHA...HEAD_SHA. Fetch the
+          # branch refs with history before computing the diff.
+          git fetch --no-tags origin "+refs/heads/$BASE_REF:refs/remotes/origin/$BASE_REF" 2>/dev/null || true
+          if [ "$HEAD_REPO" = "$BASE_REPO" ]; then
+            git fetch --no-tags origin "+refs/heads/$HEAD_REF:refs/remotes/origin/$HEAD_REF" 2>/dev/null || true
+          else
+            git fetch --no-tags "https://github.com/$HEAD_REPO.git" "+refs/heads/$HEAD_REF:refs/remotes/pr-head/$HEAD_REF" 2>/dev/null || true
+          fi
+          git fetch --no-tags origin "$BASE_SHA" "$HEAD_SHA" 2>/dev/null || true
 
           # Preflight: if the base SHA is not retrievable, fail loudly with a
           # clear message instead of a raw `git diff` fatal further down.
@@ -86,12 +95,24 @@ jobs:
             echo "If this is a force-pushed PR, rebase against current main and re-push."
             exit 1
           fi
+          if ! git cat-file -e "$HEAD_SHA" 2>/dev/null; then
+            echo "::error::PR head SHA $HEAD_SHA is not present locally even after fetch."
+            echo "If this is a force-pushed PR, rebase against current main and re-push."
+            exit 1
+          fi
+
+          MERGE_BASE=$(git merge-base "$BASE_SHA" "$HEAD_SHA" || true)
+          if [ -z "$MERGE_BASE" ]; then
+            echo "::error::No merge base found between PR base $BASE_SHA and head $HEAD_SHA after fetching branch ancestry."
+            echo "Rebase the PR branch onto the current base branch, then re-push."
+            exit 1
+          fi
 
           # Match all common skip/todo invocations:
           #   test.skip(...), it.skip(...), describe.skip(...), test.skip.each(...)
           #   test.todo(...), it.todo(...)
           # Trailing `\b` after .skip prevents false-positives on .skipIf, etc.
-          DIFF=$(git diff --no-color "$BASE_SHA...$HEAD_SHA" -- '*.spec.ts' '*.spec.tsx' '*.test.ts' '*.test.tsx')
+          DIFF=$(git diff --no-color "$MERGE_BASE" "$HEAD_SHA" -- '*.spec.ts' '*.spec.tsx' '*.test.ts' '*.test.tsx')
           ADDED=$(printf '%s' "$DIFF" \
             | grep_no_match_ok '^\+[^+]' \
             | grep_no_match_ok '\b(test|it|describe)\.skip\b|\b(test|it)\.todo\b')

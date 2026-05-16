@@ -58,6 +58,13 @@ export interface AutosaveSchedulerHandle {
   getLastSavedAt: () => string | null;
 }
 
+export interface ImeAwareTransactionGate {
+  notifyTransaction: () => void;
+  compositionStart: () => void;
+  compositionEnd: () => void;
+  isComposing: () => boolean;
+}
+
 const DEFAULT_DEBOUNCE_MS = 500;
 
 /**
@@ -158,6 +165,36 @@ export function createAutosaveScheduler(opts: AutosaveSchedulerOptions): Autosav
   };
 }
 
+export function createImeAwareTransactionGate(
+  scheduler: Pick<AutosaveSchedulerHandle, 'notify'>,
+): ImeAwareTransactionGate {
+  let composing = false;
+  let pendingDuringComposition = false;
+
+  return {
+    notifyTransaction() {
+      if (composing) {
+        pendingDuringComposition = true;
+        return;
+      }
+      scheduler.notify();
+    },
+    compositionStart() {
+      composing = true;
+      pendingDuringComposition = false;
+    },
+    compositionEnd() {
+      if (!composing) return;
+      composing = false;
+      if (pendingDuringComposition) {
+        pendingDuringComposition = false;
+        scheduler.notify();
+      }
+    },
+    isComposing: () => composing,
+  };
+}
+
 export interface UseAutosaveOptions {
   /** Debounce window in ms (default 500 per agents.md H.1 SLO). */
   debounceMs?: number;
@@ -244,11 +281,19 @@ export function useAutosave(
     });
     schedulerRef.current = scheduler;
 
-    const handler = () => scheduler.notify();
+    const imeGate = createImeAwareTransactionGate(scheduler);
+    const handler = () => imeGate.notifyTransaction();
+    const onCompositionStart = () => imeGate.compositionStart();
+    const onCompositionEnd = () => imeGate.compositionEnd();
+    const editorDom = editor.view.dom;
     editor.on('transaction', handler);
+    editorDom.addEventListener('compositionstart', onCompositionStart);
+    editorDom.addEventListener('compositionend', onCompositionEnd);
 
     return () => {
       editor.off('transaction', handler);
+      editorDom.removeEventListener('compositionstart', onCompositionStart);
+      editorDom.removeEventListener('compositionend', onCompositionEnd);
       scheduler.cancel();
       schedulerRef.current = null;
     };

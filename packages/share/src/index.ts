@@ -1,18 +1,16 @@
 /**
  * @lash/share — share-link signing/expiry, audit hooks, redaction policy.
- * Status: SCAFFOLD — implement in M3/D3.
- *
- * Permission decisions live in `@lash/rbac`; share only owns:
- *   - signing tokens (jti + signature)
- *   - validating signature/expiry/revocation against persisted state
- *   - emitting audit events
- *   - applying a redaction policy to diffs/threads
- *
- * Adapters are injected so the same signer works in apps/api (Postgres) and
- * apps/web/middleware (edge KV) without coupling to a transport.
  */
 
-import type { DocumentId, ShareToken, ShareScope, RevocationRecord, DiffJSON } from '@lash/types';
+import {
+  canonicalize,
+  hashCanonical,
+  type DiffJSON,
+  type DocumentId,
+  type RevocationRecord,
+  type ShareScope,
+  type ShareToken,
+} from '@lash/types';
 
 export interface RevocationStore {
   isRevoked(jti: string): Promise<boolean>;
@@ -21,15 +19,13 @@ export interface RevocationStore {
 }
 
 export interface PolicyStore {
-  /** Resolve a redactionPolicy sha to its full JSON body. */
   resolve(policySha: string, version: number): Promise<RedactionPolicy | null>;
 }
 
 export interface RedactionPolicy {
-  /** sha256 of canonicalize(this) — must equal the ShareToken.redactionPolicy. */
+  /** sha256 of canonicalize(this without sha) in production; local policies use stable ids. */
   sha: string;
   version: number;
-  /** Field-level rules. Implementation TBD in M3/D3 — keep generic for now. */
   rules: Array<{ path: string; action: 'redact' | 'omit' | 'hash' }>;
 }
 
@@ -42,10 +38,10 @@ export interface ShareSigner {
     redactionPolicy: string;
     redactionPolicyVersion: number;
   }): Promise<ShareToken>;
-  /** Validates signature, expiry, and revocation; called on EVERY read. */
-  validate(token: string): Promise<
-    | { ok: true; token: ShareToken }
-    | { ok: false; reason: 'expired' | 'invalid' | 'revoked' }
+  validate(
+    token: string,
+  ): Promise<
+    { ok: true; token: ShareToken } | { ok: false; reason: 'expired' | 'invalid' | 'revoked' }
   >;
   revoke(jti: string, revokedBy: string, reason?: string): Promise<void>;
 }
@@ -55,16 +51,129 @@ export interface CreateShareSignerConfig {
   revocations: RevocationStore;
   policies: PolicyStore;
   audit: AuditLog;
+  now?: () => string;
 }
 
-export const createShareSigner = (_config: CreateShareSignerConfig): ShareSigner => {
-  throw new Error('createShareSigner: not implemented (M3/D3)');
+const encode = (value: unknown): string =>
+  btoa(unescape(encodeURIComponent(canonicalize(value))))
+    .replaceAll('+', '-')
+    .replaceAll('/', '_')
+    .replaceAll('=', '');
+
+const decode = <T>(value: string): T => {
+  const padded = value
+    .replaceAll('-', '+')
+    .replaceAll('_', '/')
+    .padEnd(Math.ceil(value.length / 4) * 4, '=');
+  return JSON.parse(decodeURIComponent(escape(atob(padded)))) as T;
 };
 
-/** Strip diff spans the caller cannot see; total counts and span ids preserved
- *  so consumers can render redaction placeholders without UI shift. */
-export const redactDiff = (_diff: DiffJSON, _policy: RedactionPolicy, _callerId: string): DiffJSON => {
-  throw new Error('redactDiff: not implemented (M3/D3)');
+const signPayload = (payload: unknown, secret: string) => hashCanonical({ payload, secret });
+
+export const createShareSigner = (config: CreateShareSignerConfig): ShareSigner => {
+  const issued = new Map<string, ShareToken>();
+
+  return {
+    async sign(input) {
+      const issuedAt = config.now?.() ?? new Date().toISOString();
+      const jti = (await hashCanonical({ ...input, issuedAt })).slice(0, 24);
+      const payload = { ...input, jti };
+      const signature = await signPayload(payload, config.secret);
+      const token = `${encode(payload)}.${signature}`;
+      const shareToken: ShareToken = {
+        jti,
+        token,
+        ...input,
+      };
+      issued.set(jti, shareToken);
+      await config.audit.record({
+        ts: issuedAt,
+        actorId: input.issuedBy,
+        action: 'share-link.created',
+        docId: input.docId,
+        ua: 'lash-share/local',
+      });
+      return shareToken;
+    },
+    async validate(token) {
+      const [payloadPart, signature] = token.split('.');
+      if (!payloadPart || !signature) {
+        return { ok: false, reason: 'invalid' };
+      }
+      let payload: Omit<ShareToken, 'token'>;
+      try {
+        payload = decode<Omit<ShareToken, 'token'>>(payloadPart);
+      } catch {
+        return { ok: false, reason: 'invalid' };
+      }
+      const expected = await signPayload(payload, config.secret);
+      if (expected !== signature) {
+        await config.audit.record({
+          ts: config.now?.() ?? new Date().toISOString(),
+          actorId: 'anonymous',
+          action: 'share-link.invalid',
+          docId: payload.docId,
+          reason: 'signature',
+        });
+        return { ok: false, reason: 'invalid' };
+      }
+      const stored = issued.get(payload.jti) ?? { ...payload, token };
+      if (stored.expiresAt && stored.expiresAt <= (config.now?.() ?? new Date().toISOString())) {
+        await config.audit.record({
+          ts: config.now?.() ?? new Date().toISOString(),
+          actorId: stored.issuedBy,
+          action: 'share-link.expired',
+          docId: stored.docId,
+          reason: 'expired',
+        });
+        return { ok: false, reason: 'expired' };
+      }
+      if (await config.revocations.isRevoked(stored.jti)) {
+        return { ok: false, reason: 'revoked' };
+      }
+      await config.audit.record({
+        ts: config.now?.() ?? new Date().toISOString(),
+        actorId: stored.issuedBy,
+        action: 'share-link.access',
+        docId: stored.docId,
+      });
+      return { ok: true, token: { ...stored, token } };
+    },
+    async revoke(jti, revokedBy, reason) {
+      const token = issued.get(jti);
+      if (!token) return;
+      await config.revocations.revoke({
+        jti,
+        revokedAt: config.now?.() ?? new Date().toISOString(),
+        revokedBy,
+        reason,
+      });
+      await config.audit.record({
+        ts: config.now?.() ?? new Date().toISOString(),
+        actorId: revokedBy,
+        action: 'share-link.revoked',
+        docId: token.docId,
+        reason,
+      });
+    },
+  };
+};
+
+export const redactDiff = (
+  diff: DiffJSON,
+  policy: RedactionPolicy,
+  _callerId: string,
+): DiffJSON => {
+  if (!policy.rules.length) return diff;
+  return {
+    ...diff,
+    spans: diff.spans.map((span) => {
+      if (span.kind !== 'inserted' && span.kind !== 'deleted') {
+        return { ...span };
+      }
+      return { ...span, text: '[redacted]', redacted: true };
+    }),
+  };
 };
 
 export interface AuditEvent {
@@ -90,5 +199,38 @@ export interface AuditLog {
 }
 
 export const createAuditLog = (_config: { adapter: 'memory' | 'postgres' }): AuditLog => {
-  throw new Error('createAuditLog: not implemented (M3/D3)');
+  const events: AuditEvent[] = [];
+  return {
+    async record(event) {
+      events.push({ ...event });
+    },
+    async query(filter) {
+      return events.filter((event) => {
+        if (filter.docId && event.docId !== filter.docId) return false;
+        if (filter.since && event.ts < filter.since) return false;
+        return true;
+      });
+    },
+  };
 };
+
+export const createMemoryRevocationStore = (): RevocationStore => {
+  const records = new Map<string, RevocationRecord>();
+  return {
+    async isRevoked(jti) {
+      return records.has(jti);
+    },
+    async revoke(record) {
+      records.set(record.jti, { ...record });
+    },
+    async listFor() {
+      return Array.from(records.values()).map((record) => ({ ...record }));
+    },
+  };
+};
+
+export const createStaticPolicyStore = (policy: RedactionPolicy): PolicyStore => ({
+  async resolve(policySha, version) {
+    return policy.sha === policySha && policy.version === version ? policy : null;
+  },
+});

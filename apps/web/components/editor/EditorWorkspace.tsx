@@ -1,5 +1,7 @@
 'use client';
 
+import { applyTextOperations } from '@lash/ai';
+import { createAuthorshipMap } from '@lash/authorship';
 import {
   createLashEditorExtensions,
   createLocalStorageOutlinePersistence,
@@ -16,6 +18,8 @@ import {
   type OutlineItem,
   type ToolbarButtonSpec,
 } from '@lash/editor-core';
+import { EMPTY_HISTORY_DOC, createHistoryStore } from '@lash/history';
+import { createDocumentId, hashCanonical, type EditPatch, type HistoryEntry } from '@lash/types';
 import type { Editor } from '@tiptap/core';
 import { EditorContent, useEditor } from '@tiptap/react';
 import { type ChangeEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -25,8 +29,10 @@ import { AutosaveIndicator } from './panels/AutosaveIndicator';
 import { ChatPanel } from './panels/ChatPanel';
 import { EditorToolbar, type ToolbarMeta } from './panels/EditorToolbar';
 import { FocusModeToggle } from './panels/FocusModeToggle';
-import { HistoryPanel } from './panels/HistoryPanel';
+import { HistoryPanel, type HistoryTimeFilter } from './panels/HistoryPanel';
 import { MarkdownIO } from './panels/MarkdownIO';
+import { MentionPanel } from './panels/MentionPanel';
+import { OfflinePanel } from './panels/OfflinePanel';
 import { OutlinePanel } from './panels/OutlinePanel';
 import { SharePanel } from './panels/SharePanel';
 import { TableCellPanel, type ActiveCell } from './panels/TableCellPanel';
@@ -49,20 +55,97 @@ const TOOLBAR_META: ToolbarMeta[] = [
 ];
 
 const OUTLINE_DOC_ID = 'demo-document';
+const HISTORY_DOC_ID = createDocumentId(OUTLINE_DOC_ID);
+const HISTORY_SCHEMA_VERSION = 'lash-schema-v1';
+const HISTORY_ACTOR = { type: 'user', id: 'local-user' } as const;
+const HISTORY_AUDIT = { ua: 'lash-web/local-history' } as const;
+const HISTORY_RECORD_DEBOUNCE_MS = 1800;
+const AI_AUDIT = { ua: 'lash-local-ai-editor' };
+
+const textReplaceOp = (before: string, after: string) => {
+  let prefix = 0;
+  while (prefix < before.length && prefix < after.length && before[prefix] === after[prefix]) {
+    prefix += 1;
+  }
+  let suffix = 0;
+  while (
+    suffix < before.length - prefix &&
+    suffix < after.length - prefix &&
+    before[before.length - 1 - suffix] === after[after.length - 1 - suffix]
+  ) {
+    suffix += 1;
+  }
+  return {
+    op: 'replace_text' as const,
+    from: prefix,
+    to: before.length - suffix,
+    text: after.slice(prefix, after.length - suffix),
+  };
+};
+
+const editorText = (activeEditor: Editor): string => activeEditor.getText({ blockSeparator: '\n' });
+
+const blameFor = (entries: HistoryEntry[], text: string) => {
+  const map = createAuthorshipMap();
+  entries.forEach((entry) => map.recordEntry(entry));
+  return map.blameByLine(text);
+};
+
+const sameStringArray = (left: string[], right: string[]) =>
+  left.length === right.length && left.every((value, index) => value === right[index]);
+
+const sameActiveCell = (left: ActiveCell | null, right: ActiveCell | null) => {
+  if (left === right) return true;
+  if (!left || !right) return false;
+  return (
+    left.cellType === right.cellType &&
+    left.value === right.value &&
+    sameStringArray(left.options, right.options)
+  );
+};
+
+const textToContent = (text: string) => ({
+  type: 'doc',
+  content: text.split('\n').map((line) => ({
+    type: 'paragraph',
+    content: line ? [{ type: 'text', text: line }] : undefined,
+  })),
+});
 
 export function EditorWorkspace() {
   const [version, setVersion] = useState(0);
   const [isMounted, setIsMounted] = useState(false);
   const [outlineItems, setOutlineItems] = useState<OutlineItem[]>([]);
   const [isFocusMode, setIsFocusMode] = useState(false);
+  const [isSuggestMode, setIsSuggestMode] = useState(false);
   const [activeTableCell, setActiveTableCell] = useState<ActiveCell | null>(null);
+  const [historyEntries, setHistoryEntries] = useState<HistoryEntry[]>([]);
+  const [selectedHistoryEntryId, setSelectedHistoryEntryId] = useState<string | null>(null);
+  const [historyAuthorFilter, setHistoryAuthorFilter] = useState<string | null>(null);
+  const [historyTimeFilter, setHistoryTimeFilter] = useState<HistoryTimeFilter>(null);
+  const [acceptedSuggestionIds, setAcceptedSuggestionIds] = useState<string[]>([]);
+  const [blameLines, setBlameLines] = useState<Array<{ line: number; authorId: string | null }>>(
+    [],
+  );
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const historyStoreRef = useRef(createHistoryStore());
+  const historyHeadRef = useRef<string | null>(null);
+  const historyTextRef = useRef('');
+  const historyQueueRef = useRef(Promise.resolve());
+  const historyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const applyingHistoryRef = useRef(false);
+  const suggestModeRef = useRef(false);
+  const activeTableCellRef = useRef<ActiveCell | null>(null);
 
   const imageUploader = useMemo<LashImageUploader>(() => createBrowserImageUploader(), []);
 
   useEffect(() => {
     setIsMounted(true);
   }, []);
+
+  useEffect(() => {
+    suggestModeRef.current = isSuggestMode;
+  }, [isSuggestMode]);
 
   const outlinePersistence = useMemo(
     () =>
@@ -143,20 +226,95 @@ export function EditorWorkspace() {
 
   useEffect(() => {
     if (!editor) {
+      setHistoryEntries([]);
+      setSelectedHistoryEntryId(null);
+      setHistoryAuthorFilter(null);
+      setHistoryTimeFilter(null);
+      setAcceptedSuggestionIds([]);
+      setBlameLines([]);
+      historyHeadRef.current = null;
+      historyTextRef.current = '';
+      historyQueueRef.current = Promise.resolve();
+      return;
+    }
+
+    let disposed = false;
+    hashCanonical(EMPTY_HISTORY_DOC).then((emptySha) => {
+      if (disposed) return;
+      historyHeadRef.current = emptySha;
+      historyTextRef.current = editorText(editor);
+    });
+
+    const recordHistory = () => {
+      if (applyingHistoryRef.current) return;
+      if (historyTimerRef.current) {
+        clearTimeout(historyTimerRef.current);
+      }
+      historyTimerRef.current = setTimeout(() => {
+        historyQueueRef.current = historyQueueRef.current.then(async () => {
+          const before = historyTextRef.current;
+          const after = editorText(editor);
+          const expectedParentSha = historyHeadRef.current;
+          if (!expectedParentSha || before === after) return;
+          const result = await historyStoreRef.current.append({
+            docId: HISTORY_DOC_ID,
+            actor: HISTORY_ACTOR,
+            expectedParentSha,
+            schemaVersion: HISTORY_SCHEMA_VERSION,
+            ops: [textReplaceOp(before, after)],
+            intent: suggestModeRef.current ? 'suggest' : 'edit',
+            audit: HISTORY_AUDIT,
+          });
+          if (!result.ok) return;
+          historyHeadRef.current = result.entry.resultSha;
+          historyTextRef.current = after;
+          const entries = await historyStoreRef.current.list(HISTORY_DOC_ID);
+          if (disposed) return;
+          setHistoryEntries(entries);
+          setSelectedHistoryEntryId(result.entry.id);
+          setBlameLines(blameFor(entries, after));
+        });
+      }, HISTORY_RECORD_DEBOUNCE_MS);
+    };
+
+    editor.on('transaction', recordHistory);
+    return () => {
+      disposed = true;
+      if (historyTimerRef.current) {
+        clearTimeout(historyTimerRef.current);
+        historyTimerRef.current = null;
+      }
+      editor.off('transaction', recordHistory);
+    };
+  }, [editor]);
+
+  useEffect(() => {
+    if (!editor) {
+      activeTableCellRef.current = null;
       setActiveTableCell(null);
       return;
     }
 
+    const publishActiveCell = (next: ActiveCell | null) => {
+      if (sameActiveCell(activeTableCellRef.current, next)) {
+        return;
+      }
+      activeTableCellRef.current = next;
+      setActiveTableCell(next);
+    };
+
     const update = () => {
       const attrs = lashCommands.getTableCellAttrs(editor);
       if (!attrs) {
-        setActiveTableCell(null);
+        publishActiveCell(null);
         return;
       }
       const normalizedOptions = Array.isArray(attrs.options)
-        ? (attrs.options as unknown[]).filter((option): option is string => typeof option === 'string')
+        ? (attrs.options as unknown[]).filter(
+            (option): option is string => typeof option === 'string',
+          )
         : [];
-      setActiveTableCell({
+      publishActiveCell({
         cellType: attrs.cellType as LashTableCellType,
         value: typeof attrs.value === 'string' ? attrs.value : '',
         options: normalizedOptions,
@@ -230,13 +388,13 @@ export function EditorWorkspace() {
       anchorCol: number,
       headRow = anchorRow,
       headCol = anchorCol,
-    ) => selectTableCells(editor, anchorRow, anchorCol, headRow, headCol);
+    ) =>
+      selectTableCells(editor, anchorRow, anchorCol, headRow, headCol, {
+        scrollIntoView: false,
+      });
     win.__lashSerializeMarkdown = () =>
       serializeDocToMarkdown(editor.getJSON(), { documentId: OUTLINE_DOC_ID }).markdown;
-    win.__lashInsertImageFromArrayBuffer = async (
-      buffer: ArrayBuffer,
-      mimeType = 'image/png',
-    ) => {
+    win.__lashInsertImageFromArrayBuffer = async (buffer: ArrayBuffer, mimeType = 'image/png') => {
       const file = new File([buffer], `import-${Date.now()}.${mimeType.split('/')[1] ?? 'png'}`, {
         type: mimeType,
       });
@@ -293,6 +451,167 @@ export function EditorWorkspace() {
   const handleFocusModeToggle = useCallback(() => {
     setIsFocusMode((value) => !value);
   }, []);
+
+  const handleSelectHistoryEntry = useCallback((entryId: string) => {
+    setSelectedHistoryEntryId(entryId);
+  }, []);
+
+  const handleBlameLineClick = useCallback((authorId: string | null) => {
+    setHistoryAuthorFilter(authorId);
+  }, []);
+
+  const handleCopyHistoryFilterLink = useCallback(() => {
+    if (typeof window === 'undefined') return;
+    const url = new URL(window.location.href);
+    url.searchParams.delete('historyAuthor');
+    url.searchParams.delete('historyTime');
+    if (historyAuthorFilter) {
+      url.searchParams.set('historyAuthor', historyAuthorFilter);
+    }
+    if (historyTimeFilter) {
+      url.searchParams.set('historyTime', historyTimeFilter);
+    }
+    const link = url.toString();
+    (window as Window & { __lashLastHistoryFilterLink?: string }).__lashLastHistoryFilterLink =
+      link;
+    void navigator.clipboard?.writeText(link).catch(() => undefined);
+  }, [historyAuthorFilter, historyTimeFilter]);
+
+  const handleAcceptSuggestion = useCallback(
+    async (entry: HistoryEntry) => {
+      if (!editor) return;
+      const expectedParentSha = historyHeadRef.current;
+      if (!expectedParentSha) return;
+      const result = await historyStoreRef.current.append({
+        docId: HISTORY_DOC_ID,
+        actor: HISTORY_ACTOR,
+        expectedParentSha,
+        schemaVersion: HISTORY_SCHEMA_VERSION,
+        ops: [
+          {
+            op: 'set_attr',
+            nodeId: `suggestion:${entry.id}`,
+            attrs: { accepted: true, entryId: entry.id },
+          },
+        ],
+        intent: 'edit',
+        audit: HISTORY_AUDIT,
+      });
+      if (!result.ok) return;
+      const text = editorText(editor);
+      historyHeadRef.current = result.entry.resultSha;
+      historyTextRef.current = text;
+      const entries = await historyStoreRef.current.list(HISTORY_DOC_ID);
+      setAcceptedSuggestionIds((ids) => (ids.includes(entry.id) ? ids : [...ids, entry.id]));
+      setHistoryEntries(entries);
+      setSelectedHistoryEntryId(entry.id);
+      setBlameLines(blameFor(entries, text));
+    },
+    [editor],
+  );
+
+  const handleRejectSuggestion = useCallback(
+    async (entry: HistoryEntry) => {
+      if (!editor) return;
+      const expectedParentSha = historyHeadRef.current;
+      if (!expectedParentSha) return;
+      const parent = await historyStoreRef.current.loadAt(HISTORY_DOC_ID, entry.parentSha);
+      const targetText =
+        typeof parent === 'object' && parent && 'text' in parent ? String(parent.text) : '';
+      const currentText = editorText(editor);
+      if (currentText === targetText) return;
+      const result = await historyStoreRef.current.append({
+        docId: HISTORY_DOC_ID,
+        actor: HISTORY_ACTOR,
+        expectedParentSha,
+        schemaVersion: HISTORY_SCHEMA_VERSION,
+        ops: [{ op: 'replace_text', from: 0, to: currentText.length, text: targetText }],
+        intent: 'edit',
+        audit: HISTORY_AUDIT,
+      });
+      if (!result.ok) return;
+      applyingHistoryRef.current = true;
+      try {
+        editor.commands.setContent(textToContent(targetText), false);
+      } finally {
+        applyingHistoryRef.current = false;
+      }
+      historyHeadRef.current = result.entry.resultSha;
+      historyTextRef.current = targetText;
+      const entries = await historyStoreRef.current.list(HISTORY_DOC_ID);
+      setHistoryEntries(entries);
+      setSelectedHistoryEntryId(result.entry.id);
+      setBlameLines(blameFor(entries, targetText));
+    },
+    [editor],
+  );
+
+  const handleRestoreHistoryEntry = useCallback(
+    async (entry: HistoryEntry) => {
+      if (!editor) return;
+      const result = await historyStoreRef.current.restore(
+        HISTORY_DOC_ID,
+        entry.resultSha,
+        HISTORY_ACTOR,
+        HISTORY_AUDIT,
+      );
+      if (!result.ok) return;
+      const restored = await historyStoreRef.current.loadAt(HISTORY_DOC_ID, result.entry.resultSha);
+      const text =
+        typeof restored === 'object' && restored && 'text' in restored ? String(restored.text) : '';
+      applyingHistoryRef.current = true;
+      editor.commands.setContent(textToContent(text), false);
+      applyingHistoryRef.current = false;
+      historyHeadRef.current = result.entry.resultSha;
+      historyTextRef.current = text;
+      const entries = await historyStoreRef.current.list(HISTORY_DOC_ID);
+      setHistoryEntries(entries);
+      setSelectedHistoryEntryId(result.entry.id);
+      setBlameLines(blameFor(entries, text));
+    },
+    [editor],
+  );
+
+  const handleApplyAiPatch = useCallback(
+    async (patch: EditPatch): Promise<{ ok: true } | { ok: false; reason: string }> => {
+      if (!editor) return { ok: false, reason: 'editor unavailable' };
+      const expectedParentSha = historyHeadRef.current;
+      if (!expectedParentSha) return { ok: false, reason: 'history unavailable' };
+      if (patch.baseVersion !== expectedParentSha)
+        return { ok: false, reason: 'base version stale' };
+      const before = editorText(editor);
+      if (before !== historyTextRef.current) {
+        return { ok: false, reason: 'pending local history flush' };
+      }
+
+      const after = applyTextOperations(before, patch.operations);
+      const result = await historyStoreRef.current.append({
+        docId: HISTORY_DOC_ID,
+        actor: patch.author,
+        expectedParentSha,
+        schemaVersion: patch.schemaVersion,
+        ops: patch.operations,
+        intent: 'ai',
+        audit: AI_AUDIT,
+      });
+      if (!result.ok) return { ok: false, reason: result.reason };
+
+      applyingHistoryRef.current = true;
+      try {
+        editor.commands.setContent(textToContent(after), false);
+      } finally {
+        applyingHistoryRef.current = false;
+      }
+      historyHeadRef.current = result.entry.resultSha;
+      historyTextRef.current = after;
+      const entries = await historyStoreRef.current.list(HISTORY_DOC_ID);
+      setHistoryEntries(entries);
+      setSelectedHistoryEntryId(result.entry.id);
+      setBlameLines(blameFor(entries, after));
+      return { ok: true };
+    },
+    [editor],
+  );
 
   // Cmd/Ctrl+Shift+F binding per agents.md keymap. Listening at the shell
   // level (not via a TipTap extension) because focus mode is React state,
@@ -380,6 +699,15 @@ export function EditorWorkspace() {
         />
         <AutosaveIndicator editor={editor} />
         <FocusModeToggle isFocusMode={isFocusMode} onToggle={handleFocusModeToggle} />
+        <button
+          type="button"
+          className="suggest-mode-toggle"
+          data-testid="suggest-mode-toggle"
+          data-active={isSuggestMode ? 'true' : 'false'}
+          onClick={() => setIsSuggestMode((value) => !value)}
+        >
+          {isSuggestMode ? 'Suggesting' : 'Suggest'}
+        </button>
       </div>
       <div className="lash-editor-layout">
         {!isFocusMode ? (
@@ -410,19 +738,77 @@ export function EditorWorkspace() {
             {!isMounted || !isEditorReady ? (
               <div className="editor-loading">Loading editor...</div>
             ) : (
-              <EditorContent
-                editor={editor}
-                data-testid="lash-editor-content"
-                className="lash-editor-content"
-              />
+              <div className="lash-editor-with-blame">
+                <div
+                  className="lash-blame-gutter"
+                  data-testid="blame-gutter"
+                  aria-label="Blame gutter"
+                >
+                  {blameLines.length ? (
+                    blameLines.map((line) => (
+                      <button
+                        key={line.line}
+                        type="button"
+                        className="lash-blame-line"
+                        data-testid="blame-line"
+                        data-author-id={line.authorId ?? ''}
+                        title={
+                          line.authorId
+                            ? `Line ${line.line}: ${line.authorId}`
+                            : `Line ${line.line}: unattributed`
+                        }
+                        onClick={() => handleBlameLineClick(line.authorId)}
+                      >
+                        {line.authorId ?? '-'}
+                      </button>
+                    ))
+                  ) : (
+                    <span className="lash-blame-empty">-</span>
+                  )}
+                </div>
+                <EditorContent
+                  editor={editor}
+                  data-testid="lash-editor-content"
+                  className="lash-editor-content"
+                />
+              </div>
             )}
           </div>
 
           {/* Slot panels for downstream lanes — render nothing until they're filled. */}
-          <HistoryPanel editor={editor} />
-          <ChatPanel editor={editor} />
-          <SharePanel editor={editor} />
-          <AIPanel editor={editor} />
+          <MentionPanel editor={editor} currentText={editor ? editorText(editor) : ''} />
+          <OfflinePanel editor={editor} />
+          <HistoryPanel
+            editor={editor}
+            entries={historyEntries}
+            selectedEntryId={selectedHistoryEntryId}
+            authorFilter={historyAuthorFilter}
+            timeFilter={historyTimeFilter}
+            acceptedSuggestionIds={acceptedSuggestionIds}
+            onSelect={handleSelectHistoryEntry}
+            onRestore={handleRestoreHistoryEntry}
+            onSetAuthorFilter={setHistoryAuthorFilter}
+            onClearAuthorFilter={() => setHistoryAuthorFilter(null)}
+            onSetTimeFilter={setHistoryTimeFilter}
+            onCopyFilterLink={handleCopyHistoryFilterLink}
+            onAcceptSuggestion={handleAcceptSuggestion}
+            onRejectSuggestion={handleRejectSuggestion}
+          />
+          <ChatPanel
+            editor={editor}
+            docId={HISTORY_DOC_ID}
+            baseVersion={historyHeadRef.current}
+            currentText={editor ? editorText(editor) : ''}
+          />
+          <SharePanel editor={editor} docId={HISTORY_DOC_ID} />
+          <AIPanel
+            editor={editor}
+            docId={HISTORY_DOC_ID}
+            baseVersion={historyHeadRef.current}
+            currentText={editor ? editorText(editor) : ''}
+            schemaVersion={HISTORY_SCHEMA_VERSION}
+            onApplyPatch={handleApplyAiPatch}
+          />
         </div>
       </div>
 

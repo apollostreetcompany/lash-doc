@@ -18,7 +18,8 @@ export function OutlinePanel({ items, onToggle, onFocus }: OutlinePanelProps) {
   return (
     <aside
       data-testid="lash-outline-panel"
-      aria-label="Document outline"
+      role="navigation"
+      aria-labelledby="lash-outline-title"
       className="lash-outline-panel"
     >
       <div className="outline-header">
@@ -43,7 +44,7 @@ export function OutlinePanel({ items, onToggle, onFocus }: OutlinePanelProps) {
                 type="button"
                 className="outline-collapse-button"
                 data-testid={`outline-toggle-${item.headingId}`}
-                aria-label={item.collapsed ? 'Expand section' : 'Collapse section'}
+                aria-label={`${item.collapsed ? 'Expand' : 'Collapse'} ${item.title}`}
                 aria-expanded={item.collapsed ? 'false' : 'true'}
                 onClick={() => onToggle(item)}
               >
@@ -53,6 +54,7 @@ export function OutlinePanel({ items, onToggle, onFocus }: OutlinePanelProps) {
                 type="button"
                 className="outline-jump-button"
                 data-testid={`outline-jump-${item.headingId}`}
+                aria-label={`Jump to ${item.title}`}
                 onClick={() => onFocus(item)}
               >
                 <span className="outline-text">{item.title}</span>
