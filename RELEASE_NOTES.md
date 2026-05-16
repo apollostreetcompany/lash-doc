@@ -1,5 +1,11 @@
 # Lash — Release Notes (M0 + M1 complete)
 
+## 2026-05-16 Bead 0 gate restoration
+
+- Riddle integration is explicitly deferred. Lash v1 remains independent; future Riddle hooks should use stable Lash operation/history contracts after Riddle stabilizes as its own product.
+- Image upload completion now preserves a user-selected width when the user resizes a placeholder before upload success returns dimensions.
+- Added process scaffolding (`CONTINUITY.md`, `HANDOFF.md`, `MISTAKES.md`, `DEPLOYMENT.md`, `Makefile`, `handoff/`) to make the release gate and bead evidence explicit.
+
 ## Status at HEAD
 
 - Branch: `main`

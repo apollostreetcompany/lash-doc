@@ -31,12 +31,7 @@ interface UploadManager {
   /** retry via direct view.dispatch — used outside CM context */
   retry(view: { state: EditorState; dispatch: (tr: Transaction) => void }, uploadId: string): void;
   /** insert by mutating an existing tr — used inside addCommands so CM dispatches our tr cleanly */
-  insertIntoTransaction(
-    state: EditorState,
-    tr: Transaction,
-    view: EditorView,
-    file: File,
-  ): void;
+  insertIntoTransaction(state: EditorState, tr: Transaction, view: EditorView, file: File): void;
   /** retry by mutating an existing tr — used inside addCommands */
   retryIntoTransaction(
     state: EditorState,
@@ -92,6 +87,7 @@ const updateImageAttrs = (
 const scheduleUpload = (
   view: { state: EditorState; dispatch: (tr: Transaction) => void },
   uploader: LashImageUploader,
+  initialWidth: number,
   uploadId: string,
   entry: UploadEntry,
   onSuccess: () => void,
@@ -121,7 +117,16 @@ const scheduleUpload = (
         progress: 1,
         previewSrc: null,
       };
-      if (typeof result.width === 'number' && result.width > 0) {
+      const current = findImageByUploadId(view.state.doc, uploadId) as {
+        pos: number;
+        node: ProseMirrorNode;
+      } | null;
+      const currentWidth = current?.node.attrs.width;
+      if (
+        typeof result.width === 'number' &&
+        result.width > 0 &&
+        (typeof currentWidth !== 'number' || currentWidth === initialWidth)
+      ) {
         attrs.width = result.width;
       }
       const successTr = updateImageAttrs(view.state, uploadId, attrs);
@@ -176,6 +181,7 @@ const createUploadManager = (options: LashImageOptions): UploadManager => {
     const disposer = scheduleUpload(
       view,
       options.uploader,
+      options.initialWidth,
       uploadId,
       entry,
       () => {
@@ -210,7 +216,10 @@ const createUploadManager = (options: LashImageOptions): UploadManager => {
     startUpload(view, uploadId, entry);
   };
 
-  const buildPlaceholderNode = (state: EditorState, file: File): { uploadId: string; previewURL: string | null; node: ProseMirrorNode } => {
+  const buildPlaceholderNode = (
+    state: EditorState,
+    file: File,
+  ): { uploadId: string; previewURL: string | null; node: ProseMirrorNode } => {
     const uploadId = generateUploadId();
     const previewURL =
       typeof window !== 'undefined' && typeof window.URL?.createObjectURL === 'function'
@@ -264,13 +273,23 @@ const createUploadManager = (options: LashImageOptions): UploadManager => {
   // committed to view.state before scheduleUpload's first onProgress runs. The deferred
   // start is guarded so that an undo or editor-destroy before the microtask runs does
   // not leak an upload against a missing placeholder (proconsult-m0/A P1).
-  const insertIntoTransaction = (state: EditorState, tr: Transaction, view: EditorView, file: File) => {
+  const insertIntoTransaction = (
+    state: EditorState,
+    tr: Transaction,
+    view: EditorView,
+    file: File,
+  ) => {
     const { uploadId, previewURL, node } = buildPlaceholderNode(state, file);
     tr.replaceSelectionWith(node).scrollIntoView();
     queueMicrotask(() => startUploadIfPlaceholderAlive(view, uploadId, { file, previewURL }));
   };
 
-  const retryIntoTransaction = (state: EditorState, tr: Transaction, view: EditorView, uploadId: string) => {
+  const retryIntoTransaction = (
+    state: EditorState,
+    tr: Transaction,
+    view: EditorView,
+    uploadId: string,
+  ) => {
     const entry = uploads.get(uploadId);
     if (!entry) {
       return;
@@ -364,7 +383,11 @@ const createUploadManager = (options: LashImageOptions): UploadManager => {
       });
       removed.forEach((id) => {
         const entry = uploads.get(id);
-        if (entry?.previewURL && typeof window !== 'undefined' && typeof window.URL?.revokeObjectURL === 'function') {
+        if (
+          entry?.previewURL &&
+          typeof window !== 'undefined' &&
+          typeof window.URL?.revokeObjectURL === 'function'
+        ) {
           window.URL.revokeObjectURL(entry.previewURL);
         }
         uploads.delete(id);
@@ -642,7 +665,7 @@ export const LashImage = Node.create<LashImageOptions>({
   parseHTML() {
     return [
       {
-        tag: 'img[src]'
+        tag: 'img[src]',
       },
     ];
   },

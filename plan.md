@@ -4,6 +4,10 @@
 > Designed for parallel execution: humans review here; agents claim work via TaskCreate or `br sync` (beads).
 > Source-of-truth contracts: `agents.md` (acceptance specs), `REPO_MAP.md` (package layout), `ACCEPTANCE_GATES.md` (test ID mapping).
 
+## Riddle policy (2026-05-16)
+
+Riddle is optional and owned outside Lash. Lash v1 must not implement Riddle-specific code, tests, UI, or runtime coupling until Riddle stabilizes as its own product. Future Riddle work should enter as a separately scoped integration through Lash's stable operation/history contracts, after Riddle's own Zed-native path is defined.
+
 ## 0. Reality snapshot (2026-05-10)
 
 | Signal | State at audit | After M0 |
