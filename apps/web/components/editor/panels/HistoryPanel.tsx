@@ -9,6 +9,8 @@ import type { Editor } from '@tiptap/core';
 
 export type HistoryTimeFilter = 'last-7-days' | null;
 
+type TextDiffSpan = Extract<DiffSpan, { kind: 'inserted' | 'deleted' }>;
+
 export interface HistoryPanelProps {
   editor: Editor | null;
   entries: HistoryEntry[];
@@ -39,6 +41,29 @@ const matchesTimeFilter = (entry: HistoryEntry, filter: HistoryTimeFilter) => {
 const spanTitle = (span: DiffSpan) =>
   [span.authorId, span.intent, span.ts].filter((part): part is string => Boolean(part)).join(' | ');
 
+const cleanDiffText = (text: string) => text.replace(/\s+/g, ' ').trim() || 'whitespace';
+
+const isTextDiffSpan = (span: DiffSpan): span is TextDiffSpan =>
+  span.kind === 'inserted' || span.kind === 'deleted';
+
+const spanAnnouncement = (span: TextDiffSpan) => {
+  const action = span.kind === 'inserted' ? 'Inserted text' : 'Deleted text';
+  const actor = span.authorId ? ` by ${span.authorId}` : '';
+  const intent = span.intent ? ` as ${span.intent}` : '';
+  return `${action}${actor}${intent}: ${cleanDiffText(span.text)}`;
+};
+
+const diffAnnouncement = (spans: DiffSpan[]) => {
+  const changedSpans = spans.filter(isTextDiffSpan).filter((span) => span.text.length > 0);
+  if (!changedSpans.length) return 'Version diff contains no textual changes.';
+  return `Version diff contains ${changedSpans
+    .map(
+      (span) =>
+        `${span.kind === 'inserted' ? 'inserted' : 'deleted'} "${cleanDiffText(span.text)}"`,
+    )
+    .join('; ')}.`;
+};
+
 const renderSpan = (span: DiffSpan) => {
   const title = spanTitle(span) || undefined;
   if (span.kind === 'inserted') {
@@ -49,6 +74,7 @@ const renderSpan = (span: DiffSpan) => {
         data-testid="history-diff-insert"
         data-author-id={span.authorId ?? ''}
         data-intent={span.intent ?? ''}
+        aria-label={spanAnnouncement(span)}
         title={title}
       >
         {span.text}
@@ -63,6 +89,7 @@ const renderSpan = (span: DiffSpan) => {
         data-testid="history-diff-delete"
         data-author-id={span.authorId ?? ''}
         data-intent={span.intent ?? ''}
+        aria-label={spanAnnouncement(span)}
         title={title}
       >
         {span.text}
@@ -109,6 +136,9 @@ export function HistoryPanel({
   const selectedSuggestionAccepted = selectedEntry
     ? acceptedSuggestionIds.includes(selectedEntry.id)
     : false;
+  const diffDescriptionId = selectedEntry
+    ? `history-diff-announcement-${selectedEntry.id}`
+    : undefined;
 
   return (
     <section className="lash-history-panel" data-testid="history-panel" aria-label="History">
@@ -214,9 +244,18 @@ export function HistoryPanel({
               {selectedSuggestionAccepted ? 'Accepted suggestion' : 'Pending suggestion'}
             </div>
           ) : null}
-          <pre className="history-diff" data-testid="history-diff">
+          <pre
+            className="history-diff"
+            data-testid="history-diff"
+            aria-label="Version diff"
+            aria-describedby={diffDescriptionId}
+            aria-live="polite"
+          >
             {diff.spans.map(renderSpan)}
           </pre>
+          <p id={diffDescriptionId} className="sr-only" data-testid="history-diff-announcement">
+            {diffAnnouncement(diff.spans)}
+          </p>
           <div className="history-diff-actions">
             {selectedEntry.intent === 'suggest' && !selectedSuggestionAccepted ? (
               <>

@@ -39,6 +39,8 @@ const threadMatchesFilter = (thread: LocalThread, filter: ChatFilter) => {
   return thread.messages.some((message) => message.author.type === 'ai');
 };
 
+const domId = (value: string) => value.replace(/[^A-Za-z0-9_-]/g, '-');
+
 export function ChatPanel({
   editor,
   docId,
@@ -168,18 +170,29 @@ export function ChatPanel({
       </div>
 
       {threadViews.length ? (
-        <ol className="chat-thread-list" data-testid="chat-thread-list">
+        <ol
+          className="chat-thread-list"
+          data-testid="chat-thread-list"
+          aria-label="Document chat threads"
+        >
           {threadViews.map(({ thread, mappedAnchor }) => {
             const currentContext = mappedAnchor.orphaned
               ? 'Context lost'
               : currentText.slice(mappedAnchor.from, mappedAnchor.to);
+            const threadTitleId = `chat-thread-title-${domId(thread.id)}`;
+            const threadTitle = `Thread on ${thread.anchor.token.text}`;
             return (
               <li key={thread.id}>
                 <article
                   className="chat-thread"
                   data-testid="chat-thread"
                   data-orphaned={mappedAnchor.orphaned ? 'true' : 'false'}
+                  aria-labelledby={threadTitleId}
+                  tabIndex={0}
                 >
+                  <h3 id={threadTitleId} className="sr-only">
+                    {threadTitle}
+                  </h3>
                   <div className="chat-thread-meta">
                     <span data-testid="chat-anchor-text">{thread.anchor.token.text}</span>
                     {mappedAnchor.orphaned ? (
@@ -202,7 +215,10 @@ export function ChatPanel({
                       <p data-testid="chat-current-context">{currentContext}</p>
                     </div>
                   </div>
-                  <ul className="chat-message-list">
+                  <ul
+                    className="chat-message-list"
+                    aria-label={`Messages for ${thread.anchor.token.text}`}
+                  >
                     {thread.messages.map((message) => (
                       <li
                         key={message.id}
@@ -218,6 +234,7 @@ export function ChatPanel({
                     type="button"
                     className="chat-action-button"
                     data-testid="chat-add-ai"
+                    aria-label={`Add AI reply to thread on ${thread.anchor.token.text}`}
                     onClick={() => addAiReply(thread.id)}
                   >
                     Add AI reply

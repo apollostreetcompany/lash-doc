@@ -2,7 +2,7 @@
 
 ## Current State
 
-- Branch: `codex/feat/bead-11-table-performance`
+- Branch: `codex/feat/bead-12-a11y-screen-reader`
 - Last bead: Bead 0 - Restore Lash release gate and process scaffolding.
 - Last bead: Bead 1 - Local MVP run path.
 - Last bead: Bead 2 - Append-only history log and deterministic replay/diff foundation.
@@ -15,8 +15,9 @@
 - Last bead: Bead 9 - Mentions, RBAC-hidden suggestions, and natural-date chips.
 - Last bead: Bead 10 - Offline queue, reconnect merge, and presence resume.
 - Last bead: Bead 11 - Large table 100x20 performance gate.
-- Current state: Ready for accessibility, cross-browser, and AI patch flow beads.
-- Local MVP remains available at `http://127.0.0.1:3000` in tmux session `lash-doc-web`.
+- Last bead: Bead 12 - Screen-reader headings, diff announcements, and thread navigation.
+- Current state: Ready for cross-browser and AI patch flow beads.
+- Local MVP is available at `http://127.0.0.1:3000` in tmux session `lash-doc-web`.
 - Product decision: Riddle is optional/deferred. Do not implement Lash-Riddle integration until Riddle stabilizes as its own product.
 
 ## Recent Work
@@ -46,6 +47,8 @@
 - Rendered an Offline panel that queues editor ops while disconnected, replays them into a local merged text snapshot on reconnect, and exposes presence status.
 - Replaced three offline acceptance stubs with real Playwright coverage and added unit coverage for queue replay and presence state.
 - Added large-table scroll containment/fixed sizing and replaced the 100x20 table performance stub with a browser perf gate for insert, scroll, select, and commit.
+- Added semantic outline navigation, screen-reader diff announcements, and keyboard-focusable named chat threads.
+- Replaced three screen-reader acceptance stubs with Playwright coverage for heading landmarks, diff live-region descriptions, and thread/message navigation.
 
 ## Validation To Run
 
@@ -132,9 +135,18 @@
 - `pnpm run test:e2e` - pass, 61 passed, 14 skipped.
 - `make serve` - pass after Bead 11.
 - `make status` - pass after Bead 11; app running at `http://127.0.0.1:3000`.
+- `pnpm exec prettier --write apps/web/components/editor/panels/HistoryPanel.tsx apps/web/components/editor/panels/ChatPanel.tsx apps/web/components/editor/panels/OutlinePanel.tsx apps/web/app/globals.css apps/web/e2e/a11y/sr-headings.spec.ts apps/web/e2e/a11y/sr-diff-announce.spec.ts apps/web/e2e/a11y/sr-thread-nav.spec.ts` - pass after Bead 12.
+- `pnpm run lint` - pass after Bead 12.
+- `pnpm run typecheck` - pass after Bead 12.
+- `pnpm run test:unit` - pass, 62 passed, 7 todo/skipped.
+- `pnpm --filter @lash/web build` - pass after Bead 12.
+- `pnpm playwright test apps/web/e2e/a11y/sr-headings.spec.ts apps/web/e2e/a11y/sr-diff-announce.spec.ts apps/web/e2e/a11y/sr-thread-nav.spec.ts --workers=1` - pass, 3 passed.
+- `pnpm run test:e2e` - pass, 64 passed, 11 skipped.
+- `make serve` - pass after Bead 12.
+- `make status` - pass after Bead 12; app running at `http://127.0.0.1:3000`.
 
 ## Open Items
 
 - GitHub branch protection is UNCONFIRMED.
-- Next implementation bead should target one of the remaining skipped areas: accessibility, cross-browser, or AI patch flow.
+- Next implementation bead should target one of the remaining skipped areas: cross-browser or AI patch flow.
 - Use `make stop` to stop the local Lash server.
