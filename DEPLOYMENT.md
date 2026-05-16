@@ -19,7 +19,10 @@
 ## Deploy Assumptions
 
 - No deployment target is configured in this checkout.
-- GitHub remote is configured; branch protection is configured on the default branch with strict required `build-and-test`, admin enforcement, and no force-push/delete.
+- GitHub remote is `https://github.com/apollostreetcompany/lash-doc.git`.
+- Default branch is `main`.
+- Branch protection is configured on `main` with strict required `build-and-test`, admin enforcement, and no force-push/delete.
+- Main CI is green on `7bf032debe1931d068f009ee735b95bd5c43b5c1` via run `25955018685`.
 - Container/runtime binding assumptions are not yet applicable; record them here before the first deploy-affecting bead.
 
 ## Rollback
