@@ -6,7 +6,7 @@ Ship Lash v1 as the full collaborative editor spec in `agents.md`, with all acce
 
 ## Constraints/Assumptions
 
-- No direct commits to `main`; current branch `codex/feat/bead-3-history-ui`.
+- No direct commits to `main`; current branch `codex/feat/bead-4-authorship-blame`.
 - Riddle integration is planning-only; do not touch `/Users/borker/dev/riddle`.
 - Current v1 path resumes from M2 after the Phase 0 gate is restored.
 - GitHub remote is `https://github.com/apollostreetcompany/lash-doc.git`; branch protection remains UNCONFIRMED.
@@ -30,15 +30,16 @@ Ship Lash v1 as the full collaborative editor spec in `agents.md`, with all acce
 - [x] Verified live local editor typing/autosave against `http://127.0.0.1:3000`.
 - [x] Bead 2 - Append-only history log and deterministic replay/diff foundation.
 - [x] Bead 3 - Web history timeline, diff, and restore UI.
+- [x] Bead 4 - Authorship interval-map foundation.
 
 ### Now
 
-- Lash MVP with local history UI is running at `http://127.0.0.1:3000`; ready for the next M2 bead.
+- Lash MVP with local history UI is running at `http://127.0.0.1:3000`; ready for blame gutter UI wiring.
 
 ### Next
 
 - Begin M2 hub: append-only history log + ops shape (`lash-c2`) after process gate is complete.
-- Continue M2 with authorship/blame and richer diff/filter integrations.
+- Continue M2 with blame gutter UI, history filter-by-author, and richer diff/filter integrations.
 
 ## Open Questions
 
@@ -69,3 +70,6 @@ Ship Lash v1 as the full collaborative editor spec in `agents.md`, with all acce
 - `apps/web/e2e/history/history-open.spec.ts`
 - `apps/web/e2e/history/history-diff.spec.ts`
 - `apps/web/e2e/history/history-restore.spec.ts`
+- `packages/authorship/src/index.ts`
+- `packages/testing/unit/authorship/blame-interval-map.test.ts`
+- `packages/testing/unit/authorship/blame-property.test.ts`
