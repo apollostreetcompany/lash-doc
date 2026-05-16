@@ -21,7 +21,7 @@ Lash v1 covers the full local collaborative editor gate stack in `agents.md`. Ri
 - `pnpm run test:e2e` - pass, 75 passed.
 - `pnpm run build` - pass.
 - `make serve` / `make status` - pass, local app available at `http://127.0.0.1:3000`.
-- Main CI `build-and-test` - pass on `7bf032debe1931d068f009ee735b95bd5c43b5c1`.
+- Main CI `build-and-test` - pass on `c6ee96e796602834d6795e84d404bf962486ad40`.
 - Mechanical acceptance audit - 86 `agents.md` Test IDs, 98 unit/e2e files, no missing IDs.
 - Skip/todo audit - no acceptance `test.todo`, `test.skip`, `describe.skip`, `TODO acceptance`, or `.only(` matches in unit/e2e files.
 
@@ -29,8 +29,9 @@ Lash v1 covers the full local collaborative editor gate stack in `agents.md`. Ri
 
 - Repository: `https://github.com/apollostreetcompany/lash-doc`.
 - Default branch: `main`.
-- Release merge: PR #1, merged at `2026-05-16T06:25:59Z`.
-- Main merge commit: `7bf032debe1931d068f009ee735b95bd5c43b5c1`.
+- Product release merge: PR #1, merged at `2026-05-16T06:25:59Z`.
+- Final release-audit merge: PR #2, merged at `2026-05-16T06:42:19Z`.
+- Current main commit: `c6ee96e796602834d6795e84d404bf962486ad40`.
 - CI workflow: `build-and-test` runs install, skip/todo guard, lint, typecheck, unit tests, Playwright browser install, e2e tests, and build.
 - Branch protection: configured on `main` with strict required `build-and-test`, admin enforcement, and no force-push/delete.
 - Deployment target: none configured. See `DEPLOYMENT.md` for local run/deploy assumptions.

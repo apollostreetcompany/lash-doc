@@ -14,7 +14,7 @@ Success criteria:
 
 ## Constraints/Assumptions
 
-- No direct commits to `main`; Bead 20 is completed through branch `codex/chore/bead-20-final-release-audit` and the protected PR flow.
+- No direct commits to `main`; release cleanup completed through protected PR flow.
 - GitHub remote is `https://github.com/apollostreetcompany/lash-doc.git`.
 - Default branch is `main`.
 - Branch protection on `main` requires strict `build-and-test`, enforces admins, and disallows force-push/delete.
@@ -43,6 +43,7 @@ Success criteria:
 18. Local history recording debounce is 1800 ms after loaded full-suite runs showed 900 ms could still split a normal typed phrase into multiple history entries.
 19. Decision 18 supersedes the 900 ms value in Decision 4; keep the 1800 ms debounce until a measured browser run supports lowering it.
 20. Bead 20 closes the release with a post-merge audit artifact instead of adding product code; Riddle stays out of implementation.
+21. Lash v1 is complete for the current local product objective after PR #2 merged and `main` CI passed on `c6ee96e796602834d6795e84d404bf962486ad40`.
 
 ## State
 
@@ -69,16 +70,18 @@ Success criteria:
 - [x] Bead 17 - Table selection performance stabilization.
 - [x] Bead 18 - Branch protection finalization and release ledger update.
 - [x] Bead 19 - CI-stable table perf and suggest history debounce.
+- [x] Bead 20 - Final release audit and stale ledger cleanup.
 - [x] PR #1 merged into `main` as `7bf032debe1931d068f009ee735b95bd5c43b5c1`.
 - [x] Main push CI passed: run `25955018685`, workflow `CI`, `build-and-test`.
+- [x] PR #2 merged into `main` as `c6ee96e796602834d6795e84d404bf962486ad40`.
+- [x] Final main push CI passed: run `25955266966`, workflow `CI`, `build-and-test`.
 
 ### Now
 
-- Bead 20 - Final release audit and stale ledger cleanup.
+- No active bead for the current Lash v1 objective.
 
 ### Next
 
-- Merge Bead 20 through the protected PR flow, verify `main` CI, then treat the current local v1 objective as complete.
 - Future work is outside the current objective: production deployment target selection and any Riddle integration after Riddle has its own stable product/Zed integration.
 
 ## Open Questions
@@ -107,4 +110,5 @@ Success criteria:
 - `make serve`
 - `make status`
 - GitHub PR #1: `https://github.com/apollostreetcompany/lash-doc/pull/1`
-- Main CI run: `https://github.com/apollostreetcompany/lash-doc/actions/runs/25955018685`
+- GitHub PR #2: `https://github.com/apollostreetcompany/lash-doc/pull/2`
+- Final main CI run: `https://github.com/apollostreetcompany/lash-doc/actions/runs/25955266966`
