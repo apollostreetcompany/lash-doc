@@ -26,10 +26,12 @@ Ship Lash v1 as the full collaborative editor spec in `agents.md`, with all acce
 - [x] Added unit coverage for in-flight image resize preservation.
 - [x] Re-ran the Lash gate: lint, typecheck, unit, e2e, targeted format, and build are passing.
 - [x] Bead 0 - Restore Lash release gate and process scaffolding.
+- [x] Bead 1 - Local MVP run path (`make serve`, `make status`, `make stop`).
+- [x] Verified live local editor typing/autosave against `http://127.0.0.1:3000`.
 
 ### Now
 
-- Ready for M2 planning/implementation.
+- Lash MVP is running locally at `http://127.0.0.1:3000` in tmux session `lash-doc-web`.
 
 ### Next
 
@@ -53,3 +55,7 @@ Ship Lash v1 as the full collaborative editor spec in `agents.md`, with all acce
 - `pnpm run test:unit`
 - `pnpm run test:e2e`
 - `pnpm run build`
+- `make serve`
+- `make status`
+- `make stop`
+- `pnpm playwright test apps/web/e2e/smoke/home.spec.ts apps/web/e2e/autosave/autosave-indicator.spec.ts --workers=1`

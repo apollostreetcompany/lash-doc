@@ -13,6 +13,7 @@ coverage/
 
 # Logs and diagnostics
 *.log
+.lash-web.pid
 npm-debug.log*
 pnpm-debug.log*
 

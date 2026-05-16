@@ -1,4 +1,4 @@
-.PHONY: validate lint typecheck test-unit test-e2e build format check-port
+.PHONY: validate lint typecheck test-unit test-e2e build format check-port serve stop status
 
 validate: lint typecheck test-unit test-e2e build
 
@@ -22,3 +22,12 @@ format:
 
 check-port:
 	@lsof -n -P -iTCP:3000 -sTCP:LISTEN || true
+
+serve:
+	./scripts/lash-web-start.sh
+
+stop:
+	./scripts/lash-web-stop.sh
+
+status:
+	./scripts/lash-web-status.sh
