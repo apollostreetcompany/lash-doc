@@ -20,8 +20,9 @@
 - Last bead: Bead 14 - Cross-browser Playwright project gates.
 - Last bead: Bead 15 - QA convergence, selection stability, and IME autosave unit gates.
 - Last bead: Bead 16 - Release readiness docs and CI skip/todo guard hardening.
-- Current bead: Bead 17 - Table selection performance stabilization.
-- Current state: Unit and e2e gates pass with no skips/todos; PR #1 CI now reaches product tests, and the only remote failure was `table-perf-100x20` selection at 126.5 ms against the 120 ms gate.
+- Last bead: Bead 17 - Table selection performance stabilization.
+- Current bead: Bead 18 - Branch protection finalization and release ledger update.
+- Current state: Unit and e2e gates pass with no skips/todos; PR #1 CI passed on `fc497bf`, and branch protection now requires strict `build-and-test`.
 - Local MVP is available at `http://127.0.0.1:3000` in tmux session `lash-doc-web`.
 - Product decision: Riddle is optional/deferred. Do not implement Lash-Riddle integration until Riddle stabilizes as its own product.
 
@@ -65,6 +66,7 @@
 - Opened PR #1 against `codex/fix/bead-0-restore-lash-gate`; branch protection was checked and is not configured on the default branch.
 - Hardened CI's skip/todo guard to fetch PR branch refs with ancestry, verify both endpoint SHAs, compute an explicit merge base, and diff `MERGE_BASE..HEAD_SHA`.
 - Removed forced scroll from the programmatic table selection path used by perf gates, and deduplicated identical active-cell state so selection/transaction events do not trigger duplicate table-panel renders.
+- Configured default-branch protection with strict required `build-and-test`, admin enforcement, and no force-push/delete.
 
 ## Validation To Run
 
@@ -201,9 +203,10 @@
 - `pnpm run test:e2e` - pass, 75 passed after Bead 17.
 - `make serve` - pass after Bead 17.
 - `make status` - pass after Bead 17; app running at `http://127.0.0.1:3000`.
+- GitHub Actions `build-and-test` for PR #1 on `fc497bf` - pass, 3m8s.
+- Branch protection API check - pass: strict `build-and-test`, admin enforcement enabled, force-push/delete disabled.
 
 ## Open Items
 
-- GitHub branch protection is UNCONFIRMED; configure required `build-and-test` checks if permissions allow after CI is green.
-- Next step should be re-running PR #1 CI and configuring required `build-and-test` checks if permissions allow after CI is green.
+- Next step should be keeping PR #1 green after the release-ledger commit, then merging through the protected branch flow.
 - Use `make stop` to stop the local Lash server.

@@ -10,7 +10,7 @@ Ship Lash v1 as the full collaborative editor spec in `agents.md`, with all acce
 - Riddle integration is planning-only; do not touch `/Users/borker/dev/riddle`.
 - Current v1 path resumes from M2 after the Phase 0 gate is restored.
 - GitHub remote is `https://github.com/apollostreetcompany/lash-doc.git`; PR #1 targets `codex/fix/bead-0-restore-lash-gate`.
-- GitHub branch protection remains UNCONFIRMED; the default branch was checked on 2026-05-16 and was not protected.
+- GitHub branch protection is configured on the default branch with strict required `build-and-test`, admin enforcement, and no force-push/delete.
 
 ## Key Decisions
 
@@ -29,6 +29,7 @@ Ship Lash v1 as the full collaborative editor spec in `agents.md`, with all acce
 13. IME autosave is guarded by an explicit composition gate: transactions during composition do not schedule saves until `compositionend`, and only the final composed snapshot is persisted.
 14. CI's skip/todo guard must fetch PR branch refs with ancestry and compute an explicit merge base; shallow endpoint-SHA fetches can make `BASE_SHA...HEAD_SHA` fail even when the PR branch contains the base.
 15. Programmatic table perf selections should avoid forced scroll when the caller already controls viewport position, and table-cell panel state should be deduplicated so selection and transaction events do not trigger duplicate React renders for identical cell attrs.
+16. Default-branch protection now requires strict `build-and-test`; release work should keep PR branches green before merge.
 
 ## State
 
@@ -56,18 +57,18 @@ Ship Lash v1 as the full collaborative editor spec in `agents.md`, with all acce
 - [x] Bead 14 - Cross-browser Playwright project gates.
 - [x] Bead 15 - QA convergence, selection stability, and IME autosave unit gates.
 - [x] Bead 16 - Release readiness docs and CI skip/todo guard hardening.
+- [x] Bead 17 - Table selection performance stabilization.
 
 ### Now
 
-- Bead 17 - Table selection performance stabilization after PR #1 CI found `table-perf-100x20` selection at 126.5 ms against a 120 ms gate on GitHub Actions.
+- Bead 18 - Branch protection finalization and release ledger update. PR #1 CI passed on `fc497bf`; branch protection now requires strict `build-and-test`.
 
 ### Next
 
-- Re-run CI for PR #1, configure/confirm required checks and branch protection if permissions allow, and keep the local MVP available at `http://127.0.0.1:3000`.
+- Keep PR #1 green after the release-ledger commit, then merge through the protected branch flow.
 
 ## Open Questions
 
-- UNCONFIRMED: GitHub branch protection setup.
 - UNCONFIRMED: Whether retrospective review for M1/B1 and M1/B3 is still required before M2.
 - Repo-wide `pnpm run format` currently fails on 80 pre-existing files outside this bead; targeted source/new process files pass Prettier check, and legacy Markdown was kept minimally edited to avoid unrelated churn.
 

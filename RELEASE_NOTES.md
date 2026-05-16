@@ -26,7 +26,7 @@ Lash v1 now covers the full local collaborative editor gate stack in `agents.md`
 
 - PR #1: `codex/test/bead-15-qa-ime-unit-gates` into `codex/fix/bead-0-restore-lash-gate`.
 - CI workflow: `build-and-test` runs install, skip/todo guard, lint, typecheck, unit tests, Playwright browser install, e2e tests, and build.
-- Branch protection: checked on 2026-05-16 and not configured on the default branch. Required checks should be configured after CI is green.
+- Branch protection: configured on the default branch with strict required `build-and-test`, admin enforcement, and no force-push/delete.
 - Deployment target: none configured. See `DEPLOYMENT.md` for local run/deploy assumptions.
 
 ## Notes
