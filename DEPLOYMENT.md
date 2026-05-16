@@ -19,7 +19,7 @@
 ## Deploy Assumptions
 
 - No deployment target is configured in this checkout.
-- GitHub remote is configured; required checks/branch protection are UNCONFIRMED locally.
+- GitHub remote is configured; branch protection was checked on 2026-05-16 and is not configured on the default branch. Required checks should be configured after PR #1 CI is green.
 - Container/runtime binding assumptions are not yet applicable; record them here before the first deploy-affecting bead.
 
 ## Rollback

@@ -9,7 +9,8 @@ Ship Lash v1 as the full collaborative editor spec in `agents.md`, with all acce
 - No direct commits to `main`; current branch `codex/test/bead-15-qa-ime-unit-gates`.
 - Riddle integration is planning-only; do not touch `/Users/borker/dev/riddle`.
 - Current v1 path resumes from M2 after the Phase 0 gate is restored.
-- GitHub remote is `https://github.com/apollostreetcompany/lash-doc.git`; branch protection remains UNCONFIRMED.
+- GitHub remote is `https://github.com/apollostreetcompany/lash-doc.git`; PR #1 targets `codex/fix/bead-0-restore-lash-gate`.
+- GitHub branch protection remains UNCONFIRMED; the default branch was checked on 2026-05-16 and was not protected.
 
 ## Key Decisions
 
@@ -26,6 +27,7 @@ Ship Lash v1 as the full collaborative editor spec in `agents.md`, with all acce
 11. AI editor starts as a deterministic local `EditPatch` flow: generated patches are validated, staged for accept/reject, applied through append-only history with `intent: ai`, labeled in diffs, and cited by document ranges.
 12. Cross-browser acceptance is now project-scoped in Playwright: the full Chromium suite runs once, and Chrome, Edge-UA Chromium, Firefox, WebKit/Safari, and iPad WebKit each run a focused editor smoke gate.
 13. IME autosave is guarded by an explicit composition gate: transactions during composition do not schedule saves until `compositionend`, and only the final composed snapshot is persisted.
+14. CI's skip/todo guard must fetch PR branch refs with ancestry and compute an explicit merge base; shallow endpoint-SHA fetches can make `BASE_SHA...HEAD_SHA` fail even when the PR branch contains the base.
 
 ## State
 
@@ -55,11 +57,11 @@ Ship Lash v1 as the full collaborative editor spec in `agents.md`, with all acce
 
 ### Now
 
-- Lash MVP with local history, blame gutter, filtered diffs, suggest-mode, Doc Chat anchors, share/RBAC/redaction, mention/date-chip behavior, local offline queue/presence, large-table perf coverage, screen-reader accessibility gates, local AI patch flow, cross-browser e2e gates, and QA/IME unit gates is running at `http://127.0.0.1:3000`.
+- Bead 16 - Release readiness and CI hardening for PR #1. Local product gates are green; GitHub Actions initially failed before product tests because the skip/todo guard could not find a merge base.
 
 ### Next
 
-- Release readiness pass: confirm branch protection/CI status, review deployment docs, and prepare merge/release notes.
+- Re-run CI for PR #1, configure/confirm required checks and branch protection if permissions allow, and keep the local MVP available at `http://127.0.0.1:3000`.
 
 ## Open Questions
 
@@ -167,3 +169,6 @@ Ship Lash v1 as the full collaborative editor spec in `agents.md`, with all acce
 - `packages/testing/unit/qa/selection-stability.test.ts`
 - `packages/testing/unit/ime/ime-autosave.test.ts`
 - `packages/testing/unit/ime/ime-composition.test.ts`
+- `.github/workflows/ci.yml`
+- `RELEASE_NOTES.md`
+- `DEPLOYMENT.md`
