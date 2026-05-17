@@ -1,12 +1,18 @@
 /**
- * AppShell — three-column layout (sidebar / canvas / rail) with sticky topbar.
+ * AppShell — pure layout wrapper.
  *
- * Behavior is driven by data attributes on the root so CSS controls
- * collapse/focus/responsive behavior without React having to re-measure.
+ * Renders the sidebar / topbar / canvas / rail grid and sets data
+ * attributes that CSS uses to drive collapse / focus / responsive
+ * behavior. All state (focus mode, sidebar collapsed, rail open, mobile
+ * drawers) is owned by the parent so the chrome stays composable.
+ *
+ * On first mount the shell flips a transient `data-entrance` flag for
+ * 800ms; CSS keyframes scoped to that flag run the choreography exactly
+ * once.
  */
 'use client';
 
-import { useCallback, useEffect, useState, type ReactNode } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 
 export interface AppShellProps {
   topBar: ReactNode;
@@ -16,8 +22,10 @@ export interface AppShellProps {
   focusMode: boolean;
   railOpen: boolean;
   sidebarCollapsed: boolean;
-  onSidebarCollapsedChange: (collapsed: boolean) => void;
-  onRailOpenChange: (open: boolean) => void;
+  mobileSidebarOpen: boolean;
+  mobileRailOpen: boolean;
+  onMobileSidebarClose: () => void;
+  onMobileRailClose: () => void;
 }
 
 export function AppShell({
@@ -28,13 +36,11 @@ export function AppShell({
   focusMode,
   railOpen,
   sidebarCollapsed,
-  onSidebarCollapsedChange,
-  onRailOpenChange,
+  mobileSidebarOpen,
+  mobileRailOpen,
+  onMobileSidebarClose,
+  onMobileRailClose,
 }: AppShellProps) {
-  const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
-  const [mobileRailOpen, setMobileRailOpen] = useState(false);
-  // Entrance choreography flag — scoped to first mount so animations don't
-  // replay every time focus mode toggles or the rail closes.
   const [entrance, setEntrance] = useState(true);
 
   useEffect(() => {
@@ -42,20 +48,21 @@ export function AppShell({
     return () => clearTimeout(timer);
   }, []);
 
-  // Close mobile drawers on escape.
+  // Close mobile drawers on Escape — the parent owns the state, so we
+  // just call its close handlers.
   useEffect(() => {
+    if (!mobileSidebarOpen && !mobileRailOpen) return;
     const onKey = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
-        setMobileSidebarOpen(false);
-        setMobileRailOpen(false);
+        if (mobileSidebarOpen) onMobileSidebarClose();
+        if (mobileRailOpen) onMobileRailClose();
       }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, []);
+  }, [mobileSidebarOpen, mobileRailOpen, onMobileSidebarClose, onMobileRailClose]);
 
-  const closeMobileSidebar = useCallback(() => setMobileSidebarOpen(false), []);
-  const closeMobileRail = useCallback(() => setMobileRailOpen(false), []);
+  const drawerOpen = mobileSidebarOpen || mobileRailOpen;
 
   return (
     <div
@@ -67,19 +74,8 @@ export function AppShell({
       data-rail-mobile={mobileRailOpen ? 'true' : 'false'}
       data-entrance={entrance ? 'true' : 'false'}
     >
-      {/* clone sidebar with onCloseMobile prop when on mobile drawer */}
       {sidebar}
-
-      <SlotTopBar
-        focusMode={focusMode}
-        railOpen={railOpen}
-        sidebarCollapsed={sidebarCollapsed}
-        onSidebarCollapsedChange={onSidebarCollapsedChange}
-        onRailOpenChange={onRailOpenChange}
-        onOpenMobileSidebar={() => setMobileSidebarOpen(true)}
-      >
-        {topBar}
-      </SlotTopBar>
+      {topBar}
 
       <div className="lash-canvas" id="lash-main" tabIndex={-1}>
         {children}
@@ -91,26 +87,13 @@ export function AppShell({
         type="button"
         className="lash-app-backdrop"
         aria-label="Close menu"
-        tabIndex={mobileSidebarOpen || mobileRailOpen ? 0 : -1}
+        tabIndex={drawerOpen ? 0 : -1}
+        aria-hidden={drawerOpen ? undefined : 'true'}
         onClick={() => {
-          closeMobileSidebar();
-          closeMobileRail();
+          if (mobileSidebarOpen) onMobileSidebarClose();
+          if (mobileRailOpen) onMobileRailClose();
         }}
       />
     </div>
   );
-}
-
-interface SlotTopBarProps {
-  children: ReactNode;
-  focusMode: boolean;
-  railOpen: boolean;
-  sidebarCollapsed: boolean;
-  onSidebarCollapsedChange: (collapsed: boolean) => void;
-  onRailOpenChange: (open: boolean) => void;
-  onOpenMobileSidebar: () => void;
-}
-
-function SlotTopBar({ children }: SlotTopBarProps) {
-  return <>{children}</>;
 }

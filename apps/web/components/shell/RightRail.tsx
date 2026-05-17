@@ -1,9 +1,12 @@
 /**
- * RightRail — tabbed activity rail (Chat / History / AI / Share / Activity).
+ * RightRail — section-jump activity rail (Chat / History / AI / Share / Activity).
  *
- * All panels render simultaneously in a single scrolling column; the tab bar
- * highlights the section and scrolls it into view on click. This preserves
- * the visual hierarchy while keeping every panel addressable for tests.
+ * All panels render as siblings inside a scrolling column. The chip row at
+ * the top acts as a section navigator: clicking a chip scrolls to that
+ * section, and an IntersectionObserver keeps the active chip in sync with
+ * what's visible. We deliberately use nav + aria-current semantics rather
+ * than tablist/tab — every panel is reachable regardless of which chip is
+ * "active", and assistive-tech users shouldn't be told otherwise.
  */
 'use client';
 
@@ -28,6 +31,13 @@ export interface RightRailProps {
   onClose?: () => void;
 }
 
+const prefersReducedMotion = () => {
+  if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') {
+    return false;
+  }
+  return window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+};
+
 export function RightRail({ active, onChange, tabs, onClose }: RightRailProps) {
   const bodyRef = useRef<HTMLDivElement | null>(null);
 
@@ -38,13 +48,16 @@ export function RightRail({ active, onChange, tabs, onClose }: RightRailProps) {
       if (!body) return;
       const target = body.querySelector<HTMLElement>(`[data-section-id="${id}"]`);
       if (target) {
-        target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        target.scrollIntoView({
+          behavior: prefersReducedMotion() ? 'auto' : 'smooth',
+          block: 'start',
+        });
       }
     },
     [onChange],
   );
 
-  // Keep the active tab in sync with the section currently in view.
+  // Keep the active chip in sync with the section currently in view.
   useEffect(() => {
     const body = bodyRef.current;
     if (!body) return;
@@ -66,19 +79,20 @@ export function RightRail({ active, onChange, tabs, onClose }: RightRailProps) {
   }, [onChange]);
 
   return (
-    <aside className="lash-rail" data-testid="lash-rail" aria-label="Document activity panel">
-      <div className="lash-rail-tabs" role="tablist" aria-label="Activity tabs">
+    <aside className="lash-rail" id="lash-rail" data-testid="lash-rail" aria-label="Document activity">
+      <nav
+        className="lash-rail-tabs"
+        aria-label="Jump to activity section"
+      >
         {tabs.map((tab) => (
           <button
             key={tab.id}
             type="button"
-            role="tab"
-            aria-selected={tab.id === active}
-            aria-controls={`rail-section-${tab.id}`}
-            id={`rail-tab-${tab.id}`}
             className="lash-rail-tab"
             data-active={tab.id === active ? 'true' : 'false'}
             data-testid={`rail-tab-${tab.id}`}
+            aria-current={tab.id === active ? 'true' : undefined}
+            aria-controls={`rail-section-${tab.id}`}
             onClick={() => handleTabClick(tab.id)}
           >
             <Icon name={tab.icon} />
@@ -95,25 +109,28 @@ export function RightRail({ active, onChange, tabs, onClose }: RightRailProps) {
           <button
             type="button"
             className="lash-icon-btn"
-            aria-label="Close panel"
+            aria-label="Close activity panel"
             onClick={onClose}
             style={{ marginLeft: 'auto', alignSelf: 'center' }}
           >
             <Icon name="close" />
           </button>
         ) : null}
-      </div>
+      </nav>
 
       <div className="lash-rail-body" ref={bodyRef}>
         {tabs.map((tab) => (
           <section
             key={tab.id}
             id={`rail-section-${tab.id}`}
-            aria-labelledby={`rail-tab-${tab.id}`}
+            aria-labelledby={`rail-section-label-${tab.id}`}
             data-section-id={tab.id}
             data-active={tab.id === active ? 'true' : 'false'}
             className="lash-rail-section"
           >
+            <h2 id={`rail-section-label-${tab.id}`} className="sr-only">
+              {tab.label}
+            </h2>
             {tab.content}
           </section>
         ))}

@@ -4,12 +4,16 @@
  * Hosts a sidebar toggle (mobile), document title, autosave indicator,
  * collaborator avatar stack, focus/suggest toggles, share CTA, and the
  * right-rail toggle.
+ *
+ * Notes: this header lives *inside* the page-level `<main>` landmark, so
+ * we deliberately do not claim `role="banner"` — that role is reserved for
+ * top-of-page banners outside any main/section. We expose stable
+ * `aria-label`s on toggles and lean on `aria-pressed` for state.
  */
 'use client';
 
 import type { Editor } from '@tiptap/core';
 import type { ReactNode } from 'react';
-
 
 import { Avatar, AvatarStack, type AvatarTint } from './Avatar';
 import { Icon } from './Icon';
@@ -34,7 +38,7 @@ export interface TopBarProps {
   railOpen: boolean;
   onToggleFocusMode: () => void;
   onToggleSuggestMode: () => void;
-  onToggleRail: () => void;
+  onShareClick: () => void;
   onOpenMobileSidebar?: () => void;
   extras?: ReactNode;
 }
@@ -47,17 +51,17 @@ export function TopBar({
   railOpen,
   onToggleFocusMode,
   onToggleSuggestMode,
-  onToggleRail,
+  onShareClick,
   onOpenMobileSidebar,
   extras,
 }: TopBarProps) {
   return (
-    <header className="lash-topbar" data-testid="lash-topbar" role="banner">
+    <header className="lash-topbar" data-testid="lash-topbar">
       {onOpenMobileSidebar ? (
         <button
           type="button"
-          className="lash-icon-btn"
-          aria-label="Open menu"
+          className="lash-icon-btn lash-topbar-mobile-menu"
+          aria-label="Open navigation menu"
           onClick={onOpenMobileSidebar}
           data-testid="topbar-mobile-menu"
         >
@@ -82,12 +86,15 @@ export function TopBar({
           type="button"
           className="lash-icon-btn"
           data-testid="focus-mode-toggle"
+          aria-label="Focus mode"
           aria-pressed={focusMode ? 'true' : 'false'}
           data-active={focusMode ? 'true' : 'false'}
-          data-tooltip={focusMode ? 'Exit focus' : 'Focus mode'}
+          data-tooltip={focusMode ? 'Exit focus mode' : 'Focus mode'}
           onClick={onToggleFocusMode}
         >
           <Icon name={focusMode ? 'minimize' : 'maximize'} />
+          {/* Visible label kept for legacy text-content selectors; aria-label
+              above is what assistive tech actually announces. */}
           <span className="sr-only">{focusMode ? 'Exit Focus Mode' : 'Enter Focus Mode'}</span>
         </button>
 
@@ -95,9 +102,10 @@ export function TopBar({
           type="button"
           className="lash-icon-btn"
           data-testid="suggest-mode-toggle"
+          aria-label="Suggest mode"
           aria-pressed={suggestMode ? 'true' : 'false'}
           data-active={suggestMode ? 'true' : 'false'}
-          data-tooltip={suggestMode ? 'Suggesting' : 'Suggest mode'}
+          data-tooltip={suggestMode ? 'Stop suggesting' : 'Suggest mode'}
           onClick={onToggleSuggestMode}
         >
           <Icon name="pencil" />
@@ -119,8 +127,10 @@ export function TopBar({
           type="button"
           className="lash-share-button"
           data-testid="topbar-share-button"
-          onClick={onToggleRail}
+          aria-label="Share document"
           aria-expanded={railOpen ? 'true' : 'false'}
+          aria-controls="lash-rail"
+          onClick={onShareClick}
         >
           <Icon name="share" />
           <span className="lash-share-button-label">Share</span>

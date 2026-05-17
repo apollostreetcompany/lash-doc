@@ -124,6 +124,8 @@ export function EditorWorkspace() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [railOpen, setRailOpen] = useState(true);
   const [activeTab, setActiveTab] = useState<RailTab>('chat');
+  const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
+  const [mobileRailOpen, setMobileRailOpen] = useState(false);
   const [activeTableCell, setActiveTableCell] = useState<ActiveCell | null>(null);
   const [historyEntries, setHistoryEntries] = useState<HistoryEntry[]>([]);
   const [selectedHistoryEntryId, setSelectedHistoryEntryId] = useState<string | null>(null);
@@ -133,15 +135,24 @@ export function EditorWorkspace() {
   const [blameLines, setBlameLines] = useState<Array<{ line: number; authorId: string | null }>>(
     [],
   );
+  // History head is mirrored: ref for synchronous access inside async
+  // closures, state so React knows to re-render dependents (ChatPanel,
+  // AIPanel) when the head advances.
+  const [historyHead, setHistoryHead] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const historyStoreRef = useRef(createHistoryStore());
   const historyHeadRef = useRef<string | null>(null);
   const historyTextRef = useRef('');
-  const historyQueueRef = useRef(Promise.resolve());
+  const historyQueueRef = useRef<Promise<unknown>>(Promise.resolve());
   const historyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const applyingHistoryRef = useRef(false);
   const suggestModeRef = useRef(false);
   const activeTableCellRef = useRef<ActiveCell | null>(null);
+
+  const commitHistoryHead = useCallback((sha: string | null) => {
+    historyHeadRef.current = sha;
+    setHistoryHead(sha);
+  }, []);
 
   const imageUploader = useMemo<LashImageUploader>(() => createBrowserImageUploader(), []);
 
@@ -236,7 +247,7 @@ export function EditorWorkspace() {
       setHistoryTimeFilter(null);
       setAcceptedSuggestionIds([]);
       setBlameLines([]);
-      historyHeadRef.current = null;
+      commitHistoryHead(null);
       historyTextRef.current = '';
       historyQueueRef.current = Promise.resolve();
       return;
@@ -245,8 +256,13 @@ export function EditorWorkspace() {
     let disposed = false;
     hashCanonical(EMPTY_HISTORY_DOC).then((emptySha) => {
       if (disposed) return;
-      historyHeadRef.current = emptySha;
-      historyTextRef.current = editorText(editor);
+      // Only seed the baseline if the editor hasn't been touched yet —
+      // otherwise we'd overwrite a real edit that landed during the async
+      // hash computation.
+      if (!historyTextRef.current) {
+        historyTextRef.current = editorText(editor);
+      }
+      commitHistoryHead(emptySha);
     });
 
     const recordHistory = () => {
@@ -255,29 +271,37 @@ export function EditorWorkspace() {
         clearTimeout(historyTimerRef.current);
       }
       historyTimerRef.current = setTimeout(() => {
-        historyQueueRef.current = historyQueueRef.current.then(async () => {
-          const before = historyTextRef.current;
-          const after = editorText(editor);
-          const expectedParentSha = historyHeadRef.current;
-          if (!expectedParentSha || before === after) return;
-          const result = await historyStoreRef.current.append({
-            docId: HISTORY_DOC_ID,
-            actor: HISTORY_ACTOR,
-            expectedParentSha,
-            schemaVersion: HISTORY_SCHEMA_VERSION,
-            ops: [textReplaceOp(before, after)],
-            intent: suggestModeRef.current ? 'suggest' : 'edit',
-            audit: HISTORY_AUDIT,
+        // Recover the queue if a prior task rejected: catch the error,
+        // log it, then resume. Without this, one failed append would
+        // wedge every subsequent history write.
+        historyQueueRef.current = historyQueueRef.current
+          .catch((err) => {
+            // eslint-disable-next-line no-console
+            console.warn('[lash] history queue recovered from error:', err);
+          })
+          .then(async () => {
+            const before = historyTextRef.current;
+            const after = editorText(editor);
+            const expectedParentSha = historyHeadRef.current;
+            if (!expectedParentSha || before === after) return;
+            const result = await historyStoreRef.current.append({
+              docId: HISTORY_DOC_ID,
+              actor: HISTORY_ACTOR,
+              expectedParentSha,
+              schemaVersion: HISTORY_SCHEMA_VERSION,
+              ops: [textReplaceOp(before, after)],
+              intent: suggestModeRef.current ? 'suggest' : 'edit',
+              audit: HISTORY_AUDIT,
+            });
+            if (!result.ok) return;
+            historyTextRef.current = after;
+            commitHistoryHead(result.entry.resultSha);
+            const entries = await historyStoreRef.current.list(HISTORY_DOC_ID);
+            if (disposed) return;
+            setHistoryEntries(entries);
+            setSelectedHistoryEntryId(result.entry.id);
+            setBlameLines(blameFor(entries, after));
           });
-          if (!result.ok) return;
-          historyHeadRef.current = result.entry.resultSha;
-          historyTextRef.current = after;
-          const entries = await historyStoreRef.current.list(HISTORY_DOC_ID);
-          if (disposed) return;
-          setHistoryEntries(entries);
-          setSelectedHistoryEntryId(result.entry.id);
-          setBlameLines(blameFor(entries, after));
-        });
       }, HISTORY_RECORD_DEBOUNCE_MS);
     };
 
@@ -290,7 +314,7 @@ export function EditorWorkspace() {
       }
       editor.off('transaction', recordHistory);
     };
-  }, [editor]);
+  }, [editor, commitHistoryHead]);
 
   useEffect(() => {
     if (!editor) {
@@ -358,8 +382,16 @@ export function EditorWorkspace() {
     [editor],
   );
 
+  // Power-user test hooks (window.__lash*) are not safe to ship to end
+  // users — they expose document commands and editor state. They stay
+  // available in dev and when the build is explicitly tagged for tests
+  // (Playwright sets NEXT_PUBLIC_LASH_TEST_HOOKS=true at build time).
+  const exposeTestHooks =
+    process.env.NODE_ENV !== 'production' ||
+    process.env.NEXT_PUBLIC_LASH_TEST_HOOKS === 'true';
+
   useEffect(() => {
-    if (typeof window === 'undefined') return;
+    if (typeof window === 'undefined' || !exposeTestHooks) return;
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (window as any).__lashOutlineItems = outlineItems;
     return () => {
@@ -367,10 +399,10 @@ export function EditorWorkspace() {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       delete (window as any).__lashOutlineItems;
     };
-  }, [outlineItems]);
+  }, [outlineItems, exposeTestHooks]);
 
   useEffect(() => {
-    if (typeof window === 'undefined' || !editor) return;
+    if (typeof window === 'undefined' || !editor || !exposeTestHooks) return;
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const win = window as any;
     win.__lashEditor = editor;
@@ -415,7 +447,7 @@ export function EditorWorkspace() {
       delete win.__lashSerializeMarkdown;
       delete win.__lashInsertImageFromArrayBuffer;
     };
-  }, [editor, imageUploader]);
+  }, [editor, imageUploader, exposeTestHooks]);
 
   const isEditorReady = Boolean(editor);
 
@@ -505,15 +537,15 @@ export function EditorWorkspace() {
       });
       if (!result.ok) return;
       const text = editorText(editor);
-      historyHeadRef.current = result.entry.resultSha;
       historyTextRef.current = text;
+      commitHistoryHead(result.entry.resultSha);
       const entries = await historyStoreRef.current.list(HISTORY_DOC_ID);
       setAcceptedSuggestionIds((ids) => (ids.includes(entry.id) ? ids : [...ids, entry.id]));
       setHistoryEntries(entries);
       setSelectedHistoryEntryId(entry.id);
       setBlameLines(blameFor(entries, text));
     },
-    [editor],
+    [editor, commitHistoryHead],
   );
 
   const handleRejectSuggestion = useCallback(
@@ -542,14 +574,14 @@ export function EditorWorkspace() {
       } finally {
         applyingHistoryRef.current = false;
       }
-      historyHeadRef.current = result.entry.resultSha;
       historyTextRef.current = targetText;
+      commitHistoryHead(result.entry.resultSha);
       const entries = await historyStoreRef.current.list(HISTORY_DOC_ID);
       setHistoryEntries(entries);
       setSelectedHistoryEntryId(result.entry.id);
       setBlameLines(blameFor(entries, targetText));
     },
-    [editor],
+    [editor, commitHistoryHead],
   );
 
   const handleRestoreHistoryEntry = useCallback(
@@ -568,14 +600,14 @@ export function EditorWorkspace() {
       applyingHistoryRef.current = true;
       editor.commands.setContent(textToContent(text), false);
       applyingHistoryRef.current = false;
-      historyHeadRef.current = result.entry.resultSha;
       historyTextRef.current = text;
+      commitHistoryHead(result.entry.resultSha);
       const entries = await historyStoreRef.current.list(HISTORY_DOC_ID);
       setHistoryEntries(entries);
       setSelectedHistoryEntryId(result.entry.id);
       setBlameLines(blameFor(entries, text));
     },
-    [editor],
+    [editor, commitHistoryHead],
   );
 
   const handleApplyAiPatch = useCallback(
@@ -608,15 +640,15 @@ export function EditorWorkspace() {
       } finally {
         applyingHistoryRef.current = false;
       }
-      historyHeadRef.current = result.entry.resultSha;
       historyTextRef.current = after;
+      commitHistoryHead(result.entry.resultSha);
       const entries = await historyStoreRef.current.list(HISTORY_DOC_ID);
       setHistoryEntries(entries);
       setSelectedHistoryEntryId(result.entry.id);
       setBlameLines(blameFor(entries, after));
       return { ok: true };
     },
-    [editor],
+    [editor, commitHistoryHead],
   );
 
   // Cmd/Ctrl+Shift+F binding for focus mode.
@@ -711,7 +743,7 @@ export function EditorWorkspace() {
         <ChatPanel
           editor={editor}
           docId={HISTORY_DOC_ID}
-          baseVersion={historyHeadRef.current}
+          baseVersion={historyHead}
           currentText={currentText}
         />
       ),
@@ -748,7 +780,7 @@ export function EditorWorkspace() {
         <AIPanel
           editor={editor}
           docId={HISTORY_DOC_ID}
-          baseVersion={historyHeadRef.current}
+          baseVersion={historyHead}
           currentText={currentText}
           schemaVersion={HISTORY_SCHEMA_VERSION}
           onApplyPatch={handleApplyAiPatch}
@@ -774,6 +806,18 @@ export function EditorWorkspace() {
     },
   ];
 
+  const handleShareClick = useCallback(() => {
+    setActiveTab('share');
+    setRailOpen(true);
+    // On narrow widths the rail is a slide-in drawer.
+    if (typeof window !== 'undefined' && window.matchMedia('(max-width: 767px)').matches) {
+      setMobileRailOpen(true);
+    }
+  }, []);
+
+  const closeMobileSidebar = useCallback(() => setMobileSidebarOpen(false), []);
+  const closeMobileRail = useCallback(() => setMobileRailOpen(false), []);
+
   const topBar = (
     <TopBar
       editor={editor}
@@ -783,7 +827,8 @@ export function EditorWorkspace() {
       railOpen={railOpen}
       onToggleFocusMode={handleFocusModeToggle}
       onToggleSuggestMode={() => setIsSuggestMode((value) => !value)}
-      onToggleRail={() => setRailOpen((value) => !value)}
+      onShareClick={handleShareClick}
+      onOpenMobileSidebar={() => setMobileSidebarOpen(true)}
     />
   );
 
@@ -795,6 +840,7 @@ export function EditorWorkspace() {
       onToggleHeading={handleToggleHeading}
       onFocusHeading={handleFocusHeading}
       hideOutline={isFocusMode}
+      onCloseMobile={mobileSidebarOpen ? closeMobileSidebar : undefined}
     />
   );
 
@@ -803,7 +849,10 @@ export function EditorWorkspace() {
       active={activeTab}
       onChange={setActiveTab}
       tabs={railTabs}
-      onClose={() => setRailOpen(false)}
+      onClose={() => {
+        setRailOpen(false);
+        setMobileRailOpen(false);
+      }}
     />
   );
 
@@ -811,7 +860,6 @@ export function EditorWorkspace() {
     <div
       data-testid="lash-editor-shell"
       data-focus-mode={isFocusMode ? 'true' : 'false'}
-      aria-live="polite"
       className="lash-editor-shell"
     >
       <AppShell
@@ -821,8 +869,10 @@ export function EditorWorkspace() {
         focusMode={isFocusMode}
         railOpen={railOpen}
         sidebarCollapsed={sidebarCollapsed}
-        onSidebarCollapsedChange={setSidebarCollapsed}
-        onRailOpenChange={setRailOpen}
+        mobileSidebarOpen={mobileSidebarOpen}
+        mobileRailOpen={mobileRailOpen}
+        onMobileSidebarClose={closeMobileSidebar}
+        onMobileRailClose={closeMobileRail}
       >
         <EditorToolbar
           editor={editor}
