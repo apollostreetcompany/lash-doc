@@ -7,13 +7,10 @@ const EditorWorkspace = dynamic(() => import('../components/editor/EditorWorkspa
 export default function HomePage() {
   return (
     <main data-testid="lash-home" role="main" aria-labelledby="lash-page-title">
-      <header style={{ padding: '2rem 2.5rem 1.5rem' }}>
-        <h1 style={{ margin: 0 }} id="lash-page-title">
-          Lash Collaborative Editor
-        </h1>
-      </header>
-
-      <section aria-label="Document editor" style={{ padding: '0 2.5rem 2.5rem' }}>
+      <h1 className="sr-only" id="lash-page-title">
+        Lash Collaborative Editor
+      </h1>
+      <section aria-label="Document editor">
         <EditorWorkspace />
       </section>
     </main>

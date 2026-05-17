@@ -52,3 +52,5 @@ codex-*-terminal.txt
 fixes-required-*.md
 test-focus-fix.md
 Claude-Code-*.txt
+visual-snapshots/
+test-results/

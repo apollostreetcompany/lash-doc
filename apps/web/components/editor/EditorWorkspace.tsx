@@ -24,19 +24,21 @@ import type { Editor } from '@tiptap/core';
 import { EditorContent, useEditor } from '@tiptap/react';
 import { type ChangeEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
+import { createBrowserImageUploader } from '../../lib/createBrowserImageUploader';
+import { AppShell } from '../shell/AppShell';
+import { Icon } from '../shell/Icon';
+import { RightRail, type RailTab, type RailTabConfig } from '../shell/RightRail';
+import { Sidebar } from '../shell/Sidebar';
+import { TopBar } from '../shell/TopBar';
 import { AIPanel } from './panels/AIPanel';
-import { AutosaveIndicator } from './panels/AutosaveIndicator';
 import { ChatPanel } from './panels/ChatPanel';
 import { EditorToolbar, type ToolbarMeta } from './panels/EditorToolbar';
-import { FocusModeToggle } from './panels/FocusModeToggle';
 import { HistoryPanel, type HistoryTimeFilter } from './panels/HistoryPanel';
 import { MarkdownIO } from './panels/MarkdownIO';
 import { MentionPanel } from './panels/MentionPanel';
 import { OfflinePanel } from './panels/OfflinePanel';
-import { OutlinePanel } from './panels/OutlinePanel';
 import { SharePanel } from './panels/SharePanel';
 import { TableCellPanel, type ActiveCell } from './panels/TableCellPanel';
-import { createBrowserImageUploader } from '../../lib/createBrowserImageUploader';
 
 const normalizeUrl = (href: string): string => {
   if (!href) {
@@ -61,6 +63,7 @@ const HISTORY_ACTOR = { type: 'user', id: 'local-user' } as const;
 const HISTORY_AUDIT = { ua: 'lash-web/local-history' } as const;
 const HISTORY_RECORD_DEBOUNCE_MS = 1800;
 const AI_AUDIT = { ua: 'lash-local-ai-editor' };
+const DOC_TITLE = 'Untitled document';
 
 const textReplaceOp = (before: string, after: string) => {
   let prefix = 0;
@@ -118,6 +121,9 @@ export function EditorWorkspace() {
   const [outlineItems, setOutlineItems] = useState<OutlineItem[]>([]);
   const [isFocusMode, setIsFocusMode] = useState(false);
   const [isSuggestMode, setIsSuggestMode] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [railOpen, setRailOpen] = useState(true);
+  const [activeTab, setActiveTab] = useState<RailTab>('chat');
   const [activeTableCell, setActiveTableCell] = useState<ActiveCell | null>(null);
   const [historyEntries, setHistoryEntries] = useState<HistoryEntry[]>([]);
   const [selectedHistoryEntryId, setSelectedHistoryEntryId] = useState<string | null>(null);
@@ -180,8 +186,6 @@ export function EditorWorkspace() {
           uploader: imageUploader,
         },
         chips: {
-          // Mock chip resolver — returns a deterministic title for any
-          // lash.local/doc/<id> URL. Real implementation lands in D2.
           resolveDocChip: async (docId) => ({
             title: `Internal Doc ${docId}`,
             lastEditor: 'Test User',
@@ -458,6 +462,8 @@ export function EditorWorkspace() {
 
   const handleBlameLineClick = useCallback((authorId: string | null) => {
     setHistoryAuthorFilter(authorId);
+    setActiveTab('history');
+    setRailOpen(true);
   }, []);
 
   const handleCopyHistoryFilterLink = useCallback(() => {
@@ -613,15 +619,10 @@ export function EditorWorkspace() {
     [editor],
   );
 
-  // Cmd/Ctrl+Shift+F binding per agents.md keymap. Listening at the shell
-  // level (not via a TipTap extension) because focus mode is React state,
-  // not editor state, and we need to toggle it regardless of editor focus.
+  // Cmd/Ctrl+Shift+F binding for focus mode.
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
-      // IME composition guard: keyCode === 229 covers older runtimes where
-      // isComposing can be false during composition (MDN recommendation).
       if (event.isComposing || event.keyCode === 229) return;
-      // Holding the shortcut shouldn't flip focus mode repeatedly.
       if (event.repeat) return;
       if (!event.shiftKey) return;
       const isModifier = event.metaKey || event.ctrlKey;
@@ -629,6 +630,21 @@ export function EditorWorkspace() {
       if (event.key !== 'F' && event.key !== 'f') return;
       event.preventDefault();
       setIsFocusMode((value) => !value);
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, []);
+
+  // Cmd/Ctrl+/ toggles right rail
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.isComposing || event.keyCode === 229) return;
+      if (event.repeat) return;
+      const isModifier = event.metaKey || event.ctrlKey;
+      if (!isModifier) return;
+      if (event.key !== '/') return;
+      event.preventDefault();
+      setRailOpen((value) => !value);
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
@@ -682,6 +698,115 @@ export function EditorWorkspace() {
     URL.revokeObjectURL(url);
   }, [editor, showWarnings]);
 
+  const currentText = editor ? editorText(editor) : '';
+
+  // Recompute on every render: panels rely on live editor selection state, so
+  // memoizing on text alone would mask selection-only updates.
+  const railTabs: RailTabConfig[] = [
+    {
+      id: 'chat',
+      label: 'Chat',
+      icon: 'message',
+      content: (
+        <ChatPanel
+          editor={editor}
+          docId={HISTORY_DOC_ID}
+          baseVersion={historyHeadRef.current}
+          currentText={currentText}
+        />
+      ),
+    },
+    {
+      id: 'history',
+      label: 'History',
+      icon: 'history',
+      badge: historyEntries.length || undefined,
+      content: (
+        <HistoryPanel
+          editor={editor}
+          entries={historyEntries}
+          selectedEntryId={selectedHistoryEntryId}
+          authorFilter={historyAuthorFilter}
+          timeFilter={historyTimeFilter}
+          acceptedSuggestionIds={acceptedSuggestionIds}
+          onSelect={handleSelectHistoryEntry}
+          onRestore={handleRestoreHistoryEntry}
+          onSetAuthorFilter={setHistoryAuthorFilter}
+          onClearAuthorFilter={() => setHistoryAuthorFilter(null)}
+          onSetTimeFilter={setHistoryTimeFilter}
+          onCopyFilterLink={handleCopyHistoryFilterLink}
+          onAcceptSuggestion={handleAcceptSuggestion}
+          onRejectSuggestion={handleRejectSuggestion}
+        />
+      ),
+    },
+    {
+      id: 'ai',
+      label: 'AI',
+      icon: 'sparkles',
+      content: (
+        <AIPanel
+          editor={editor}
+          docId={HISTORY_DOC_ID}
+          baseVersion={historyHeadRef.current}
+          currentText={currentText}
+          schemaVersion={HISTORY_SCHEMA_VERSION}
+          onApplyPatch={handleApplyAiPatch}
+        />
+      ),
+    },
+    {
+      id: 'share',
+      label: 'Share',
+      icon: 'share',
+      content: <SharePanel editor={editor} docId={HISTORY_DOC_ID} />,
+    },
+    {
+      id: 'activity',
+      label: 'Activity',
+      icon: 'cloud',
+      content: (
+        <>
+          <MentionPanel editor={editor} currentText={currentText} />
+          <OfflinePanel editor={editor} />
+        </>
+      ),
+    },
+  ];
+
+  const topBar = (
+    <TopBar
+      editor={editor}
+      docTitle={DOC_TITLE}
+      focusMode={isFocusMode}
+      suggestMode={isSuggestMode}
+      railOpen={railOpen}
+      onToggleFocusMode={handleFocusModeToggle}
+      onToggleSuggestMode={() => setIsSuggestMode((value) => !value)}
+      onToggleRail={() => setRailOpen((value) => !value)}
+    />
+  );
+
+  const sidebar = (
+    <Sidebar
+      collapsed={sidebarCollapsed}
+      onToggleCollapsed={() => setSidebarCollapsed((value) => !value)}
+      outlineItems={outlineItems}
+      onToggleHeading={handleToggleHeading}
+      onFocusHeading={handleFocusHeading}
+      hideOutline={isFocusMode}
+    />
+  );
+
+  const rail = (
+    <RightRail
+      active={activeTab}
+      onChange={setActiveTab}
+      tabs={railTabs}
+      onClose={() => setRailOpen(false)}
+    />
+  );
+
   return (
     <div
       data-testid="lash-editor-shell"
@@ -689,128 +814,119 @@ export function EditorWorkspace() {
       aria-live="polite"
       className="lash-editor-shell"
     >
-      <div className="lash-editor-controls">
-        <MarkdownIO
-          fileInputRef={fileInputRef}
-          onImportClick={handleImportMarkdown}
-          onExportClick={handleExportMarkdown}
-          onFileChange={handleMarkdownFileChange}
-          exportDisabled={!isEditorReady}
-        />
-        <AutosaveIndicator editor={editor} />
-        <FocusModeToggle isFocusMode={isFocusMode} onToggle={handleFocusModeToggle} />
-        <button
-          type="button"
-          className="suggest-mode-toggle"
-          data-testid="suggest-mode-toggle"
-          data-active={isSuggestMode ? 'true' : 'false'}
-          onClick={() => setIsSuggestMode((value) => !value)}
-        >
-          {isSuggestMode ? 'Suggesting' : 'Suggest'}
-        </button>
-      </div>
-      <div className="lash-editor-layout">
-        {!isFocusMode ? (
-          <OutlinePanel
-            items={outlineItems}
-            onToggle={handleToggleHeading}
-            onFocus={handleFocusHeading}
-          />
-        ) : null}
-        <div className="lash-editor-main">
-          <EditorToolbar
-            editor={editor}
-            groups={TOOLBAR_META}
-            hidden={isFocusMode}
-            onClick={handleToolbarClick}
-          />
-
-          {isEditorReady && activeTableCell && !isFocusMode ? (
-            <TableCellPanel
-              active={activeTableCell}
-              onSetCellType={handleSetTableCellType}
-              onSetValue={handleSetTableCellValue}
-              onCycle={handleCycleTableCellOption}
+      <AppShell
+        topBar={topBar}
+        sidebar={sidebar}
+        rail={rail}
+        focusMode={isFocusMode}
+        railOpen={railOpen}
+        sidebarCollapsed={sidebarCollapsed}
+        onSidebarCollapsedChange={setSidebarCollapsed}
+        onRailOpenChange={setRailOpen}
+      >
+        <EditorToolbar
+          editor={editor}
+          groups={TOOLBAR_META}
+          hidden={isFocusMode}
+          onClick={handleToolbarClick}
+          trailing={
+            <MarkdownIO
+              fileInputRef={fileInputRef}
+              onImportClick={handleImportMarkdown}
+              onExportClick={handleExportMarkdown}
+              onFileChange={handleMarkdownFileChange}
+              exportDisabled={!isEditorReady}
             />
-          ) : null}
+          }
+        />
 
-          <div className="lash-editor-content-wrapper" role="region" aria-label="Document editor">
-            {!isMounted || !isEditorReady ? (
-              <div className="editor-loading">Loading editor...</div>
-            ) : (
-              <div className="lash-editor-with-blame">
-                <div
-                  className="lash-blame-gutter"
-                  data-testid="blame-gutter"
-                  aria-label="Blame gutter"
-                >
-                  {blameLines.length ? (
-                    blameLines.map((line) => (
-                      <button
-                        key={line.line}
-                        type="button"
-                        className="lash-blame-line"
-                        data-testid="blame-line"
-                        data-author-id={line.authorId ?? ''}
-                        title={
-                          line.authorId
-                            ? `Line ${line.line}: ${line.authorId}`
-                            : `Line ${line.line}: unattributed`
-                        }
-                        onClick={() => handleBlameLineClick(line.authorId)}
-                      >
-                        {line.authorId ?? '-'}
-                      </button>
-                    ))
-                  ) : (
-                    <span className="lash-blame-empty">-</span>
-                  )}
-                </div>
-                <EditorContent
-                  editor={editor}
-                  data-testid="lash-editor-content"
-                  className="lash-editor-content"
-                />
+        <div className="lash-doc-wrap">
+          <article className="lash-doc-paper" aria-labelledby="lash-doc-title-text">
+            <header className="lash-doc-header">
+              <h1 className="lash-doc-title" id="lash-doc-title-text">
+                {DOC_TITLE}
+              </h1>
+              <div className="lash-doc-meta" aria-label="Document metadata">
+                <span>Edited by Apollo</span>
+                <span className="lash-doc-meta-dot" aria-hidden="true" />
+                <span>
+                  {historyEntries.length} version{historyEntries.length === 1 ? '' : 's'}
+                </span>
+                <span className="lash-doc-meta-dot" aria-hidden="true" />
+                <span>
+                  {outlineItems.length} section{outlineItems.length === 1 ? '' : 's'}
+                </span>
+                {isSuggestMode ? (
+                  <>
+                    <span className="lash-doc-meta-dot" aria-hidden="true" />
+                    <span
+                      style={{
+                        color: 'var(--color-coral-600)',
+                        fontWeight: 600,
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: 4,
+                      }}
+                    >
+                      <Icon name="pencil" width={12} height={12} /> Suggesting
+                    </span>
+                  </>
+                ) : null}
               </div>
-            )}
-          </div>
+            </header>
 
-          {/* Slot panels for downstream lanes — render nothing until they're filled. */}
-          <MentionPanel editor={editor} currentText={editor ? editorText(editor) : ''} />
-          <OfflinePanel editor={editor} />
-          <HistoryPanel
-            editor={editor}
-            entries={historyEntries}
-            selectedEntryId={selectedHistoryEntryId}
-            authorFilter={historyAuthorFilter}
-            timeFilter={historyTimeFilter}
-            acceptedSuggestionIds={acceptedSuggestionIds}
-            onSelect={handleSelectHistoryEntry}
-            onRestore={handleRestoreHistoryEntry}
-            onSetAuthorFilter={setHistoryAuthorFilter}
-            onClearAuthorFilter={() => setHistoryAuthorFilter(null)}
-            onSetTimeFilter={setHistoryTimeFilter}
-            onCopyFilterLink={handleCopyHistoryFilterLink}
-            onAcceptSuggestion={handleAcceptSuggestion}
-            onRejectSuggestion={handleRejectSuggestion}
-          />
-          <ChatPanel
-            editor={editor}
-            docId={HISTORY_DOC_ID}
-            baseVersion={historyHeadRef.current}
-            currentText={editor ? editorText(editor) : ''}
-          />
-          <SharePanel editor={editor} docId={HISTORY_DOC_ID} />
-          <AIPanel
-            editor={editor}
-            docId={HISTORY_DOC_ID}
-            baseVersion={historyHeadRef.current}
-            currentText={editor ? editorText(editor) : ''}
-            schemaVersion={HISTORY_SCHEMA_VERSION}
-            onApplyPatch={handleApplyAiPatch}
-          />
+            {isEditorReady && activeTableCell && !isFocusMode ? (
+              <TableCellPanel
+                active={activeTableCell}
+                onSetCellType={handleSetTableCellType}
+                onSetValue={handleSetTableCellValue}
+                onCycle={handleCycleTableCellOption}
+              />
+            ) : null}
+
+            <div className="lash-editor-content-wrapper" role="region" aria-label="Document editor">
+              {!isMounted || !isEditorReady ? (
+                <div className="editor-loading">Preparing your editor…</div>
+              ) : (
+                <div className="lash-editor-with-blame" data-blame-on="true">
+                  <div
+                    className="lash-blame-gutter"
+                    data-testid="blame-gutter"
+                    aria-label="Blame gutter"
+                  >
+                    {blameLines.length ? (
+                      blameLines.map((line) => (
+                        <button
+                          key={line.line}
+                          type="button"
+                          className="lash-blame-line"
+                          data-testid="blame-line"
+                          data-author-id={line.authorId ?? ''}
+                          title={
+                            line.authorId
+                              ? `Line ${line.line}: ${line.authorId}`
+                              : `Line ${line.line}: unattributed`
+                          }
+                          onClick={() => handleBlameLineClick(line.authorId)}
+                        >
+                          {line.authorId ?? '·'}
+                        </button>
+                      ))
+                    ) : (
+                      <span className="lash-blame-empty">·</span>
+                    )}
+                  </div>
+                  <EditorContent
+                    editor={editor}
+                    data-testid="lash-editor-content"
+                    className="lash-editor-content"
+                  />
+                </div>
+              )}
+            </div>
+          </article>
         </div>
-      </div>
+      </AppShell>
 
       <span style={{ display: 'none' }}>{version}</span>
     </div>
