@@ -122,12 +122,34 @@ try {
       null,
       { timeout: 5000 },
     );
-    await page.waitForTimeout(400);
+    await page.waitForTimeout(900);
     await page.screenshot({
       path: join(outDir, `${viewport.name}.png`),
       fullPage: false,
     });
     await context.close();
+  }
+
+  // Motion entrance choreography — capture frames during the 800ms window
+  {
+    console.log('-> entrance frames @1440');
+    const frames = [100, 240, 380, 520, 700];
+    for (const delay of frames) {
+      const context = await browser.newContext({
+        viewport: { width: 1440, height: 900 },
+        deviceScaleFactor: 2,
+      });
+      const page = await context.newPage();
+      await page.goto(baseUrl, { waitUntil: 'domcontentloaded' });
+      // Wait for the AppShell to mount but capture before entrance finishes.
+      await page.waitForSelector('.lash-app', { timeout: 15000 });
+      await page.waitForTimeout(delay);
+      await page.screenshot({
+        path: join(outDir, `entrance-${String(delay).padStart(3, '0')}ms.png`),
+        fullPage: false,
+      });
+      await context.close();
+    }
   }
 
   // Focus mode at 1440 with content

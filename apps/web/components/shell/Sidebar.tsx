@@ -130,9 +130,10 @@ interface SidebarOutlineProps {
 }
 
 function SidebarOutline({ items, onToggle, onFocus }: SidebarOutlineProps): ReactNode {
+  // OutlinePanel renders its own `Outline` heading; we provide the section
+  // wrapper here but suppress an extra label to keep the chrome quiet.
   return (
     <div className="lash-sidebar-section">
-      <div className="lash-sidebar-section-label">Outline</div>
       <OutlinePanel items={items} onToggle={onToggle} onFocus={onFocus} />
     </div>
   );

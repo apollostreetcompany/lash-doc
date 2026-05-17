@@ -33,6 +33,14 @@ export function AppShell({
 }: AppShellProps) {
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   const [mobileRailOpen, setMobileRailOpen] = useState(false);
+  // Entrance choreography flag — scoped to first mount so animations don't
+  // replay every time focus mode toggles or the rail closes.
+  const [entrance, setEntrance] = useState(true);
+
+  useEffect(() => {
+    const timer = setTimeout(() => setEntrance(false), 800);
+    return () => clearTimeout(timer);
+  }, []);
 
   // Close mobile drawers on escape.
   useEffect(() => {
@@ -57,6 +65,7 @@ export function AppShell({
       data-sidebar-collapsed={sidebarCollapsed ? 'true' : 'false'}
       data-mobile-drawer={mobileSidebarOpen ? 'true' : 'false'}
       data-rail-mobile={mobileRailOpen ? 'true' : 'false'}
+      data-entrance={entrance ? 'true' : 'false'}
     >
       {/* clone sidebar with onCloseMobile prop when on mobile drawer */}
       {sidebar}
