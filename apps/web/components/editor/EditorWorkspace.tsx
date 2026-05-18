@@ -6,6 +6,7 @@ import {
   createLashEditorExtensions,
   createLocalStorageOutlinePersistence,
   getOutlineItems,
+  hasOutlineTransactionMeta,
   lashCommands,
   parseMarkdownToDoc,
   runToolbarAction,
@@ -20,7 +21,7 @@ import {
 } from '@lash/editor-core';
 import { EMPTY_HISTORY_DOC, createHistoryStore } from '@lash/history';
 import { createDocumentId, hashCanonical, type EditPatch, type HistoryEntry } from '@lash/types';
-import type { Editor } from '@tiptap/core';
+import type { Editor, EditorEvents } from '@tiptap/core';
 import { EditorContent, useEditor } from '@tiptap/react';
 import {
   type ChangeEvent,
@@ -72,6 +73,8 @@ const HISTORY_AUDIT = { ua: 'lash-web/local-history' } as const;
 const HISTORY_RECORD_DEBOUNCE_MS = 1800;
 const AI_AUDIT = { ua: 'lash-local-ai-editor' };
 const DOC_TITLE = 'Untitled document';
+
+type OutlineTransaction = EditorEvents['transaction']['transaction'];
 
 const textReplaceOp = (before: string, after: string) => {
   let prefix = 0;
@@ -324,7 +327,10 @@ export function EditorWorkspace() {
       outlineItemsRef.current = nextItems;
       setOutlineItems(nextItems);
     };
-    const scheduleOutline = () => {
+    const scheduleOutline = (transaction?: OutlineTransaction) => {
+      if (transaction && !transaction.docChanged && !hasOutlineTransactionMeta(transaction)) {
+        return;
+      }
       if (outlineFrameRef.current !== null) {
         return;
       }
@@ -334,15 +340,16 @@ export function EditorWorkspace() {
       });
     };
     publishOutline();
-    editor.on('selectionUpdate', scheduleOutline);
-    editor.on('transaction', scheduleOutline);
+    const handleTransaction = ({ transaction }: { transaction: OutlineTransaction }) => {
+      scheduleOutline(transaction);
+    };
+    editor.on('transaction', handleTransaction);
     return () => {
       if (outlineFrameRef.current !== null) {
         window.cancelAnimationFrame(outlineFrameRef.current);
         outlineFrameRef.current = null;
       }
-      editor.off('selectionUpdate', scheduleOutline);
-      editor.off('transaction', scheduleOutline);
+      editor.off('transaction', handleTransaction);
     };
   }, [editor]);
 
@@ -494,8 +501,7 @@ export function EditorWorkspace() {
   // available in dev and when the build is explicitly tagged for tests
   // (Playwright sets NEXT_PUBLIC_LASH_TEST_HOOKS=true at build time).
   const exposeTestHooks =
-    process.env.NODE_ENV !== 'production' ||
-    process.env.NEXT_PUBLIC_LASH_TEST_HOOKS === 'true';
+    process.env.NODE_ENV !== 'production' || process.env.NEXT_PUBLIC_LASH_TEST_HOOKS === 'true';
 
   useEffect(() => {
     if (typeof window === 'undefined' || !exposeTestHooks) return;
@@ -935,13 +941,10 @@ export function EditorWorkspace() {
     }
   }, []);
 
-  const handleOpenMobileSidebar = useCallback(
-    (event: ReactMouseEvent<HTMLButtonElement>) => {
-      mobileSidebarTriggerRef.current = event.currentTarget;
-      setMobileSidebarOpen(true);
-    },
-    [],
-  );
+  const handleOpenMobileSidebar = useCallback((event: ReactMouseEvent<HTMLButtonElement>) => {
+    mobileSidebarTriggerRef.current = event.currentTarget;
+    setMobileSidebarOpen(true);
+  }, []);
 
   const closeMobileSidebar = useCallback(() => {
     setMobileSidebarOpen(false);
