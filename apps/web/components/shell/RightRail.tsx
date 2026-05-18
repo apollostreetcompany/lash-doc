@@ -40,6 +40,10 @@ const prefersReducedMotion = () => {
 
 export function RightRail({ active, onChange, tabs, onClose }: RightRailProps) {
   const bodyRef = useRef<HTMLDivElement | null>(null);
+  // Programmatic scrollIntoView fires the observer mid-flight on iOS; arm a
+  // brief lockout window after every chip click so the observer can't
+  // immediately override the user's tap-to-jump.
+  const scrollLockRef = useRef<number>(0);
 
   const handleTabClick = useCallback(
     (id: RailTab) => {
@@ -48,6 +52,7 @@ export function RightRail({ active, onChange, tabs, onClose }: RightRailProps) {
       if (!body) return;
       const target = body.querySelector<HTMLElement>(`[data-section-id="${id}"]`);
       if (target) {
+        scrollLockRef.current = Date.now() + 400;
         target.scrollIntoView({
           behavior: prefersReducedMotion() ? 'auto' : 'smooth',
           block: 'start',
@@ -65,14 +70,19 @@ export function RightRail({ active, onChange, tabs, onClose }: RightRailProps) {
     if (!sections.length) return;
     const observer = new IntersectionObserver(
       (entries) => {
+        if (Date.now() < scrollLockRef.current) return;
         const visible = entries
-          .filter((entry) => entry.isIntersecting)
+          .filter((entry) => entry.isIntersecting && entry.intersectionRatio > 0.25)
           .sort((a, b) => b.intersectionRatio - a.intersectionRatio)[0];
         if (!visible) return;
         const id = visible.target.getAttribute('data-section-id') as RailTab | null;
         if (id) onChange(id);
       },
-      { root: body, threshold: [0.25, 0.5, 0.75] },
+      // The negative bottom rootMargin suppresses false fires near the
+      // bottom of the rail during iOS rubber-band overscroll, which would
+      // otherwise yank the active chip onto whatever section is briefly
+      // pushed into view.
+      { root: body, rootMargin: '0px 0px -40% 0px', threshold: [0.25, 0.5, 0.75] },
     );
     sections.forEach((section) => observer.observe(section));
     return () => observer.disconnect();

@@ -12,7 +12,7 @@
  */
 'use client';
 
-import { useEffect, useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 
 export interface AppShellProps {
   topBar: ReactNode;
@@ -42,6 +42,7 @@ export function AppShell({
   onMobileRailClose,
 }: AppShellProps) {
   const [entrance, setEntrance] = useState(true);
+  const canvasRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     const timer = setTimeout(() => setEntrance(false), 800);
@@ -64,6 +65,16 @@ export function AppShell({
 
   const drawerOpen = mobileSidebarOpen || mobileRailOpen;
 
+  // While a mobile drawer is open, mark the canvas as `inert` so AT users
+  // (and tab-focus) cannot reach the editor behind the drawer. React 18
+  // does not yet emit `inert` as a known prop, so we toggle the attribute
+  // imperatively to avoid type churn and keep the contract explicit.
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    canvas.toggleAttribute('inert', drawerOpen);
+  }, [drawerOpen]);
+
   return (
     <div
       className="lash-app"
@@ -77,7 +88,7 @@ export function AppShell({
       {sidebar}
       {topBar}
 
-      <div className="lash-canvas" id="lash-main" tabIndex={-1}>
+      <div className="lash-canvas" id="lash-main" tabIndex={-1} ref={canvasRef}>
         {children}
       </div>
 

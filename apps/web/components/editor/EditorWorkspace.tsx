@@ -22,7 +22,15 @@ import { EMPTY_HISTORY_DOC, createHistoryStore } from '@lash/history';
 import { createDocumentId, hashCanonical, type EditPatch, type HistoryEntry } from '@lash/types';
 import type { Editor } from '@tiptap/core';
 import { EditorContent, useEditor } from '@tiptap/react';
-import { type ChangeEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  type ChangeEvent,
+  type MouseEvent as ReactMouseEvent,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 
 import { createBrowserImageUploader } from '../../lib/createBrowserImageUploader';
 import { AppShell } from '../shell/AppShell';
@@ -115,6 +123,38 @@ const textToContent = (text: string) => ({
   })),
 });
 
+// Copy `text` to the clipboard. Prefers the async Clipboard API, but falls
+// back to a transient textarea + execCommand('copy') for HTTP previews,
+// iframes, and older Safari that can't acquire clipboard-write permission.
+const copyToClipboard = async (text: string): Promise<boolean> => {
+  try {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(text);
+      return true;
+    }
+  } catch {
+    // Fall through to the execCommand path below.
+  }
+  if (typeof document === 'undefined') return false;
+  const ta = document.createElement('textarea');
+  ta.value = text;
+  ta.setAttribute('readonly', '');
+  ta.style.position = 'fixed';
+  ta.style.top = '0';
+  ta.style.left = '0';
+  ta.style.opacity = '0';
+  document.body.appendChild(ta);
+  ta.select();
+  let ok = false;
+  try {
+    ok = document.execCommand('copy');
+  } catch {
+    ok = false;
+  }
+  document.body.removeChild(ta);
+  return ok;
+};
+
 export function EditorWorkspace() {
   const [version, setVersion] = useState(0);
   const [isMounted, setIsMounted] = useState(false);
@@ -148,6 +188,10 @@ export function EditorWorkspace() {
   const applyingHistoryRef = useRef(false);
   const suggestModeRef = useRef(false);
   const activeTableCellRef = useRef<ActiveCell | null>(null);
+  // Refs to the buttons that opened the mobile drawers, so focus can
+  // return to them on close (a11y requirement: focus must not be lost).
+  const mobileSidebarTriggerRef = useRef<HTMLElement | null>(null);
+  const mobileRailTriggerRef = useRef<HTMLElement | null>(null);
 
   const commitHistoryHead = useCallback((sha: string | null) => {
     historyHeadRef.current = sha;
@@ -163,6 +207,32 @@ export function EditorWorkspace() {
   useEffect(() => {
     suggestModeRef.current = isSuggestMode;
   }, [isSuggestMode]);
+
+  // iOS scroll lock while a mobile drawer is open. CSS `overflow: hidden`
+  // alone does not stop iOS rubber-band scroll on the document body — the
+  // proven trick is to position-fix the body at a negative top offset
+  // equal to the prior scroll position, then restore on close.
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const drawerOpen = mobileSidebarOpen || mobileRailOpen;
+    if (!drawerOpen) return;
+    const scrollY = window.scrollY;
+    const body = document.body;
+    const prev = {
+      position: body.style.position,
+      top: body.style.top,
+      width: body.style.width,
+    };
+    body.style.position = 'fixed';
+    body.style.top = `-${scrollY}px`;
+    body.style.width = '100%';
+    return () => {
+      body.style.position = prev.position;
+      body.style.top = prev.top;
+      body.style.width = prev.width;
+      window.scrollTo(0, scrollY);
+    };
+  }, [mobileSidebarOpen, mobileRailOpen]);
 
   const outlinePersistence = useMemo(
     () =>
@@ -220,6 +290,20 @@ export function EditorWorkspace() {
     },
     [extensions],
   );
+
+  // Programmatic editor focus does not always pop the iOS software
+  // keyboard — it requires the focus to happen inside a user-gesture
+  // tick. A short post-mount nudge reliably opens the keyboard on touch
+  // devices so users can start typing without an extra tap.
+  useEffect(() => {
+    if (!editor || !isMounted) return;
+    if (typeof window === 'undefined') return;
+    if (!window.matchMedia?.('(pointer: coarse)').matches) return;
+    const timer = setTimeout(() => {
+      editor.commands.focus('end');
+    }, 120);
+    return () => clearTimeout(timer);
+  }, [editor, isMounted]);
 
   useEffect(() => {
     if (!editor) {
@@ -512,7 +596,15 @@ export function EditorWorkspace() {
     const link = url.toString();
     (window as Window & { __lashLastHistoryFilterLink?: string }).__lashLastHistoryFilterLink =
       link;
-    void navigator.clipboard?.writeText(link).catch(() => undefined);
+    // navigator.clipboard requires a secure context and may reject inside
+    // iframes or older Safari builds — fall back to the execCommand
+    // textarea dance so mobile Safari and HTTP previews still produce a
+    // working copy. The result is mirrored to a test hook so e2e can
+    // distinguish ok / failed outcomes.
+    void copyToClipboard(link).then((ok) => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (window as any).__lashLastCopyResult = ok ? 'ok' : 'failed';
+    });
   }, [historyAuthorFilter, historyTimeFilter]);
 
   const handleAcceptSuggestion = useCallback(
@@ -651,8 +743,12 @@ export function EditorWorkspace() {
     [editor, commitHistoryHead],
   );
 
-  // Cmd/Ctrl+Shift+F binding for focus mode.
+  // Cmd/Ctrl+Shift+F binding for focus mode. Touch devices never fire this
+  // chord (no physical keyboard in the common case), so skip the listener
+  // there to avoid hijacking the iOS software-keyboard "F" shortcut row.
   useEffect(() => {
+    if (typeof window === 'undefined') return;
+    if (window.matchMedia?.('(pointer: coarse)').matches) return;
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.isComposing || event.keyCode === 229) return;
       if (event.repeat) return;
@@ -806,17 +902,34 @@ export function EditorWorkspace() {
     },
   ];
 
-  const handleShareClick = useCallback(() => {
+  const handleShareClick = useCallback((event: ReactMouseEvent<HTMLButtonElement>) => {
     setActiveTab('share');
     setRailOpen(true);
     // On narrow widths the rail is a slide-in drawer.
     if (typeof window !== 'undefined' && window.matchMedia('(max-width: 767px)').matches) {
+      mobileRailTriggerRef.current = event.currentTarget;
       setMobileRailOpen(true);
     }
   }, []);
 
-  const closeMobileSidebar = useCallback(() => setMobileSidebarOpen(false), []);
-  const closeMobileRail = useCallback(() => setMobileRailOpen(false), []);
+  const handleOpenMobileSidebar = useCallback(
+    (event: ReactMouseEvent<HTMLButtonElement>) => {
+      mobileSidebarTriggerRef.current = event.currentTarget;
+      setMobileSidebarOpen(true);
+    },
+    [],
+  );
+
+  const closeMobileSidebar = useCallback(() => {
+    setMobileSidebarOpen(false);
+    // Return focus to the trigger so AT users don't get dumped at the
+    // document root after the drawer closes.
+    mobileSidebarTriggerRef.current?.focus();
+  }, []);
+  const closeMobileRail = useCallback(() => {
+    setMobileRailOpen(false);
+    mobileRailTriggerRef.current?.focus();
+  }, []);
 
   const topBar = (
     <TopBar
@@ -828,7 +941,7 @@ export function EditorWorkspace() {
       onToggleFocusMode={handleFocusModeToggle}
       onToggleSuggestMode={() => setIsSuggestMode((value) => !value)}
       onShareClick={handleShareClick}
-      onOpenMobileSidebar={() => setMobileSidebarOpen(true)}
+      onOpenMobileSidebar={handleOpenMobileSidebar}
     />
   );
 

@@ -13,7 +13,7 @@
 'use client';
 
 import type { Editor } from '@tiptap/core';
-import type { ReactNode } from 'react';
+import type { MouseEvent, ReactNode } from 'react';
 
 import { Avatar, AvatarStack, type AvatarTint } from './Avatar';
 import { Icon } from './Icon';
@@ -38,8 +38,10 @@ export interface TopBarProps {
   railOpen: boolean;
   onToggleFocusMode: () => void;
   onToggleSuggestMode: () => void;
-  onShareClick: () => void;
-  onOpenMobileSidebar?: () => void;
+  // Both handlers receive the originating click event so callers can stash
+  // `event.currentTarget` for later focus restoration when the drawer closes.
+  onShareClick: (event: MouseEvent<HTMLButtonElement>) => void;
+  onOpenMobileSidebar?: (event: MouseEvent<HTMLButtonElement>) => void;
   extras?: ReactNode;
 }
 
