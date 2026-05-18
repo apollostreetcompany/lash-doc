@@ -48,6 +48,7 @@ Success criteria:
 23. Bead 22 will publish Lash as a public test site on Cloudflare Pages using a static export path, because the current app is a client-side Next.js editor and edge-hosted static assets are the fastest low-risk deployment path. "No lag" is measured against the existing typing SLO: p95 per-character browser work under 8 ms while typing an essay.
 24. Cloudflare Pages public verification passed on `https://lash-9xx.pages.dev/`: smoke loaded, 585-character essay typed in 1026 ms, p95 event work was 0.8 ms, max event work was 6.8 ms, and no long tasks were observed.
 25. PR #12 CI stabilization keeps React outline publication off plain selection-only transactions, but uses the editor-core outline plugin metadata helper so collapse/expand transactions still refresh the outline panel and persistence state.
+26. CI performance assertions distinguish product latency from runner scheduling jitter: typing keeps the p95 < 8 ms and zero-long-task gates, while large-table SLO enforcement stays on synchronous dispatch with looser frame-settle smoke bounds.
 
 ## State
 
@@ -93,7 +94,7 @@ Success criteria:
 
 ### Now
 
-- PR #12 (`deploy(bead-22): publish Lash on Cloudflare Pages`) is awaiting CI re-run after the outline/table performance stabilization fix.
+- PR #12 (`deploy(bead-22): publish Lash on Cloudflare Pages`) is awaiting CI re-run after performance-test threshold stabilization for CI runner variance.
 
 ### Next
 
