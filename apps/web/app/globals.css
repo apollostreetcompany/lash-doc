@@ -775,8 +775,8 @@ main[data-testid='lash-home'] > section {
   background: transparent;
   color: var(--color-text-secondary);
   cursor: pointer;
-  width: 32px;
-  height: 32px;
+  min-width: 32px;
+  min-height: 32px;
   border-radius: var(--radius-md);
   display: inline-flex;
   align-items: center;
@@ -2683,6 +2683,77 @@ li[data-type='taskItem'] > div p {
 
   .lash-table-panel {
     margin: 0 var(--canvas-pad-x) var(--space-2);
+  }
+
+  /* ----------------------------------------------------------------------
+     Mobile touch targets: ensure ≥44×44px hit area per WCAG 2.5.5.
+     Keep icon glyphs at desktop size by adjusting padding, not the SVG.
+     For pill-shaped controls, expand padding so the pill grows uniformly
+     instead of forcing a tall block.
+     ---------------------------------------------------------------------- */
+  .lash-icon-btn,
+  .lash-sidebar-toggle,
+  .outline-collapse-button,
+  .lash-blame-line {
+    min-width: 44px;
+    min-height: 44px;
+  }
+
+  .lash-rail-tab {
+    min-width: 44px;
+  }
+
+  .lash-sidebar-item {
+    min-height: 44px;
+  }
+
+  .lash-share-button,
+  .lash-table-cell-control {
+    min-height: 44px;
+    height: auto;
+    padding: 0 var(--space-4);
+  }
+
+  .history-restore-button,
+  .history-suggestion-button,
+  .chat-action-button,
+  .chat-filter-button,
+  .ai-action-button,
+  .ai-citation-button,
+  .share-action-button,
+  .offline-action {
+    min-height: 44px;
+    height: auto;
+    padding: var(--space-2) var(--space-4);
+  }
+
+  .history-filter-button,
+  .lash-table-type-button,
+  .lash-table-cycle-button,
+  .lash-table-option-button {
+    min-height: 44px;
+    padding: var(--space-2) var(--space-3);
+  }
+
+  /* ----------------------------------------------------------------------
+     Mobile typography: bump small (≤11px) labels to ≥12px for legibility.
+     ---------------------------------------------------------------------- */
+  .lash-avatar {
+    font-size: 13px;
+  }
+
+  .outline-title,
+  .lash-blame-line,
+  .lash-table-panel-label,
+  .lash-sidebar-section-label,
+  .outline-meta,
+  .lash-chip-icon,
+  .share-capabilities span,
+  .share-redaction-grid span,
+  .share-audit ol,
+  .offline-status-row > span,
+  [data-testid='offline-merge-status'] {
+    font-size: 12px;
   }
 }
 
