@@ -50,6 +50,7 @@ Success criteria:
 25. PR #12 CI stabilization keeps React outline publication off plain selection-only transactions, but uses the editor-core outline plugin metadata helper so collapse/expand transactions still refresh the outline panel and persistence state.
 26. CI performance assertions distinguish product latency from runner scheduling jitter: typing keeps the p95 < 8 ms and zero-long-task gates, while large-table SLO enforcement stays on synchronous dispatch with looser frame-settle smoke bounds.
 27. Bead 22 is merged and deployed from `main`: PR #12 squash-merged as `3f19bc3`, protected main CI run `26026635724` passed, Cloudflare redeploy produced preview `https://cad5a3ac.lash-9xx.pages.dev`, and production verification passed on `https://lash-9xx.pages.dev/` with 585 characters typed in 985 ms, p95 event work 0.8 ms, max event work 7.4 ms, and zero long tasks.
+28. User-reported public-test regressions are tracked in `REGRESSIONS.md` and should be handled as Beads 23-25: title, @mentions, and sidebar. Each bead must first reproduce the failure with a failing test before implementation.
 
 ## State
 
@@ -98,11 +99,14 @@ Success criteria:
 
 ### Now
 
-- No active bead for the current deploy/performance objective; Lash is deployed publicly and `main` is green.
+- Shutdown handoff complete: local Lash web server is stopped/not running; regression backlog is recorded for Beads 23-25.
 
 ### Next
 
-- Future work is outside the current objective: production deployment target selection and any Riddle integration after Riddle has its own stable product/Zed integration.
+- Bead 23 - Fix title regression.
+- Bead 24 - Fix @mention regression.
+- Bead 25 - Fix sidebar regression.
+- Future work outside the regression set: production/custom-domain decision and any Riddle integration after Riddle has its own stable product/Zed integration.
 
 ## Open Questions
 
@@ -116,6 +120,7 @@ Success criteria:
 - `HANDOFF.md`
 - `MISTAKES.md`
 - `DEPLOYMENT.md`
+- `REGRESSIONS.md`
 - `RELEASE_NOTES.md`
 - `handoff/beads.jsonl`
 - `handoff/beads.schema.json`
