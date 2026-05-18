@@ -1,4 +1,4 @@
-import type { Metadata } from 'next';
+import type { Metadata, Viewport } from 'next';
 import { Inter, JetBrains_Mono } from 'next/font/google';
 import type { ReactNode } from 'react';
 
@@ -21,6 +21,14 @@ const jetbrainsMono = JetBrains_Mono({
 export const metadata: Metadata = {
   title: 'Lash — Collaborative Editor',
   description: 'Collaborative, AI-assisted document editing for high-trust teams.',
+};
+
+// Mobile-safe viewport: `width=device-width` for proper scaling on phones and
+// `viewport-fit=cover` so the app extends under the iOS safe-area notches.
+export const viewport: Viewport = {
+  width: 'device-width',
+  initialScale: 1,
+  viewportFit: 'cover',
 };
 
 export default function RootLayout({ children }: { children: ReactNode }) {
