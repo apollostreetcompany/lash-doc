@@ -2798,6 +2798,16 @@ li[data-type='taskItem'] > div p {
   pointer-events: auto;
 }
 
+/* Belt-and-suspenders: clip the app container itself while a mobile drawer
+   is open. The primary scroll-lock is the JS body `position: fixed` trick
+   inside EditorWorkspace (CSS `overflow: hidden` alone does not stop iOS
+   rubber-band scroll), but this keeps content from leaking past the drawer
+   if the JS is ever bypassed (SSR, hydration race, prefers-reduced-data). */
+.lash-app[data-mobile-drawer='true'],
+.lash-app[data-rail-mobile='true'] {
+  overflow: hidden;
+}
+
 /* ==========================================================================
    12. Motion choreography
    ==========================================================================
