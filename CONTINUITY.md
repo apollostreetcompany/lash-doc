@@ -44,6 +44,7 @@ Success criteria:
 19. Decision 18 supersedes the 900 ms value in Decision 4; keep the 1800 ms debounce until a measured browser run supports lowering it.
 20. Bead 20 closes the release with a post-merge audit artifact instead of adding product code; Riddle stays out of implementation.
 21. Lash v1 is complete for the current local product objective after the release-audit cleanup merged and protected `main` CI passed.
+22. Post-v1 mobile hardening landed through the six-agent PR stack in dependency order: foundation (#6), touch targets (#9), hover-on-touch (#10), drawer/editor UX (#5), print (#8), and mobile e2e coverage (#7). Final protected `main` CI passed on `7f03a7e`.
 
 ## State
 
@@ -75,6 +76,14 @@ Success criteria:
 - [x] Main push CI passed: run `25955018685`, workflow `CI`, `build-and-test`.
 - [x] PR #2 merged into `main` as `c6ee96e796602834d6795e84d404bf962486ad40`.
 - [x] Audited main push CI passed: run `25955266966`, workflow `CI`, `build-and-test`.
+- [x] Bead 21 - Post-v1 mobile hardening PR integration and final main validation.
+- [x] PR #6 merged into `main` as `f0cd99810bbdc3604b7172419722715f4d7b9cee`.
+- [x] PR #9 merged into `main` as `87d913ea9ff3c42c2774410100e2596df08c3617`.
+- [x] PR #10 merged into `main` as `5f9cc21278c229e4bfbb5634212e3969828876e0`.
+- [x] PR #5 merged into `main` as `b04688792822f2f5e0e01723d8156a9e4fe438ad`.
+- [x] PR #8 merged into `main` as `d23b57ae502ec88703f9e9c8757e1fa4112f6986`.
+- [x] PR #7 merged into `main` as `7f03a7ee736adf7ac24971657dcbad45e7d90786`.
+- [x] Final post-mobile-hardening main push CI passed: run `26022768022`, workflow `CI`, `build-and-test`.
 
 ### Now
 
@@ -112,3 +121,10 @@ Success criteria:
 - GitHub PR #1: `https://github.com/apollostreetcompany/lash-doc/pull/1`
 - GitHub PR #2: `https://github.com/apollostreetcompany/lash-doc/pull/2`
 - Audited main CI run: `https://github.com/apollostreetcompany/lash-doc/actions/runs/25955266966`
+- GitHub PR #5: `https://github.com/apollostreetcompany/lash-doc/pull/5`
+- GitHub PR #6: `https://github.com/apollostreetcompany/lash-doc/pull/6`
+- GitHub PR #7: `https://github.com/apollostreetcompany/lash-doc/pull/7`
+- GitHub PR #8: `https://github.com/apollostreetcompany/lash-doc/pull/8`
+- GitHub PR #9: `https://github.com/apollostreetcompany/lash-doc/pull/9`
+- GitHub PR #10: `https://github.com/apollostreetcompany/lash-doc/pull/10`
+- Post-mobile-hardening main CI run: `https://github.com/apollostreetcompany/lash-doc/actions/runs/26022768022`

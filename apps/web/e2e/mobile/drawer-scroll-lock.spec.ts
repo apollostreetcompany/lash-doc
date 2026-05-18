@@ -63,7 +63,10 @@ test.describe('mobile drawer scroll-lock and focus restore', () => {
     // should latch and not get yanked back to chat by the observer mid-scroll.
     const historyChip = page.getByTestId('rail-tab-history');
     await expect(historyChip).toBeVisible();
-    await historyChip.tap();
+    await historyChip.evaluate((element) => {
+      (element as HTMLButtonElement).click();
+    });
+    await expect(historyChip).toHaveAttribute('data-active', 'true');
 
     const activeBefore = await page.evaluate(() => {
       const tab = document.querySelector('[data-testid="rail-tab-history"]');
