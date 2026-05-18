@@ -49,6 +49,7 @@ Success criteria:
 24. Cloudflare Pages public verification passed on `https://lash-9xx.pages.dev/`: smoke loaded, 585-character essay typed in 1026 ms, p95 event work was 0.8 ms, max event work was 6.8 ms, and no long tasks were observed.
 25. PR #12 CI stabilization keeps React outline publication off plain selection-only transactions, but uses the editor-core outline plugin metadata helper so collapse/expand transactions still refresh the outline panel and persistence state.
 26. CI performance assertions distinguish product latency from runner scheduling jitter: typing keeps the p95 < 8 ms and zero-long-task gates, while large-table SLO enforcement stays on synchronous dispatch with looser frame-settle smoke bounds.
+27. Bead 22 is merged and deployed from `main`: PR #12 squash-merged as `3f19bc3`, protected main CI run `26026635724` passed, Cloudflare redeploy produced preview `https://cad5a3ac.lash-9xx.pages.dev`, and production verification passed on `https://lash-9xx.pages.dev/` with 585 characters typed in 985 ms, p95 event work 0.8 ms, max event work 7.4 ms, and zero long tasks.
 
 ## State
 
@@ -91,10 +92,13 @@ Success criteria:
 - [x] Bead 22 - Cloudflare Pages public test deploy and essay typing performance gate.
 - [x] Cloudflare Pages project `lash` deployed at `https://lash-9xx.pages.dev/`.
 - [x] Public smoke/performance verification passed with `make verify-cloudflare URL=https://lash-9xx.pages.dev/`.
+- [x] PR #12 merged into `main` as `3f19bc361c3071d9e3f7425bfd064193cd8b83a9`.
+- [x] Final post-deploy main push CI passed: run `26026635724`, workflow `CI`, `build-and-test`.
+- [x] Final Cloudflare production redeploy from merged `main` passed public smoke/performance verification.
 
 ### Now
 
-- PR #12 (`deploy(bead-22): publish Lash on Cloudflare Pages`) is awaiting CI re-run after performance-test threshold stabilization for CI runner variance.
+- No active bead for the current deploy/performance objective; Lash is deployed publicly and `main` is green.
 
 ### Next
 
@@ -141,3 +145,6 @@ Success criteria:
 - `make deploy-cloudflare`
 - `make verify-cloudflare URL=https://lash-9xx.pages.dev/`
 - `apps/web/e2e/performance/typing-latency.spec.ts`
+- GitHub PR #12: `https://github.com/apollostreetcompany/lash-doc/pull/12`
+- Post-deploy main CI run: `https://github.com/apollostreetcompany/lash-doc/actions/runs/26026635724`
+- Final Cloudflare deployment preview: `https://cad5a3ac.lash-9xx.pages.dev`

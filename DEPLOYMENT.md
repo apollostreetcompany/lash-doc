@@ -27,7 +27,7 @@
 - GitHub remote is `https://github.com/apollostreetcompany/lash-doc.git`.
 - Default branch is `main`.
 - Branch protection is configured on `main` with strict required `build-and-test`, admin enforcement, and no force-push/delete.
-- Audited main CI is green on release-audit commit `c6ee96e796602834d6795e84d404bf962486ad40` via run `25955266966`; latest protected `main` CI should be checked in GitHub Actions for future changes.
+- Latest protected `main` CI is green on deploy commit `3f19bc361c3071d9e3f7425bfd064193cd8b83a9` via run `26026635724`; check GitHub Actions for future changes.
 - Container/runtime binding assumptions are not applicable to the Cloudflare Pages test site because it serves static assets at the edge. The existing local `next start` path remains unchanged.
 
 ## Cloudflare Pages Preflight
@@ -41,8 +41,9 @@
 ## Public Performance Gate
 
 - Public verification runs `apps/web/e2e/smoke/home.spec.ts` and `apps/web/e2e/performance/typing-latency.spec.ts` with `PLAYWRIGHT_BASE_URL`.
-- Essay typing threshold: p95 browser event processing < 8 ms, max event processing < 24 ms, full essay typed < 5 s, zero long tasks, and no character loss.
-- Latest public verification on `https://lash-9xx.pages.dev/`: 585 characters typed in 1026 ms, p95 event work 0.8 ms, max event work 6.8 ms, zero long tasks.
+- Essay typing threshold: p95 browser event processing < 8 ms, max event processing < 50 ms, full essay typed < 5 s, zero long tasks, and no character loss.
+- Latest public verification on `https://lash-9xx.pages.dev/`: 585 characters typed in 985 ms, p95 event work 0.8 ms, max event work 7.4 ms, zero long tasks.
+- Latest merged-main Cloudflare deployment preview: `https://cad5a3ac.lash-9xx.pages.dev`.
 
 ## Rollback
 
