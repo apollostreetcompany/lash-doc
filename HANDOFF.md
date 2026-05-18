@@ -12,7 +12,7 @@
 - Mobile hardening PRs #5, #6, #7, #8, #9, and #10 are merged.
 - Audited main push CI is green: run `25955266966`, workflow `CI`, job `build-and-test`.
 - Post-mobile-hardening main push CI is green: run `26022768022`, workflow `CI`, job `build-and-test`.
-- Bead 22 branch complete locally: Cloudflare Pages project `lash` exists at `https://lash-9xx.pages.dev/`; initial static deploy and public smoke/performance verification passed. PR #12 required CI stabilization after runner-load misses on frame-settle/max-outlier assertions; local full e2e passes and tests now enforce p95/dispatch SLOs with load-tolerant smoke bounds. Remaining gates are PR CI, merge, and final redeploy from merged `main`.
+- Bead 22 is merged and deployed: PR #12 squash-merged into `main` as `3f19bc361c3071d9e3f7425bfd064193cd8b83a9`, protected main CI run `26026635724` passed, Cloudflare Pages project `lash` was redeployed from merged main, and production public verification passed on `https://lash-9xx.pages.dev/`.
 - Branch protection on `main` is configured with strict required `build-and-test`, admin enforcement, and no force-push/delete.
 - Local product server was not left running during PR integration; use `make serve` to start `http://127.0.0.1:3000`.
 - Product decision: Riddle is optional/deferred. Do not implement Lash-Riddle integration until Riddle stabilizes as its own product and default Zed integration.
@@ -59,6 +59,9 @@
 - Bead 22 public verification - pass on `https://lash-9xx.pages.dev/`: smoke test passed; 585-character essay typed in 1026 ms; p95 event work 0.8 ms; max event work 6.8 ms; zero long tasks.
 - Bead 22 PR #12 CI-fix local validation - pass: `pnpm run typecheck`, `pnpm run lint`, `pnpm run test:unit` (73 passed), targeted outline/table/typing Playwright specs (5 passed), and full `pnpm run test:e2e` (87 passed). Latest full-suite typing metrics: 585 characters, 2111 ms total, p95 event work 1.0 ms, max event work 7.8 ms, zero long tasks.
 - PR #12 CI rerun `26026119148` proved p95 typing still passed under CI load (3.9 ms, zero long tasks) but failed on a single max-event outlier and table frame-settle timing. Thresholds were adjusted to keep the SLO gates on p95/dispatch and treat frame/max checks as broader smoke bounds.
+- PR #12 final CI - pass: `build-and-test` on run `26026440100`.
+- Post-merge main CI - pass: `build-and-test` on run `26026635724`.
+- Final merged-main deploy - pass: `make deploy-cloudflare CLOUDFLARE_PAGES_PROJECT=lash` produced `https://cad5a3ac.lash-9xx.pages.dev`; `make verify-cloudflare URL=https://lash-9xx.pages.dev/` passed smoke and typing checks with 585 characters in 985 ms, p95 event work 0.8 ms, max event work 7.4 ms, and zero long tasks.
 - Acceptance coverage audit - 86 `agents.md` Test IDs, 98 unit/e2e files, no missing IDs.
 - Skip/todo audit - no `test.todo`, `test.skip`, `describe.skip`, `TODO acceptance`, or `.only(` matches in `apps/web/e2e` or `packages/testing/unit`.
 - Riddle audit - only planning/docs references; no Lash-Riddle runtime integration code.
@@ -72,5 +75,5 @@
 
 ## Open Items
 
-- None blocking the current v1 objective.
-- Future production deployment and future Riddle integration are separate post-v1 workstreams.
+- None blocking the current public test deployment objective.
+- Future custom-domain/production hosting decisions and future Riddle integration are separate post-v1 workstreams.
