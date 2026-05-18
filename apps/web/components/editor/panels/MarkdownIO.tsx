@@ -1,12 +1,12 @@
 /**
- * panels/MarkdownIO — the markdown import/export buttons in the action bar.
- *
- * Owned by editor-core/markdown; this is a thin React shell. M1 does not
- * modify this directly.
+ * panels/MarkdownIO — markdown import/export buttons rendered as compact
+ * chrome buttons with icons. Owned by editor-core/markdown.
  */
 'use client';
 
 import { type ChangeEvent, type RefObject } from 'react';
+
+import { Icon } from '../../shell/Icon';
 
 export interface MarkdownIOProps {
   fileInputRef: RefObject<HTMLInputElement>;
@@ -24,23 +24,27 @@ export function MarkdownIO({
   exportDisabled,
 }: MarkdownIOProps) {
   return (
-    <div className="lash-editor-action-group">
+    <div className="lash-editor-action-group" style={{ display: 'inline-flex', gap: 4 }}>
       <button
         type="button"
-        className="chrome-button"
+        className="lash-icon-btn"
         data-testid="markdown-import-button"
         onClick={onImportClick}
+        aria-label="Import markdown"
+        data-tooltip="Import .md"
       >
-        Import Markdown
+        <Icon name="upload" />
       </button>
       <button
         type="button"
-        className="chrome-button"
+        className="lash-icon-btn"
         data-testid="markdown-export-button"
         onClick={onExportClick}
         disabled={exportDisabled}
+        aria-label="Export markdown"
+        data-tooltip="Export .md"
       >
-        Export Markdown
+        <Icon name="download" />
       </button>
       <input
         ref={fileInputRef}
