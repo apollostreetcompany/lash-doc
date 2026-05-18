@@ -6,7 +6,26 @@
  * - Tooltip rule fires on :focus-visible (keyboard) not just :hover
  * - Sidebar item SVG nudges on :active (tap)
  */
-import { expect, test } from '@playwright/test';
+import { expect, test, type Page } from '@playwright/test';
+
+const builtCssText = async (page: Page): Promise<string> => {
+  const stylesheetUrls = await page.evaluate(() =>
+    Array.from(document.querySelectorAll<HTMLLinkElement>('link[rel="stylesheet"][href*="static/css"]'))
+      .map((link) => link.href),
+  );
+
+  expect(stylesheetUrls.length, 'expected at least one built CSS file').toBeGreaterThan(0);
+
+  const cssChunks = await Promise.all(
+    stylesheetUrls.map(async (url) => {
+      const response = await page.request.get(url);
+      expect(response.ok(), `failed to fetch ${url}`).toBe(true);
+      return response.text();
+    }),
+  );
+
+  return cssChunks.join('\n');
+};
 
 test.use({
   viewport: { width: 375, height: 812 },
@@ -36,16 +55,7 @@ test.describe('hover-on-touch affordances', () => {
     await page.goto('/');
     await expect(page.getByTestId('lash-home')).toBeVisible();
 
-    const stylesheetUrl = await page.evaluate(() => {
-      const link = document.querySelector(
-        'link[rel="stylesheet"][href*="static/css"]',
-      ) as HTMLLinkElement | null;
-      return link?.href ?? null;
-    });
-    expect(stylesheetUrl).not.toBeNull();
-
-    const response = await page.request.get(stylesheetUrl as string);
-    const cssText = await response.text();
+    const cssText = await builtCssText(page);
 
     // Built CSS uses single-colon `:after` (legacy alias).
     expect(cssText).toMatch(/\.lash-icon-btn\[data-tooltip\]:focus-visible:(?::?)after/);
@@ -55,16 +65,7 @@ test.describe('hover-on-touch affordances', () => {
     await page.goto('/');
     await expect(page.getByTestId('lash-home')).toBeVisible();
 
-    const stylesheetUrl = await page.evaluate(() => {
-      const link = document.querySelector(
-        'link[rel="stylesheet"][href*="static/css"]',
-      ) as HTMLLinkElement | null;
-      return link?.href ?? null;
-    });
-    expect(stylesheetUrl).not.toBeNull();
-
-    const response = await page.request.get(stylesheetUrl as string);
-    const cssText = await response.text();
+    const cssText = await builtCssText(page);
 
     expect(cssText).toMatch(/\.lash-sidebar-item:active\s+svg\s*\{[^}]*translateX\(1px\)/);
   });
