@@ -3,7 +3,7 @@
 ## Current State
 
 - Default branch: `main`.
-- Current local branch: `codex/deploy/bead-22-cloudflare-performance`.
+- Expected checkout after shutdown: `main`.
 - Product release commit on `main`: `7bf032debe1931d068f009ee735b95bd5c43b5c1` (`Release Lash v1 collaborative editor gates`).
 - Audited release-audit commit on `main`: `c6ee96e796602834d6795e84d404bf962486ad40`.
 - Post-v1 mobile hardening commit on `main`: `7f03a7ee736adf7ac24971657dcbad45e7d90786`.
@@ -13,6 +13,8 @@
 - Audited main push CI is green: run `25955266966`, workflow `CI`, job `build-and-test`.
 - Post-mobile-hardening main push CI is green: run `26022768022`, workflow `CI`, job `build-and-test`.
 - Bead 22 is merged and deployed: PR #12 squash-merged into `main` as `3f19bc361c3071d9e3f7425bfd064193cd8b83a9`, protected main CI run `26026635724` passed, Cloudflare Pages project `lash` was redeployed from merged main, and production public verification passed on `https://lash-9xx.pages.dev/`.
+- Shutdown state: local Lash web server is stopped/not running.
+- User-reported regressions are tracked in `REGRESSIONS.md` and queued as Beads 23-25.
 - Branch protection on `main` is configured with strict required `build-and-test`, admin enforcement, and no force-push/delete.
 - Local product server was not left running during PR integration; use `make serve` to start `http://127.0.0.1:3000`.
 - Product decision: Riddle is optional/deferred. Do not implement Lash-Riddle integration until Riddle stabilizes as its own product and default Zed integration.
@@ -73,7 +75,13 @@
 - Use `make serve` to restart the local production server.
 - Public test deploy target: Cloudflare Pages project `lash`, URL `https://lash-9xx.pages.dev/`.
 
+## Regression Backlog
+
+- Bead 23 - Fix title regression. First reproduce the user-reported failure with a failing Playwright test, then fix title editing/persistence/layout behavior.
+- Bead 24 - Fix @mention regression. First reproduce the real editor `@` trigger/insertion failure, then restore suggestions, insertion, date mentions, and RBAC privacy behavior.
+- Bead 25 - Fix sidebar regression. First reproduce the broken sidebar workflow, then fix desktop collapse/outline behavior and mobile drawer/focus/scroll behavior.
+
 ## Open Items
 
-- None blocking the current public test deployment objective.
+- User-reported regressions: title, @mentions, sidebar.
 - Future custom-domain/production hosting decisions and future Riddle integration are separate post-v1 workstreams.
