@@ -2,222 +2,62 @@
 
 ## Current State
 
-- Branch: `codex/test/bead-15-qa-ime-unit-gates`
-- Last bead: Bead 0 - Restore Lash release gate and process scaffolding.
-- Last bead: Bead 1 - Local MVP run path.
-- Last bead: Bead 2 - Append-only history log and deterministic replay/diff foundation.
-- Last bead: Bead 3 - Web history timeline, diff, and restore UI.
-- Last bead: Bead 4 - Authorship interval-map foundation.
-- Last bead: Bead 5 - Blame gutter UI and history filter-by-author.
-- Last bead: Bead 6 - Filtered diffs and local suggest-mode accept/reject.
-- Last bead: Bead 7 - Doc Chat anchored threads, context, and filters.
-- Last bead: Bead 8 - Share links, RBAC decisions, audit, and redaction.
-- Last bead: Bead 9 - Mentions, RBAC-hidden suggestions, and natural-date chips.
-- Last bead: Bead 10 - Offline queue, reconnect merge, and presence resume.
-- Last bead: Bead 11 - Large table 100x20 performance gate.
-- Last bead: Bead 12 - Screen-reader headings, diff announcements, and thread navigation.
-- Last bead: Bead 13 - AI patch validation, accept/reject flow, labeling, and citations.
-- Last bead: Bead 14 - Cross-browser Playwright project gates.
-- Last bead: Bead 15 - QA convergence, selection stability, and IME autosave unit gates.
-- Last bead: Bead 16 - Release readiness docs and CI skip/todo guard hardening.
-- Last bead: Bead 17 - Table selection performance stabilization.
-- Last bead: Bead 18 - Branch protection finalization and release ledger update.
-- Current bead: Bead 19 - CI stability follow-up for table perf measurement and suggest-mode history debounce.
-- Current state: Unit and e2e gates pass with no skips/todos; branch protection requires strict `build-and-test`. The final docs-only CI rerun failed only because the table perf test still folded frame-settle delay into the strict selection operation budget.
-- Local MVP is available at `http://127.0.0.1:3000` in tmux session `lash-doc-web`.
-- Product decision: Riddle is optional/deferred. Do not implement Lash-Riddle integration until Riddle stabilizes as its own product.
+- Default branch: `main`.
+- Current local branch: `main`.
+- Product release commit on `main`: `7bf032debe1931d068f009ee735b95bd5c43b5c1` (`Release Lash v1 collaborative editor gates`).
+- Audited release-audit commit on `main`: `c6ee96e796602834d6795e84d404bf962486ad40`.
+- PR #1 is merged: `https://github.com/apollostreetcompany/lash-doc/pull/1`.
+- PR #2 is merged: `https://github.com/apollostreetcompany/lash-doc/pull/2`.
+- Audited main push CI is green: run `25955266966`, workflow `CI`, job `build-and-test`.
+- Branch protection on `main` is configured with strict required `build-and-test`, admin enforcement, and no force-push/delete.
+- Local product server is running at `http://127.0.0.1:3000` in tmux session `lash-doc-web`.
+- Product decision: Riddle is optional/deferred. Do not implement Lash-Riddle integration until Riddle stabilizes as its own product and default Zed integration.
 
-## Recent Work
+## Completed Beads
 
-- Fixed image upload completion so a late upload result does not overwrite a user-selected image width.
-- Added a unit regression test for in-flight image resize preservation.
-- Added missing process scaffolding files required by the project rules.
-- Added local production-server scripts and Makefile targets for `make serve`, `make status`, and `make stop`.
-- Implemented M2 history foundation: append-only in-memory history store, deterministic replay/load/restore, deterministic text diff, and unit coverage.
-- Wired local history into the web editor: timeline, deterministic inserted/deleted diff spans, restore button, and real history e2e coverage.
-- Implemented authorship interval map with insertion/delete/replacement mapping, dominant author per line, and deterministic property-style interval invariants.
-- Wired line-level authorship into the web editor blame gutter, added hover titles, and connected gutter clicks to the history author filter.
-- Replaced the blame gutter/hover/filter acceptance stubs with real Playwright coverage.
-- Added local history author/time filters, copyable filtered-diff links, and real filtered-diff e2e coverage.
-- Added local suggest mode that records `intent: suggest`, renders pending/accepted suggestion state in history diffs, and supports accept/reject via append-only history entries.
-- Increased local history recording debounce to 900 ms so loaded browser runs do not split one typing session into accidental single-character versions.
-- Implemented local Doc Chat anchor mapping and in-memory thread store with unit coverage.
-- Rendered Doc Chat panel with selection-anchored threads, original/current context, orphan markers, and author/AI filters.
-- Replaced six Doc Chat acceptance stubs with real Playwright coverage.
-- Implemented local share signer, memory audit/revocation stores, RBAC policy decisions, and diff redaction helpers.
-- Rendered Share panel capability/audit/redaction state for comment/suggest/edit/expired links.
-- Replaced five share and two privacy acceptance stubs with real Playwright coverage.
-- Implemented local user/group mention providers through `@lash/rbac`, with hidden entities rendered only as anonymized tokens.
-- Added deterministic natural-date parsing for `@next Friday 3pm` with locale/timezone display and ISO storage.
-- Rendered a local Mention panel with suggestions and chips, and replaced five mention acceptance stubs with real Playwright coverage.
-- Implemented a local deterministic collab room with offline queueing, replay, queue-depth observers, and presence pause/resume states.
-- Rendered an Offline panel that queues editor ops while disconnected, replays them into a local merged text snapshot on reconnect, and exposes presence status.
-- Replaced three offline acceptance stubs with real Playwright coverage and added unit coverage for queue replay and presence state.
-- Added large-table scroll containment/fixed sizing and replaced the 100x20 table performance stub with a browser perf gate for insert, scroll, select, and commit.
-- Added semantic outline navigation, screen-reader diff announcements, and keyboard-focusable named chat threads.
-- Replaced three screen-reader acceptance stubs with Playwright coverage for heading landmarks, diff live-region descriptions, and thread/message navigation.
-- Implemented the local `@lash/ai` validator for selection scope, unsafe ops, schema-safe node/mark checks, doc-wide confirmation, no-op fallback suggestions, and deterministic text-op application.
-- Rendered the AI Editor panel with patch generation, patch JSON review, rationale, accept/reject, invalid-patch rejection/fallback messaging, global-edit confirmation, AI labels, and document citations.
-- Wired accepted AI patches through the append-only history pipeline as AI-authored `intent: ai` entries.
-- Replaced six AI e2e stubs and three AI unit todos with real coverage.
-- Added Playwright projects for focused Chrome, Edge-UA Chromium, Firefox, WebKit/Safari, and iPad WebKit acceptance gates without multiplying the full suite across every browser.
-- Replaced five cross-browser e2e stubs with real editor smoke coverage.
-- Added an IME-aware autosave transaction gate and wired it into `useAutosave` so composition transactions wait until `compositionend`.
-- Replaced the remaining QA/IME unit todos with convergence, selection-anchor stability, IME autosave, and IME composition coverage.
-- Opened PR #1 against `codex/fix/bead-0-restore-lash-gate`; branch protection was checked and is not configured on the default branch.
-- Hardened CI's skip/todo guard to fetch PR branch refs with ancestry, verify both endpoint SHAs, compute an explicit merge base, and diff `MERGE_BASE..HEAD_SHA`.
-- Removed forced scroll from the programmatic table selection path used by perf gates, and deduplicated identical active-cell state so selection/transaction events do not trigger duplicate table-panel renders.
-- Configured default-branch protection with strict required `build-and-test`, admin enforcement, and no force-push/delete.
-- Split the 100x20 table perf gate into strict dispatch budgets and separate frame-settle budgets so CI scheduler contention does not hide the actual operation latency.
-- Raised local history recording debounce to 1800 ms after a loaded 5-worker full e2e run split one suggest-mode typed phrase into two history entries.
+- Bead 0 - Restore Lash release gate and process scaffolding.
+- Bead 1 - Local MVP run path.
+- Bead 2 - Append-only history log and deterministic replay/diff foundation.
+- Bead 3 - Web history timeline, diff, and restore UI.
+- Bead 4 - Authorship interval-map foundation.
+- Bead 5 - Blame gutter UI and history filter-by-author.
+- Bead 6 - Filtered diffs and local suggest-mode accept/reject.
+- Bead 7 - Doc Chat anchored threads, context, and filters.
+- Bead 8 - Share links, RBAC decisions, audit, and redaction.
+- Bead 9 - Mentions, RBAC-hidden suggestions, and natural-date chips.
+- Bead 10 - Offline queue, reconnect merge, and presence resume.
+- Bead 11 - Large table 100x20 performance gate.
+- Bead 12 - Screen-reader headings, diff announcements, and thread navigation.
+- Bead 13 - AI patch validation, accept/reject flow, labeling, and citations.
+- Bead 14 - Cross-browser Playwright project gates.
+- Bead 15 - QA convergence, selection stability, and IME autosave unit gates.
+- Bead 16 - Release readiness docs and CI skip/todo guard hardening.
+- Bead 17 - Table selection performance stabilization.
+- Bead 18 - Branch protection finalization and release ledger update.
+- Bead 19 - CI-stable table perf and suggest history debounce.
+- Bead 20 - Final release audit and stale ledger cleanup.
 
-## Validation To Run
+## Release Evidence
 
 - `pnpm run lint` - pass.
 - `pnpm run typecheck` - pass.
-- `pnpm run test:unit` - pass, 42 passed, 12 todo/skipped.
-- `pnpm run test:e2e` - pass, 27 passed, 48 skipped.
-- `pnpm run build` - pass.
-- `pnpm exec prettier --check ...new/process/source files...` - pass.
-- `pnpm run format` - fails on 80 pre-existing unrelated files; no broad formatting sweep applied.
-- `sh -n scripts/lash-web-start.sh scripts/lash-web-stop.sh scripts/lash-web-status.sh` - pass.
-- `make serve` - pass, app running at `http://127.0.0.1:3000`.
-- `make status` - pass.
-- `curl -fsS http://127.0.0.1:3000/` - pass.
-- `pnpm playwright test apps/web/e2e/smoke/home.spec.ts apps/web/e2e/autosave/autosave-indicator.spec.ts --workers=1` - pass, 2 passed.
-- `pnpm vitest run packages/testing/unit/history/history-store.test.ts packages/testing/unit/diff/diff-deterministic.test.ts` - pass, 6 passed.
-- `pnpm run lint` - pass after Bead 2.
-- `pnpm run typecheck` - pass after Bead 2.
-- `pnpm run test:unit` - pass, 48 passed, 11 todo/skipped.
-- `pnpm run build` - pass after stopping the local server and clearing generated `.next`.
-- `pnpm run test:e2e` - pass, 27 passed, 48 skipped.
-- `pnpm --filter @lash/web build && pnpm playwright test apps/web/e2e/history/history-open.spec.ts apps/web/e2e/history/history-diff.spec.ts apps/web/e2e/history/history-restore.spec.ts --workers=1` - pass, 3 passed.
-- `pnpm run test:e2e` - pass after Bead 3, 30 passed, 45 skipped.
-- `pnpm vitest run packages/testing/unit/authorship/blame-interval-map.test.ts packages/testing/unit/authorship/blame-property.test.ts` - pass, 4 passed.
-- `pnpm run lint` - pass after Bead 4.
-- `pnpm run typecheck` - pass after Bead 4.
-- `pnpm run test:unit` - pass, 52 passed, 9 todo/skipped.
-- `pnpm run build` - pass after Bead 4.
-- `pnpm run lint` - pass after Bead 5.
-- `pnpm run typecheck` - pass after Bead 5.
-- `pnpm run test:unit` - pass, 52 passed, 9 todo/skipped.
-- `pnpm --filter @lash/web build` - pass after Bead 5.
-- `pnpm playwright test apps/web/e2e/authorship/blame-gutter.spec.ts apps/web/e2e/authorship/blame-hover.spec.ts apps/web/e2e/authorship/blame-filter.spec.ts --workers=1` - pass, 3 passed.
-- `pnpm run test:e2e` - pass, 33 passed, 42 skipped.
-- `make serve` - pass after Bead 5.
-- `make status` - pass after Bead 5; app running at `http://127.0.0.1:3000`.
-- `pnpm run lint` - pass after Bead 6.
-- `pnpm run typecheck` - pass after Bead 6.
-- `pnpm run test:unit` - pass, 52 passed, 9 todo/skipped.
-- `pnpm --filter @lash/web build` - pass after Bead 6.
-- `pnpm playwright test apps/web/e2e/diff/diff-filter-author.spec.ts apps/web/e2e/diff/diff-filter-time.spec.ts apps/web/e2e/diff/diff-share-link.spec.ts apps/web/e2e/suggest-mode/suggest-visuals.spec.ts apps/web/e2e/suggest-mode/suggest-accept.spec.ts apps/web/e2e/suggest-mode/suggest-reject.spec.ts --workers=1` - pass, 6 passed.
-- `pnpm playwright test apps/web/e2e/autosave/autosave-indicator.spec.ts apps/web/e2e/diff/diff-filter-author.spec.ts apps/web/e2e/history/history-restore.spec.ts --workers=1` - pass, 3 passed.
-- `pnpm run test:e2e` - pass, 39 passed, 36 skipped.
-- `make serve` - pass after Bead 6.
-- `make status` - pass after Bead 6; app running at `http://127.0.0.1:3000`.
-- `pnpm run lint` - pass after Bead 7.
-- `pnpm run typecheck` - pass after Bead 7.
-- `pnpm run test:unit` - pass, 55 passed, 9 todo/skipped.
-- `pnpm --filter @lash/web build` - pass after Bead 7.
-- `pnpm playwright test apps/web/e2e/doc-chat/chat-anchor-map.spec.ts apps/web/e2e/doc-chat/chat-current-context.spec.ts apps/web/e2e/doc-chat/chat-history-context.spec.ts apps/web/e2e/doc-chat/chat-orphan.spec.ts apps/web/e2e/doc-chat/chat-filter-author.spec.ts apps/web/e2e/doc-chat/chat-filter-ai.spec.ts --workers=1` - pass, 6 passed.
-- `pnpm run test:e2e` - pass, 45 passed, 30 skipped.
-- `make serve` - pass after Bead 7.
-- `make status` - pass after Bead 7; app running at `http://127.0.0.1:3000`.
-- `pnpm run lint` - pass after Bead 8.
-- `pnpm run typecheck` - pass after Bead 8.
-- `pnpm run test:unit` - pass, 58 passed, 9 todo/skipped.
-- `pnpm --filter @lash/web build` - pass after Bead 8.
-- `pnpm playwright test apps/web/e2e/share/share-comment-scope.spec.ts apps/web/e2e/share/share-suggest-scope.spec.ts apps/web/e2e/share/share-edit-scope.spec.ts apps/web/e2e/share/share-expiry.spec.ts apps/web/e2e/share/share-audit.spec.ts apps/web/e2e/privacy/history-redact.spec.ts apps/web/e2e/privacy/chat-redact.spec.ts --workers=1` - pass, 7 passed.
-- `pnpm run test:e2e` - pass, 52 passed, 23 skipped.
-- `make serve` - pass after Bead 8.
-- `make status` - pass after Bead 8; app running at `http://127.0.0.1:3000`.
-- `pnpm run lint` - pass after Bead 9.
-- `pnpm run typecheck` - pass after Bead 9.
-- `pnpm run test:unit` - pass, 60 passed, 7 todo/skipped.
-- `pnpm --filter @lash/web build` - pass after Bead 9.
-- `pnpm playwright test apps/web/e2e/mentions/mention-suggest.spec.ts apps/web/e2e/mentions/mention-insert.spec.ts apps/web/e2e/mentions/mention-rbac-hide.spec.ts apps/web/e2e/mentions/mention-anonymized.spec.ts apps/web/e2e/mentions/mention-privacy.spec.ts --workers=1` - pass, 5 passed.
-- `pnpm run test:e2e` - pass, 57 passed, 18 skipped.
-- `make serve` - pass after Bead 9.
-- `make status` - pass after Bead 9; app running at `http://127.0.0.1:3000`.
-- `pnpm run lint` - pass after Bead 10.
-- `pnpm run typecheck` - pass after Bead 10.
-- `pnpm run test:unit` - pass, 62 passed, 7 todo/skipped.
-- `pnpm --filter @lash/web build` - pass after Bead 10.
-- `pnpm playwright test apps/web/e2e/offline/offline-queue.spec.ts apps/web/e2e/offline/offline-merge.spec.ts apps/web/e2e/offline/presence-resume.spec.ts --workers=1` - pass, 3 passed.
-- `pnpm --filter @lash/web build && pnpm playwright test apps/web/e2e/suggest-mode/suggest-visuals.spec.ts apps/web/e2e/suggest-mode/suggest-accept.spec.ts apps/web/e2e/suggest-mode/suggest-reject.spec.ts apps/web/e2e/offline/offline-queue.spec.ts apps/web/e2e/offline/offline-merge.spec.ts apps/web/e2e/offline/presence-resume.spec.ts --workers=1` - pass, 6 passed.
-- `pnpm run test:e2e` - pass, 60 passed, 15 skipped.
-- `make serve` - pass after Bead 10.
-- `make status` - pass after Bead 10; app running at `http://127.0.0.1:3000`.
-- `pnpm run lint` - pass after Bead 11.
-- `pnpm run typecheck` - pass after Bead 11.
-- `pnpm run test:unit` - pass, 62 passed, 7 todo/skipped.
-- `pnpm --filter @lash/web build` - pass after Bead 11.
-- `pnpm --filter @lash/web build && pnpm playwright test apps/web/e2e/tables/table-perf-100x20.spec.ts --workers=1` - pass, 1 passed.
-- `pnpm run test:e2e` - pass, 61 passed, 14 skipped.
-- `make serve` - pass after Bead 11.
-- `make status` - pass after Bead 11; app running at `http://127.0.0.1:3000`.
-- `pnpm exec prettier --write apps/web/components/editor/panels/HistoryPanel.tsx apps/web/components/editor/panels/ChatPanel.tsx apps/web/components/editor/panels/OutlinePanel.tsx apps/web/app/globals.css apps/web/e2e/a11y/sr-headings.spec.ts apps/web/e2e/a11y/sr-diff-announce.spec.ts apps/web/e2e/a11y/sr-thread-nav.spec.ts` - pass after Bead 12.
-- `pnpm run lint` - pass after Bead 12.
-- `pnpm run typecheck` - pass after Bead 12.
-- `pnpm run test:unit` - pass, 62 passed, 7 todo/skipped.
-- `pnpm --filter @lash/web build` - pass after Bead 12.
-- `pnpm playwright test apps/web/e2e/a11y/sr-headings.spec.ts apps/web/e2e/a11y/sr-diff-announce.spec.ts apps/web/e2e/a11y/sr-thread-nav.spec.ts --workers=1` - pass, 3 passed.
-- `pnpm run test:e2e` - pass, 64 passed, 11 skipped.
-- `make serve` - pass after Bead 12.
-- `make status` - pass after Bead 12; app running at `http://127.0.0.1:3000`.
-- `pnpm vitest run packages/testing/unit/ai/ai-scope-selection.test.ts packages/testing/unit/ai/ai-invalid-reject.test.ts packages/testing/unit/ai/ai-fallback.test.ts` - failed first for unimplemented helpers, then pass after implementation, 6 passed.
-- `pnpm --filter @lash/web build` - pass after Bead 13.
-- `pnpm playwright test apps/web/e2e/ai/ai-patch-apply.spec.ts apps/web/e2e/ai/ai-labeling.spec.ts apps/web/e2e/ai/ai-rationale.spec.ts apps/web/e2e/ai/ai-chat-citation.spec.ts apps/web/e2e/ai/ai-citation-jump.spec.ts apps/web/e2e/ai/ai-scope-global-confirm.spec.ts --workers=1` - pass, 6 passed.
-- `pnpm run lint` - pass after Bead 13.
-- `pnpm run typecheck` - pass after Bead 13.
-- `pnpm run test:unit` - pass, 68 passed, 4 todo/skipped.
-- `pnpm run test:e2e` - pass, 70 passed, 5 skipped.
-- `make serve` - pass after Bead 13.
-- `make status` - pass after Bead 13; app running at `http://127.0.0.1:3000`.
-- `pnpm playwright test apps/web/e2e/cross-browser --workers=1` - pass, 5 passed.
-- `pnpm run lint` - pass after Bead 14.
-- `pnpm run typecheck` - pass after Bead 14.
-- `pnpm run test:unit` - pass, 68 passed, 4 todo/skipped.
-- `pnpm run test:e2e` - pass, 75 passed.
-- `make serve` - pass after Bead 14.
-- `make status` - pass after Bead 14; app running at `http://127.0.0.1:3000`.
-- `pnpm vitest run packages/testing/unit/qa/multi-client-converge.test.ts packages/testing/unit/qa/selection-stability.test.ts packages/testing/unit/ime/ime-autosave.test.ts packages/testing/unit/ime/ime-composition.test.ts` - pass, 5 passed.
-- `pnpm run lint` - pass after Bead 15.
-- `pnpm run typecheck` - pass after Bead 15.
 - `pnpm run test:unit` - pass, 73 passed.
 - `pnpm run test:e2e` - pass, 75 passed.
-- `make serve` - pass after Bead 15.
-- `make status` - pass after Bead 15; app running at `http://127.0.0.1:3000`.
-- Local CI skip/todo guard reproduction with PR #1 base/head refs - pass; explicit merge base resolved.
-- `pnpm exec prettier --check .github/workflows/ci.yml RELEASE_NOTES.md CONTINUITY.md HANDOFF.md` - pass after Bead 16.
-- `git diff --check` - pass after Bead 16.
-- `rg -n "test\.todo|test\.skip\(true|TODO acceptance" packages/testing/unit apps/web/e2e` - no matches after Bead 16.
-- `pnpm run lint` - pass after Bead 16.
-- `pnpm run typecheck` - pass after Bead 16.
-- `pnpm run test:unit` - pass, 73 passed after Bead 16.
-- `pnpm run build` - pass after Bead 16.
-- `make serve` - pass after Bead 16.
-- `make status` - pass after Bead 16; app running at `http://127.0.0.1:3000`.
-- `pnpm exec prettier --write apps/web/components/editor/EditorWorkspace.tsx packages/editor-core/src/table/helpers.ts` - pass after Bead 17.
-- `pnpm --filter @lash/web build && pnpm playwright test apps/web/e2e/tables/table-perf-100x20.spec.ts --workers=1` - pass after Bead 17, 1 passed.
-- `pnpm run lint` - pass after Bead 17.
-- `pnpm run typecheck` - pass after Bead 17.
-- `pnpm run test:unit` - pass, 73 passed after Bead 17.
-- `pnpm run test:e2e` - pass, 75 passed after Bead 17.
-- `make serve` - pass after Bead 17.
-- `make status` - pass after Bead 17; app running at `http://127.0.0.1:3000`.
-- GitHub Actions `build-and-test` for PR #1 on `fc497bf` - pass, 3m8s.
-- Branch protection API check - pass: strict `build-and-test`, admin enforcement enabled, force-push/delete disabled.
-- `pnpm exec prettier --write apps/web/components/editor/EditorWorkspace.tsx apps/web/e2e/tables/table-perf-100x20.spec.ts MISTAKES.md` - pass after Bead 19.
-- `pnpm --filter @lash/web build && pnpm playwright test apps/web/e2e/tables/table-perf-100x20.spec.ts apps/web/e2e/suggest-mode/suggest-visuals.spec.ts apps/web/e2e/suggest-mode/suggest-accept.spec.ts apps/web/e2e/suggest-mode/suggest-reject.spec.ts --workers=1` - pass after Bead 19, 4 passed.
-- `pnpm run lint` - pass after Bead 19.
-- `pnpm run typecheck` - pass after Bead 19.
-- `pnpm run test:unit` - pass, 73 passed after Bead 19.
-- `pnpm run test:e2e` - pass, 75 passed after Bead 19.
-- `make serve` - pass after Bead 19.
-- `make status` - pass after Bead 19; app running at `http://127.0.0.1:3000`.
+- `pnpm run build` - pass.
+- `make serve` / `make status` - pass, local app available at `http://127.0.0.1:3000`.
+- Main CI `build-and-test` - pass on `c6ee96e796602834d6795e84d404bf962486ad40`.
+- Acceptance coverage audit - 86 `agents.md` Test IDs, 98 unit/e2e files, no missing IDs.
+- Skip/todo audit - no `test.todo`, `test.skip`, `describe.skip`, `TODO acceptance`, or `.only(` matches in `apps/web/e2e` or `packages/testing/unit`.
+- Riddle audit - only planning/docs references; no Lash-Riddle runtime integration code.
+
+## Operational Notes
+
+- Use `make status` to verify the local server.
+- Use `make stop` before `pnpm run build` or `pnpm run test:e2e`.
+- Use `make serve` to restart the local production server.
+- No production deployment target exists from this checkout.
 
 ## Open Items
 
-- Next step should be keeping PR #1 green after the release-ledger commit, then merging through the protected branch flow.
-- Use `make stop` to stop the local Lash server.
+- None blocking the current v1 objective.
+- Future production deployment and future Riddle integration are separate post-v1 workstreams.

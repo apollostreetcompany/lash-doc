@@ -1,8 +1,8 @@
 # Lash v1 Release Notes
 
-## 2026-05-16 v1 Release Candidate
+## 2026-05-16 v1
 
-Lash v1 now covers the full local collaborative editor gate stack in `agents.md`. Riddle remains optional and deferred; this release does not add Lash-Riddle integration code.
+Lash v1 covers the full local collaborative editor gate stack in `agents.md`. Riddle remains optional and deferred; this release does not add Lash-Riddle integration code.
 
 ## Product Scope
 
@@ -13,20 +13,27 @@ Lash v1 now covers the full local collaborative editor gate stack in `agents.md`
 - Quality and accessibility: large-table 100x20 performance gate, named outline navigation, screen-reader diff announcements, keyboard-navigable chat threads, browser compatibility gates, convergence/selection-stability tests, and IME-safe autosave.
 - AI editor: deterministic local `EditPatch` validation, scoped/global patch rules, safe fallback suggestions, rationale, accept/reject, append-only AI-authored history entries, labels, and citations.
 
-## Validation at Bead 15
+## Final Validation
 
 - `pnpm run lint` - pass.
 - `pnpm run typecheck` - pass.
 - `pnpm run test:unit` - pass, 73 passed.
 - `pnpm run test:e2e` - pass, 75 passed.
+- `pnpm run build` - pass.
 - `make serve` / `make status` - pass, local app available at `http://127.0.0.1:3000`.
-- `rg -n "test\.todo|test\.skip\(true|TODO acceptance" packages/testing/unit apps/web/e2e` - no matches.
+- Main CI `build-and-test` - pass on audited release-audit commit `c6ee96e796602834d6795e84d404bf962486ad40`.
+- Mechanical acceptance audit - 86 `agents.md` Test IDs, 98 unit/e2e files, no missing IDs.
+- Skip/todo audit - no acceptance `test.todo`, `test.skip`, `describe.skip`, `TODO acceptance`, or `.only(` matches in unit/e2e files.
 
 ## Release Readiness
 
-- PR #1: `codex/test/bead-15-qa-ime-unit-gates` into `codex/fix/bead-0-restore-lash-gate`.
+- Repository: `https://github.com/apollostreetcompany/lash-doc`.
+- Default branch: `main`.
+- Product release merge: PR #1, merged at `2026-05-16T06:25:59Z`.
+- Final release-audit merge: PR #2, merged at `2026-05-16T06:42:19Z`.
+- Audited release-audit commit: `c6ee96e796602834d6795e84d404bf962486ad40`.
 - CI workflow: `build-and-test` runs install, skip/todo guard, lint, typecheck, unit tests, Playwright browser install, e2e tests, and build.
-- Branch protection: configured on the default branch with strict required `build-and-test`, admin enforcement, and no force-push/delete.
+- Branch protection: configured on `main` with strict required `build-and-test`, admin enforcement, and no force-push/delete.
 - Deployment target: none configured. See `DEPLOYMENT.md` for local run/deploy assumptions.
 
 ## Notes

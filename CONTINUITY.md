@@ -2,15 +2,24 @@
 
 ## Goal (incl. success criteria)
 
-Ship Lash v1 as the full collaborative editor spec in `agents.md`, with all acceptance gates passing. Riddle is optional/deferred; no Lash-Riddle code integration until Riddle stabilizes as its own product.
+Ship Lash v1 as the full local collaborative editor product described in `agents.md`, with all acceptance gates passing. Riddle is optional/deferred; no Lash-Riddle code integration until Riddle stabilizes as its own product.
+
+Success criteria:
+
+- Product scope covers the `agents.md` v1 acceptance matrix, not a single-feature MVP.
+- All unit, e2e, lint, typecheck, build, and local run gates pass.
+- Every `agents.md` Test ID has executable unit or Playwright coverage and no acceptance skips/todos remain.
+- GitHub remote/default branch/protection/CI are configured and green.
+- Riddle remains planning-only in Lash.
 
 ## Constraints/Assumptions
 
-- No direct commits to `main`; current branch `codex/test/bead-15-qa-ime-unit-gates`.
+- No direct commits to `main`; release cleanup completed through protected PR flow.
+- GitHub remote is `https://github.com/apollostreetcompany/lash-doc.git`.
+- Default branch is `main`.
+- Branch protection on `main` requires strict `build-and-test`, enforces admins, and disallows force-push/delete.
 - Riddle integration is planning-only; do not touch `/Users/borker/dev/riddle`.
-- Current v1 path resumes from M2 after the Phase 0 gate is restored.
-- GitHub remote is `https://github.com/apollostreetcompany/lash-doc.git`; PR #1 targets `codex/fix/bead-0-restore-lash-gate`.
-- GitHub branch protection is configured on the default branch with strict required `build-and-test`, admin enforcement, and no force-push/delete.
+- No production deployment target is configured; v1 validation is local product/runtime plus GitHub CI.
 
 ## Key Decisions
 
@@ -32,18 +41,17 @@ Ship Lash v1 as the full collaborative editor spec in `agents.md`, with all acce
 16. Default-branch protection now requires strict `build-and-test`; release work should keep PR branches green before merge.
 17. Large-table perf tests should assert synchronous dispatch budgets separately from animation-frame settling so CI worker contention does not masquerade as operation latency.
 18. Local history recording debounce is 1800 ms after loaded full-suite runs showed 900 ms could still split a normal typed phrase into multiple history entries.
+19. Decision 18 supersedes the 900 ms value in Decision 4; keep the 1800 ms debounce until a measured browser run supports lowering it.
+20. Bead 20 closes the release with a post-merge audit artifact instead of adding product code; Riddle stays out of implementation.
+21. Lash v1 is complete for the current local product objective after the release-audit cleanup merged and protected `main` CI passed.
 
 ## State
 
 ### Done
 
 - [x] M0/M1 Phase 0 feature work merged per `RELEASE_NOTES.md`.
-- [x] Fixed image upload completion so in-flight uploads preserve user-selected width.
-- [x] Added unit coverage for in-flight image resize preservation.
-- [x] Re-ran the Lash gate: lint, typecheck, unit, e2e, targeted format, and build are passing.
 - [x] Bead 0 - Restore Lash release gate and process scaffolding.
 - [x] Bead 1 - Local MVP run path (`make serve`, `make status`, `make stop`).
-- [x] Verified live local editor typing/autosave against `http://127.0.0.1:3000`.
 - [x] Bead 2 - Append-only history log and deterministic replay/diff foundation.
 - [x] Bead 3 - Web history timeline, diff, and restore UI.
 - [x] Bead 4 - Authorship interval-map foundation.
@@ -61,27 +69,39 @@ Ship Lash v1 as the full collaborative editor spec in `agents.md`, with all acce
 - [x] Bead 16 - Release readiness docs and CI skip/todo guard hardening.
 - [x] Bead 17 - Table selection performance stabilization.
 - [x] Bead 18 - Branch protection finalization and release ledger update.
+- [x] Bead 19 - CI-stable table perf and suggest history debounce.
+- [x] Bead 20 - Final release audit and stale ledger cleanup.
+- [x] PR #1 merged into `main` as `7bf032debe1931d068f009ee735b95bd5c43b5c1`.
+- [x] Main push CI passed: run `25955018685`, workflow `CI`, `build-and-test`.
+- [x] PR #2 merged into `main` as `c6ee96e796602834d6795e84d404bf962486ad40`.
+- [x] Audited main push CI passed: run `25955266966`, workflow `CI`, `build-and-test`.
 
 ### Now
 
-- Bead 19 - CI stability follow-up for table perf measurement and suggest-mode history debounce after the final docs-only CI rerun exposed loaded-run timing noise.
+- No active bead for the current Lash v1 objective.
 
 ### Next
 
-- Keep PR #1 green after the release-ledger commit, then merge through the protected branch flow.
+- Future work is outside the current objective: production deployment target selection and any Riddle integration after Riddle has its own stable product/Zed integration.
 
 ## Open Questions
 
-- UNCONFIRMED: Whether retrospective review for M1/B1 and M1/B3 is still required before M2.
-- Repo-wide `pnpm run format` currently fails on 80 pre-existing files outside this bead; targeted source/new process files pass Prettier check, and legacy Markdown was kept minimally edited to avoid unrelated churn.
+- UNCONFIRMED: Whether retrospective review for M1/B1 and M1/B3 is still required before later post-v1 work.
+- UNCONFIRMED: Production hosting target is not selected.
 
 ## Working Set
 
-- `packages/editor-core/src/extensions/image.ts`
-- `packages/testing/unit/editor/image-extension.test.ts`
-- `apps/web/e2e/media/image-resize.spec.ts`
-- `plan.md`
+- `AGENTS.md`
+- `CONTINUITY.md`
+- `HANDOFF.md`
+- `MISTAKES.md`
+- `DEPLOYMENT.md`
 - `RELEASE_NOTES.md`
+- `handoff/beads.jsonl`
+- `handoff/beads.schema.json`
+- `handoff/release-audit-2026-05-16.md`
+- `.github/workflows/ci.yml`
+- `Makefile`
 - `pnpm run lint`
 - `pnpm run typecheck`
 - `pnpm run test:unit`
@@ -89,95 +109,6 @@ Ship Lash v1 as the full collaborative editor spec in `agents.md`, with all acce
 - `pnpm run build`
 - `make serve`
 - `make status`
-- `make stop`
-- `pnpm playwright test apps/web/e2e/smoke/home.spec.ts apps/web/e2e/autosave/autosave-indicator.spec.ts --workers=1`
-- `packages/history/src/index.ts`
-- `packages/testing/unit/history/history-store.test.ts`
-- `packages/testing/unit/diff/diff-deterministic.test.ts`
-- `apps/web/components/editor/panels/HistoryPanel.tsx`
-- `apps/web/e2e/history/history-open.spec.ts`
-- `apps/web/e2e/history/history-diff.spec.ts`
-- `apps/web/e2e/history/history-restore.spec.ts`
-- `packages/authorship/src/index.ts`
-- `packages/testing/unit/authorship/blame-interval-map.test.ts`
-- `packages/testing/unit/authorship/blame-property.test.ts`
-- `apps/web/e2e/authorship/blame-gutter.spec.ts`
-- `apps/web/e2e/authorship/blame-hover.spec.ts`
-- `apps/web/e2e/authorship/blame-filter.spec.ts`
-- `apps/web/e2e/diff/diff-filter-author.spec.ts`
-- `apps/web/e2e/diff/diff-filter-time.spec.ts`
-- `apps/web/e2e/diff/diff-share-link.spec.ts`
-- `apps/web/e2e/suggest-mode/suggest-visuals.spec.ts`
-- `apps/web/e2e/suggest-mode/suggest-accept.spec.ts`
-- `apps/web/e2e/suggest-mode/suggest-reject.spec.ts`
-- `packages/doc-chat/src/index.ts`
-- `packages/testing/unit/doc-chat/thread-store.test.ts`
-- `apps/web/components/editor/panels/ChatPanel.tsx`
-- `apps/web/e2e/doc-chat/chat-anchor-map.spec.ts`
-- `apps/web/e2e/doc-chat/chat-current-context.spec.ts`
-- `apps/web/e2e/doc-chat/chat-history-context.spec.ts`
-- `apps/web/e2e/doc-chat/chat-orphan.spec.ts`
-- `apps/web/e2e/doc-chat/chat-filter-author.spec.ts`
-- `apps/web/e2e/doc-chat/chat-filter-ai.spec.ts`
-- `packages/share/src/index.ts`
-- `packages/rbac/src/index.ts`
-- `packages/testing/unit/share/share-rbac.test.ts`
-- `apps/web/components/editor/panels/SharePanel.tsx`
-- `apps/web/e2e/share/share-comment-scope.spec.ts`
-- `apps/web/e2e/share/share-suggest-scope.spec.ts`
-- `apps/web/e2e/share/share-edit-scope.spec.ts`
-- `apps/web/e2e/share/share-expiry.spec.ts`
-- `apps/web/e2e/share/share-audit.spec.ts`
-- `apps/web/e2e/privacy/history-redact.spec.ts`
-- `apps/web/e2e/privacy/chat-redact.spec.ts`
-- `packages/mentions/src/index.ts`
-- `packages/testing/unit/mentions/mention-date-parse.test.ts`
-- `packages/testing/unit/mentions/mention-date-locale.test.ts`
-- `apps/web/components/editor/panels/MentionPanel.tsx`
-- `apps/web/e2e/mentions/mention-suggest.spec.ts`
-- `apps/web/e2e/mentions/mention-insert.spec.ts`
-- `apps/web/e2e/mentions/mention-rbac-hide.spec.ts`
-- `apps/web/e2e/mentions/mention-anonymized.spec.ts`
-- `apps/web/e2e/mentions/mention-privacy.spec.ts`
-- `packages/collab-service/src/index.ts`
-- `packages/testing/unit/collab-service/offline-room.test.ts`
-- `apps/web/components/editor/panels/OfflinePanel.tsx`
-- `apps/web/e2e/offline/offline-queue.spec.ts`
-- `apps/web/e2e/offline/offline-merge.spec.ts`
-- `apps/web/e2e/offline/presence-resume.spec.ts`
-- `apps/web/e2e/tables/table-perf-100x20.spec.ts`
-- `apps/web/components/editor/panels/HistoryPanel.tsx`
-- `apps/web/components/editor/panels/ChatPanel.tsx`
-- `apps/web/components/editor/panels/OutlinePanel.tsx`
-- `apps/web/e2e/a11y/sr-headings.spec.ts`
-- `apps/web/e2e/a11y/sr-diff-announce.spec.ts`
-- `apps/web/e2e/a11y/sr-thread-nav.spec.ts`
-- `packages/ai/src/index.ts`
-- `packages/testing/unit/ai/ai-scope-selection.test.ts`
-- `packages/testing/unit/ai/ai-invalid-reject.test.ts`
-- `packages/testing/unit/ai/ai-fallback.test.ts`
-- `apps/web/components/editor/panels/AIPanel.tsx`
-- `apps/web/e2e/ai/ai-patch-apply.spec.ts`
-- `apps/web/e2e/ai/ai-labeling.spec.ts`
-- `apps/web/e2e/ai/ai-rationale.spec.ts`
-- `apps/web/e2e/ai/ai-chat-citation.spec.ts`
-- `apps/web/e2e/ai/ai-citation-jump.spec.ts`
-- `apps/web/e2e/ai/ai-scope-global-confirm.spec.ts`
-- `playwright.config.ts`
-- `apps/web/e2e/cross-browser/helpers.ts`
-- `apps/web/e2e/cross-browser/cb-chrome.spec.ts`
-- `apps/web/e2e/cross-browser/cb-edge.spec.ts`
-- `apps/web/e2e/cross-browser/cb-firefox.spec.ts`
-- `apps/web/e2e/cross-browser/cb-safari.spec.ts`
-- `apps/web/e2e/cross-browser/cb-ipad.spec.ts`
-- `apps/web/lib/autosave.ts`
-- `packages/testing/unit/qa/multi-client-converge.test.ts`
-- `packages/testing/unit/qa/selection-stability.test.ts`
-- `packages/testing/unit/ime/ime-autosave.test.ts`
-- `packages/testing/unit/ime/ime-composition.test.ts`
-- `.github/workflows/ci.yml`
-- `RELEASE_NOTES.md`
-- `DEPLOYMENT.md`
-- `packages/editor-core/src/table/helpers.ts`
-- `apps/web/e2e/tables/table-perf-100x20.spec.ts`
-- `MISTAKES.md`
+- GitHub PR #1: `https://github.com/apollostreetcompany/lash-doc/pull/1`
+- GitHub PR #2: `https://github.com/apollostreetcompany/lash-doc/pull/2`
+- Audited main CI run: `https://github.com/apollostreetcompany/lash-doc/actions/runs/25955266966`
