@@ -34,7 +34,10 @@ module.exports = {
     'import/order': [
       'error',
       {
-        groups: [['builtin', 'external', 'internal'], ['parent', 'sibling', 'index']],
+        groups: [
+          ['builtin', 'external', 'internal'],
+          ['parent', 'sibling', 'index'],
+        ],
         'newlines-between': 'always',
         alphabetize: { order: 'asc', caseInsensitive: true },
       },
@@ -53,11 +56,26 @@ module.exports = {
   },
   overrides: [
     {
-      files: ['**/*.spec.ts', '**/*.spec.tsx', '**/*.test.ts', '**/*.test.tsx', 'apps/web/e2e/**/*'],
+      files: [
+        '**/*.spec.ts',
+        '**/*.spec.tsx',
+        '**/*.test.ts',
+        '**/*.test.tsx',
+        'apps/web/e2e/**/*',
+      ],
       rules: {
         '@typescript-eslint/no-explicit-any': 'off',
       },
     },
   ],
-  ignorePatterns: ['node_modules/', '.next/', 'dist/', '.turbo/', 'coverage/'],
+  ignorePatterns: [
+    'node_modules/',
+    '.next/',
+    '**/.next/',
+    'dist/',
+    'out/',
+    '**/out/',
+    '.turbo/',
+    'coverage/',
+  ],
 };

@@ -12,8 +12,16 @@ export { createLashEditorExtensions } from './schema';
 export type { ToolbarButtonSpec } from './toolbar';
 export { toolbarButtons, toolbarGroups, runToolbarAction, isToolbarButtonActive } from './toolbar';
 export type { OutlineItem, OutlinePersistenceAdapter } from './plugins/outline';
-export { getOutlineItems, getCollapsedHeadingIds, isHeadingCollapsed } from './plugins/outline';
-export { createLocalStorageOutlinePersistence, createMemoryOutlinePersistence } from './persistence/outline-persistence';
+export {
+  getOutlineItems,
+  getCollapsedHeadingIds,
+  hasOutlineTransactionMeta,
+  isHeadingCollapsed,
+} from './plugins/outline';
+export {
+  createLocalStorageOutlinePersistence,
+  createMemoryOutlinePersistence,
+} from './persistence/outline-persistence';
 export {
   parseMarkdownToDoc,
   serializeDocToMarkdown,
@@ -21,11 +29,7 @@ export {
   type MarkdownImportOptions,
 } from './markdown';
 export type { LashImageUploader } from './extensions/image';
-export type {
-  LashTableCellType,
-  LashTableCellAttrs,
-  LashTableOptions,
-} from './extensions/table';
+export type { LashTableCellType, LashTableCellAttrs, LashTableOptions } from './extensions/table';
 export {
   sanitizeCellType,
   createLashTableExtensions,

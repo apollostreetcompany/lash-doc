@@ -6,6 +6,7 @@ import {
   createLashEditorExtensions,
   createLocalStorageOutlinePersistence,
   getOutlineItems,
+  hasOutlineTransactionMeta,
   lashCommands,
   parseMarkdownToDoc,
   runToolbarAction,
@@ -20,7 +21,7 @@ import {
 } from '@lash/editor-core';
 import { EMPTY_HISTORY_DOC, createHistoryStore } from '@lash/history';
 import { createDocumentId, hashCanonical, type EditPatch, type HistoryEntry } from '@lash/types';
-import type { Editor } from '@tiptap/core';
+import type { Editor, EditorEvents } from '@tiptap/core';
 import { EditorContent, useEditor } from '@tiptap/react';
 import {
   type ChangeEvent,
@@ -73,6 +74,8 @@ const HISTORY_RECORD_DEBOUNCE_MS = 1800;
 const AI_AUDIT = { ua: 'lash-local-ai-editor' };
 const DOC_TITLE = 'Untitled document';
 
+type OutlineTransaction = EditorEvents['transaction']['transaction'];
+
 const textReplaceOp = (before: string, after: string) => {
   let prefix = 0;
   while (prefix < before.length && prefix < after.length && before[prefix] === after[prefix]) {
@@ -104,6 +107,24 @@ const blameFor = (entries: HistoryEntry[], text: string) => {
 
 const sameStringArray = (left: string[], right: string[]) =>
   left.length === right.length && left.every((value, index) => value === right[index]);
+
+const sameOutlineItems = (left: OutlineItem[], right: OutlineItem[]) =>
+  left.length === right.length &&
+  left.every((item, index) => {
+    const next = right[index];
+    return (
+      item.headingId === next.headingId &&
+      item.level === next.level &&
+      item.title === next.title &&
+      item.from === next.from &&
+      item.to === next.to &&
+      item.contentFrom === next.contentFrom &&
+      item.contentTo === next.contentTo &&
+      item.collapsed === next.collapsed &&
+      item.descendantCount === next.descendantCount &&
+      item.hiddenBlockCount === next.hiddenBlockCount
+    );
+  });
 
 const sameActiveCell = (left: ActiveCell | null, right: ActiveCell | null) => {
   if (left === right) return true;
@@ -156,7 +177,6 @@ const copyToClipboard = async (text: string): Promise<boolean> => {
 };
 
 export function EditorWorkspace() {
-  const [version, setVersion] = useState(0);
   const [isMounted, setIsMounted] = useState(false);
   const [outlineItems, setOutlineItems] = useState<OutlineItem[]>([]);
   const [isFocusMode, setIsFocusMode] = useState(false);
@@ -180,6 +200,8 @@ export function EditorWorkspace() {
   // AIPanel) when the head advances.
   const [historyHead, setHistoryHead] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const outlineItemsRef = useRef<OutlineItem[]>([]);
+  const outlineFrameRef = useRef<number | null>(null);
   const historyStoreRef = useRef(createHistoryStore());
   const historyHeadRef = useRef<string | null>(null);
   const historyTextRef = useRef('');
@@ -293,19 +315,41 @@ export function EditorWorkspace() {
 
   useEffect(() => {
     if (!editor) {
+      outlineItemsRef.current = [];
       setOutlineItems([]);
       return;
     }
-    const updateOutline = () => {
-      setOutlineItems(getOutlineItems(editor.state));
-      setVersion((value) => value + 1);
+    const publishOutline = () => {
+      const nextItems = getOutlineItems(editor.state);
+      if (sameOutlineItems(outlineItemsRef.current, nextItems)) {
+        return;
+      }
+      outlineItemsRef.current = nextItems;
+      setOutlineItems(nextItems);
     };
-    updateOutline();
-    editor.on('selectionUpdate', updateOutline);
-    editor.on('transaction', updateOutline);
+    const scheduleOutline = (transaction?: OutlineTransaction) => {
+      if (transaction && !transaction.docChanged && !hasOutlineTransactionMeta(transaction)) {
+        return;
+      }
+      if (outlineFrameRef.current !== null) {
+        return;
+      }
+      outlineFrameRef.current = window.requestAnimationFrame(() => {
+        outlineFrameRef.current = null;
+        publishOutline();
+      });
+    };
+    publishOutline();
+    const handleTransaction = ({ transaction }: { transaction: OutlineTransaction }) => {
+      scheduleOutline(transaction);
+    };
+    editor.on('transaction', handleTransaction);
     return () => {
-      editor.off('selectionUpdate', updateOutline);
-      editor.off('transaction', updateOutline);
+      if (outlineFrameRef.current !== null) {
+        window.cancelAnimationFrame(outlineFrameRef.current);
+        outlineFrameRef.current = null;
+      }
+      editor.off('transaction', handleTransaction);
     };
   }, [editor]);
 
@@ -457,8 +501,7 @@ export function EditorWorkspace() {
   // available in dev and when the build is explicitly tagged for tests
   // (Playwright sets NEXT_PUBLIC_LASH_TEST_HOOKS=true at build time).
   const exposeTestHooks =
-    process.env.NODE_ENV !== 'production' ||
-    process.env.NEXT_PUBLIC_LASH_TEST_HOOKS === 'true';
+    process.env.NODE_ENV !== 'production' || process.env.NEXT_PUBLIC_LASH_TEST_HOOKS === 'true';
 
   useEffect(() => {
     if (typeof window === 'undefined' || !exposeTestHooks) return;
@@ -898,13 +941,10 @@ export function EditorWorkspace() {
     }
   }, []);
 
-  const handleOpenMobileSidebar = useCallback(
-    (event: ReactMouseEvent<HTMLButtonElement>) => {
-      mobileSidebarTriggerRef.current = event.currentTarget;
-      setMobileSidebarOpen(true);
-    },
-    [],
-  );
+  const handleOpenMobileSidebar = useCallback((event: ReactMouseEvent<HTMLButtonElement>) => {
+    mobileSidebarTriggerRef.current = event.currentTarget;
+    setMobileSidebarOpen(true);
+  }, []);
 
   const closeMobileSidebar = useCallback(() => {
     setMobileSidebarOpen(false);
@@ -1076,8 +1116,6 @@ export function EditorWorkspace() {
           </article>
         </div>
       </AppShell>
-
-      <span style={{ display: 'none' }}>{version}</span>
     </div>
   );
 }

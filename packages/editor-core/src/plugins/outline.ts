@@ -1,7 +1,7 @@
 import { Extension, type CommandProps, type RawCommands } from '@tiptap/core';
 import type { Node as ProseMirrorNode } from '@tiptap/pm/model';
 import { Plugin, PluginKey, Selection as PMSelection, TextSelection } from '@tiptap/pm/state';
-import type { EditorState, Selection } from '@tiptap/pm/state';
+import type { EditorState, Selection, Transaction } from '@tiptap/pm/state';
 import { Decoration, DecorationSet } from '@tiptap/pm/view';
 
 import { createHeadingIdPlugin } from './heading-id';
@@ -48,6 +48,9 @@ interface OutlinePluginConfig {
 }
 
 const OUTLINE_PLUGIN_KEY = new PluginKey<OutlinePluginState>('lashOutline');
+
+export const hasOutlineTransactionMeta = (transaction: Pick<Transaction, 'getMeta'>): boolean =>
+  Boolean(transaction.getMeta(OUTLINE_PLUGIN_KEY));
 
 const setsEqual = (a: Set<string>, b: Set<string>) => {
   if (a === b) {
@@ -153,7 +156,10 @@ const computeOutlineItems = (doc: ProseMirrorNode, collapsed: Set<string>) => {
   return { outline, collapsed: filteredCollapsed };
 };
 
-const createHiddenDecorations = (doc: ProseMirrorNode, ranges: Array<{ from: number; to: number }>) => {
+const createHiddenDecorations = (
+  doc: ProseMirrorNode,
+  ranges: Array<{ from: number; to: number }>,
+) => {
   if (!ranges.length) {
     return DecorationSet.empty;
   }
@@ -189,7 +195,11 @@ const computeOutlineState = (
   };
 };
 
-const findNextVisiblePosition = (doc: ProseMirrorNode, outline: OutlineItem[], targetId: string) => {
+const findNextVisiblePosition = (
+  doc: ProseMirrorNode,
+  outline: OutlineItem[],
+  targetId: string,
+) => {
   const index = outline.findIndex((item) => item.headingId === targetId);
   if (index === -1) {
     return null;
@@ -235,7 +245,8 @@ const createOutlinePlugin = (config: OutlinePluginConfig) =>
         // survives a page reload + setContent reload. (Filtering against
         // currentHeadingIds happens at render time.)
         const shouldPersist =
-          meta?.type === 'set-collapsed' || !setsEqual(prevState.collapsedIntent, nextState.collapsedIntent);
+          meta?.type === 'set-collapsed' ||
+          !setsEqual(prevState.collapsedIntent, nextState.collapsedIntent);
         if (shouldPersist) {
           config.persistence?.save(config.documentId, Array.from(nextState.collapsedIntent));
         }
@@ -250,94 +261,95 @@ const createOutlinePlugin = (config: OutlinePluginConfig) =>
     },
   });
 
-export const OutlineManager = Extension.create<{ persistence?: OutlinePersistenceAdapter; documentId?: string }>(
-  {
-    name: 'outlineManager',
+export const OutlineManager = Extension.create<{
+  persistence?: OutlinePersistenceAdapter;
+  documentId?: string;
+}>({
+  name: 'outlineManager',
 
-    addOptions() {
-      return {
-        persistence: undefined,
-        documentId: 'default',
-      };
-    },
-
-    addCommands() {
-      return {
-        toggleHeadingCollapse:
-          (headingId: string) =>
-          ({ state, dispatch }: CommandProps) => {
-            if (!headingId) {
-              return false;
-            }
-            const pluginState = OUTLINE_PLUGIN_KEY.getState(state);
-            if (!pluginState) {
-              return false;
-            }
-            // Toggle against the INTENT set so the persisted state includes
-            // headings the user collapsed even if they aren't currently in
-            // the doc (e.g. between reloads of the same document).
-            const collapsed = new Set(pluginState.collapsedIntent);
-            let collapsedNow = false;
-            if (collapsed.has(headingId)) {
-              collapsed.delete(headingId);
-            } else {
-              collapsed.add(headingId);
-              collapsedNow = true;
-            }
-
-            let tr = state.tr;
-            if (collapsedNow) {
-              const nextPos = findNextVisiblePosition(state.doc, pluginState.outline, headingId);
-              if (typeof nextPos === 'number') {
-                const pos = Math.min(Math.max(nextPos, 0), state.doc.content.size);
-                const resolved = state.doc.resolve(pos);
-                const selection: Selection = PMSelection.near(resolved, 1);
-                tr = tr.setSelection(selection as TextSelection);
-              }
-            }
-
-            if (dispatch) {
-              const meta: OutlineMeta = {
-                type: 'set-collapsed',
-                collapsedIds: Array.from(collapsed),
-              };
-              dispatch(tr.setMeta(OUTLINE_PLUGIN_KEY, meta));
-            }
-            return true;
-          },
-        expandAllHeadings:
-          () =>
-          ({ state, dispatch }: CommandProps) => {
-            const pluginState = OUTLINE_PLUGIN_KEY.getState(state);
-            if (!pluginState) {
-              return false;
-            }
-            // Check INTENT — `collapsed` is the filtered visible set; if the
-            // user has collapsed headings that aren't currently in the doc
-            // (e.g. between reloads), expand-all should clear those too.
-            if (!pluginState.collapsedIntent.size) {
-              return true;
-            }
-            if (dispatch) {
-              const meta: OutlineMeta = { type: 'set-collapsed', collapsedIds: [] };
-              dispatch(state.tr.setMeta(OUTLINE_PLUGIN_KEY, meta));
-            }
-            return true;
-          },
-      } as Partial<RawCommands>;
-    },
-
-    addProseMirrorPlugins() {
-      return [
-        createHeadingIdPlugin(),
-        createOutlinePlugin({
-          documentId: this.options.documentId ?? 'default',
-          persistence: this.options.persistence,
-        }),
-      ];
-    },
+  addOptions() {
+    return {
+      persistence: undefined,
+      documentId: 'default',
+    };
   },
-);
+
+  addCommands() {
+    return {
+      toggleHeadingCollapse:
+        (headingId: string) =>
+        ({ state, dispatch }: CommandProps) => {
+          if (!headingId) {
+            return false;
+          }
+          const pluginState = OUTLINE_PLUGIN_KEY.getState(state);
+          if (!pluginState) {
+            return false;
+          }
+          // Toggle against the INTENT set so the persisted state includes
+          // headings the user collapsed even if they aren't currently in
+          // the doc (e.g. between reloads of the same document).
+          const collapsed = new Set(pluginState.collapsedIntent);
+          let collapsedNow = false;
+          if (collapsed.has(headingId)) {
+            collapsed.delete(headingId);
+          } else {
+            collapsed.add(headingId);
+            collapsedNow = true;
+          }
+
+          let tr = state.tr;
+          if (collapsedNow) {
+            const nextPos = findNextVisiblePosition(state.doc, pluginState.outline, headingId);
+            if (typeof nextPos === 'number') {
+              const pos = Math.min(Math.max(nextPos, 0), state.doc.content.size);
+              const resolved = state.doc.resolve(pos);
+              const selection: Selection = PMSelection.near(resolved, 1);
+              tr = tr.setSelection(selection as TextSelection);
+            }
+          }
+
+          if (dispatch) {
+            const meta: OutlineMeta = {
+              type: 'set-collapsed',
+              collapsedIds: Array.from(collapsed),
+            };
+            dispatch(tr.setMeta(OUTLINE_PLUGIN_KEY, meta));
+          }
+          return true;
+        },
+      expandAllHeadings:
+        () =>
+        ({ state, dispatch }: CommandProps) => {
+          const pluginState = OUTLINE_PLUGIN_KEY.getState(state);
+          if (!pluginState) {
+            return false;
+          }
+          // Check INTENT — `collapsed` is the filtered visible set; if the
+          // user has collapsed headings that aren't currently in the doc
+          // (e.g. between reloads), expand-all should clear those too.
+          if (!pluginState.collapsedIntent.size) {
+            return true;
+          }
+          if (dispatch) {
+            const meta: OutlineMeta = { type: 'set-collapsed', collapsedIds: [] };
+            dispatch(state.tr.setMeta(OUTLINE_PLUGIN_KEY, meta));
+          }
+          return true;
+        },
+    } as Partial<RawCommands>;
+  },
+
+  addProseMirrorPlugins() {
+    return [
+      createHeadingIdPlugin(),
+      createOutlinePlugin({
+        documentId: this.options.documentId ?? 'default',
+        persistence: this.options.persistence,
+      }),
+    ];
+  },
+});
 
 export const getOutlineItems = (state: EditorState): OutlineItem[] => {
   const pluginState = OUTLINE_PLUGIN_KEY.getState(state);
