@@ -814,7 +814,27 @@ main[data-testid='lash-home'] > section {
   height: 18px;
 }
 
-.lash-icon-btn[data-tooltip]:hover::after {
+@supports (hover: hover) and (pointer: fine) {
+  .lash-icon-btn[data-tooltip]:hover::after {
+    content: attr(data-tooltip);
+    position: absolute;
+    bottom: -34px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: var(--color-text-primary);
+    color: var(--color-paper);
+    font-size: var(--text-caption);
+    padding: 4px 8px;
+    border-radius: var(--radius-sm);
+    white-space: nowrap;
+    pointer-events: none;
+    z-index: 100;
+    font-weight: 500;
+    letter-spacing: 0.01em;
+  }
+}
+
+.lash-icon-btn[data-tooltip]:focus-visible::after {
   content: attr(data-tooltip);
   position: absolute;
   bottom: -34px;
@@ -1767,6 +1787,11 @@ li[data-type='taskItem'] > div p {
 }
 
 .history-filter-button:hover:not(:disabled) {
+  background: var(--color-hover-bg);
+  color: var(--color-text-primary);
+}
+
+.history-filter-button:active:not(:disabled) {
   background: var(--color-hover-bg);
   color: var(--color-text-primary);
 }
@@ -3004,8 +3029,10 @@ li[data-type='taskItem'] > div p {
     transform var(--dur-instant) var(--ease-out-quart);
 }
 
-.lash-icon-btn:hover:not(:disabled) {
-  transform: translateY(-0.5px);
+@supports (hover: hover) and (pointer: fine) {
+  .lash-icon-btn:hover:not(:disabled) {
+    transform: translateY(-0.5px);
+  }
 }
 
 .lash-icon-btn:active:not(:disabled) {
@@ -3031,11 +3058,13 @@ li[data-type='taskItem'] > div p {
     inset 0 1px 0 rgba(255, 255, 255, 0.12);
 }
 
-.lash-share-button:hover {
-  transform: translateY(-1px);
-  box-shadow:
-    0 4px 12px rgba(198, 74, 50, 0.22),
-    inset 0 1px 0 rgba(255, 255, 255, 0.12);
+@supports (hover: hover) and (pointer: fine) {
+  .lash-share-button:hover {
+    transform: translateY(-1px);
+    box-shadow:
+      0 4px 12px rgba(198, 74, 50, 0.22),
+      inset 0 1px 0 rgba(255, 255, 255, 0.12);
+  }
 }
 
 .lash-share-button:active {
@@ -3055,11 +3084,13 @@ li[data-type='taskItem'] > div p {
     transform var(--dur-instant) var(--ease-out-quart);
 }
 
-.lash-chrome-button:hover:not(:disabled),
-.chrome-button:hover:not(:disabled),
-.focus-mode-toggle:hover:not(:disabled),
-.suggest-mode-toggle:hover:not(:disabled) {
-  transform: translateY(-0.5px);
+@supports (hover: hover) and (pointer: fine) {
+  .lash-chrome-button:hover:not(:disabled),
+  .chrome-button:hover:not(:disabled),
+  .focus-mode-toggle:hover:not(:disabled),
+  .suggest-mode-toggle:hover:not(:disabled) {
+    transform: translateY(-0.5px);
+  }
 }
 
 .lash-chrome-button:active:not(:disabled),
@@ -3076,13 +3107,22 @@ li[data-type='taskItem'] > div p {
     color var(--dur-fast) var(--ease-out-quart);
 }
 
-.lash-sidebar-item:hover {
+@supports (hover: hover) and (pointer: fine) {
+  .lash-sidebar-item:hover {
+    background: var(--color-sidebar-hover);
+  }
+
+  .lash-sidebar-item:hover svg {
+    transform: translateX(1px);
+  }
+}
+
+.lash-sidebar-item:active {
   background: var(--color-sidebar-hover);
 }
 
-.lash-sidebar-item:hover svg {
+.lash-sidebar-item:active svg {
   transform: translateX(1px);
-  transition: transform var(--dur-base) var(--ease-out-quart);
 }
 
 .lash-sidebar-item svg {
@@ -3102,9 +3142,18 @@ li[data-type='taskItem'] > div p {
   transition: transform var(--dur-base) var(--ease-out-quart);
 }
 
-.lash-rail-tab:hover svg,
+@supports (hover: hover) and (pointer: fine) {
+  .lash-rail-tab:hover svg {
+    transform: scale(1.08);
+  }
+}
+
 .lash-rail-tab[data-active='true'] svg {
   transform: scale(1.08);
+}
+
+.lash-rail-tab:active {
+  opacity: 0.85;
 }
 
 /* Rail tab badge — pop in when count > 0 */
@@ -3149,8 +3198,10 @@ li[data-type='taskItem'] > div p {
     transform var(--dur-instant) var(--ease-out-quart);
 }
 
-.history-version-button:hover {
-  transform: translateX(2px);
+@supports (hover: hover) and (pointer: fine) {
+  .history-version-button:hover {
+    transform: translateX(2px);
+  }
 }
 
 /* Mention suggestions / chips — gentle pop */
@@ -3161,8 +3212,10 @@ li[data-type='taskItem'] > div p {
     transform var(--dur-instant) var(--ease-out-quart);
 }
 
-.mention-suggestion:hover {
-  transform: translateY(-1px);
+@supports (hover: hover) and (pointer: fine) {
+  .mention-suggestion:hover {
+    transform: translateY(-1px);
+  }
 }
 
 .mention-suggestion:active {
@@ -3187,21 +3240,29 @@ li[data-type='taskItem'] > div p {
   transition: transform var(--dur-base) var(--ease-out-quart);
 }
 
-.lash-avatar-stack:hover .lash-avatar {
-  transform: translateY(-2px);
-}
+@supports (hover: hover) and (pointer: fine) {
+  .lash-avatar-stack:hover .lash-avatar {
+    transform: translateY(-2px);
+  }
 
-.lash-avatar-stack:hover .lash-avatar + .lash-avatar {
-  margin-left: -4px;
-  transition:
-    margin var(--dur-base) var(--ease-out-quart),
-    transform var(--dur-base) var(--ease-out-quart);
+  .lash-avatar-stack:hover .lash-avatar + .lash-avatar {
+    margin-left: -4px;
+    transition:
+      margin var(--dur-base) var(--ease-out-quart),
+      transform var(--dur-base) var(--ease-out-quart);
+  }
 }
 
 .lash-avatar-stack .lash-avatar + .lash-avatar {
   transition:
     margin var(--dur-base) var(--ease-out-quart),
     transform var(--dur-base) var(--ease-out-quart);
+}
+
+@media (hover: none), (max-width: 767px) {
+  .lash-avatar-stack > .lash-avatar + .lash-avatar {
+    margin-left: -4px;
+  }
 }
 
 /* -- Autosave indicator — gentle pulse when transitioning to saved -------- */
@@ -3228,7 +3289,15 @@ li[data-type='taskItem'] > div p {
   transform: translate(-50%, -2px);
 }
 
-.lash-icon-btn[data-tooltip]:hover::after {
+@supports (hover: hover) and (pointer: fine) {
+  .lash-icon-btn[data-tooltip]:hover::after {
+    opacity: 1;
+    transform: translate(-50%, 0);
+    transition-delay: 280ms;
+  }
+}
+
+.lash-icon-btn[data-tooltip]:focus-visible::after {
   opacity: 1;
   transform: translate(-50%, 0);
   transition-delay: 280ms;
@@ -3244,8 +3313,10 @@ li[data-type='taskItem'] input[type='checkbox'] {
     transform var(--dur-fast) var(--ease-out-quart);
 }
 
-li[data-type='taskItem'] input[type='checkbox']:hover {
-  border-color: var(--color-coral-500);
+@supports (hover: hover) and (pointer: fine) {
+  li[data-type='taskItem'] input[type='checkbox']:hover {
+    border-color: var(--color-coral-500);
+  }
 }
 
 li[data-type='taskItem'] input[type='checkbox']:active {
@@ -3276,8 +3347,10 @@ li[data-type='taskItem'] > div p {
     transform var(--dur-instant) var(--ease-out-quart);
 }
 
-.lash-blame-line:hover {
-  transform: translateX(1px);
+@supports (hover: hover) and (pointer: fine) {
+  .lash-blame-line:hover {
+    transform: translateX(1px);
+  }
 }
 
 /* Status pills in tables — subtle bloom on hover */
@@ -3289,9 +3362,11 @@ li[data-type='taskItem'] > div p {
     box-shadow var(--dur-fast) var(--ease-out-quart);
 }
 
-.lash-table-cell-control:hover {
-  transform: translateY(-0.5px);
-  box-shadow: 0 1px 4px rgba(15, 17, 21, 0.08);
+@supports (hover: hover) and (pointer: fine) {
+  .lash-table-cell-control:hover {
+    transform: translateY(-0.5px);
+    box-shadow: 0 1px 4px rgba(15, 17, 21, 0.08);
+  }
 }
 
 .lash-table-cell-control:active {
@@ -3306,8 +3381,10 @@ li[data-type='taskItem'] > div p {
     transform var(--dur-instant) var(--ease-out-quart);
 }
 
-.lash-chip:hover {
-  transform: translateY(-0.5px);
+@supports (hover: hover) and (pointer: fine) {
+  .lash-chip:hover {
+    transform: translateY(-0.5px);
+  }
 }
 
 .lash-chip-preview {
@@ -3372,14 +3449,16 @@ li[data-type='taskItem'] > div p {
     inset 0 1px 0 rgba(255, 255, 255, 0.1);
 }
 
-.chat-action-button[data-testid='chat-create-thread']:hover:not(:disabled),
-.ai-action-button[data-testid='ai-improve-button']:hover:not(:disabled),
-.share-action-button[data-testid='share-create-edit']:hover,
-.history-restore-button:hover:not(:disabled) {
-  transform: translateY(-1px);
-  box-shadow:
-    0 4px 10px rgba(198, 74, 50, 0.2),
-    inset 0 1px 0 rgba(255, 255, 255, 0.12);
+@supports (hover: hover) and (pointer: fine) {
+  .chat-action-button[data-testid='chat-create-thread']:hover:not(:disabled),
+  .ai-action-button[data-testid='ai-improve-button']:hover:not(:disabled),
+  .share-action-button[data-testid='share-create-edit']:hover,
+  .history-restore-button:hover:not(:disabled) {
+    transform: translateY(-1px);
+    box-shadow:
+      0 4px 10px rgba(198, 74, 50, 0.2),
+      inset 0 1px 0 rgba(255, 255, 255, 0.12);
+  }
 }
 
 .chat-action-button[data-testid='chat-create-thread']:active:not(:disabled),
@@ -3415,14 +3494,20 @@ li[data-type='taskItem'] > div p {
     color var(--dur-fast) var(--ease-out-quart);
 }
 
-.outline-jump-button:hover .outline-text {
-  transition: transform var(--dur-base) var(--ease-out-quart);
-  transform: translateX(2px);
-  display: inline-block;
-}
-
 .outline-jump-button .outline-text {
   transition: transform var(--dur-base) var(--ease-out-quart);
+}
+
+@supports (hover: hover) and (pointer: fine) {
+  .outline-jump-button:hover .outline-text {
+    transform: translateX(2px);
+    display: inline-block;
+  }
+}
+
+.outline-jump-button:active .outline-text {
+  transform: translateX(2px);
+  display: inline-block;
 }
 
 .outline-collapse-button svg,
