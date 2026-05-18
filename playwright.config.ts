@@ -50,5 +50,15 @@ export default defineConfig({
       testMatch: /cross-browser\/cb-ipad\.spec\.ts/,
       use: { ...devices['iPad Pro 11'] },
     },
+    {
+      name: 'cb-mobile-safari',
+      testMatch: /cross-browser\/cb-mobile-safari\.spec\.ts/,
+      use: { ...devices['iPhone 14'] },
+    },
+    {
+      name: 'cb-mobile-chrome',
+      testMatch: /cross-browser\/cb-mobile-chrome\.spec\.ts/,
+      use: { ...devices['Pixel 7'] },
+    },
   ],
 });
