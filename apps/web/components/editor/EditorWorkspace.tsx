@@ -291,20 +291,6 @@ export function EditorWorkspace() {
     [extensions],
   );
 
-  // Programmatic editor focus does not always pop the iOS software
-  // keyboard — it requires the focus to happen inside a user-gesture
-  // tick. A short post-mount nudge reliably opens the keyboard on touch
-  // devices so users can start typing without an extra tap.
-  useEffect(() => {
-    if (!editor || !isMounted) return;
-    if (typeof window === 'undefined') return;
-    if (!window.matchMedia?.('(pointer: coarse)').matches) return;
-    const timer = setTimeout(() => {
-      editor.commands.focus('end');
-    }, 120);
-    return () => clearTimeout(timer);
-  }, [editor, isMounted]);
-
   useEffect(() => {
     if (!editor) {
       setOutlineItems([]);

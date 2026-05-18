@@ -56,11 +56,14 @@ test.describe('mobile drawer scroll-lock and focus restore', () => {
       Boolean((window as unknown as { __lashEditor?: unknown }).__lashEditor),
     );
 
-    // Tap the History chip; the active tab should latch and not get
-    // yanked back to chat by the observer mid-scroll.
+    await page.getByTestId('topbar-share-button').tap();
+    await expect(page.locator('.lash-app')).toHaveAttribute('data-rail-mobile', 'true');
+
+    // Tap the History chip inside the open mobile rail; the active tab
+    // should latch and not get yanked back to chat by the observer mid-scroll.
     const historyChip = page.getByTestId('rail-tab-history');
     await expect(historyChip).toBeVisible();
-    await historyChip.click();
+    await historyChip.tap();
 
     const activeBefore = await page.evaluate(() => {
       const tab = document.querySelector('[data-testid="rail-tab-history"]');
