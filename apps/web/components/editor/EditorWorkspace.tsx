@@ -105,6 +105,24 @@ const blameFor = (entries: HistoryEntry[], text: string) => {
 const sameStringArray = (left: string[], right: string[]) =>
   left.length === right.length && left.every((value, index) => value === right[index]);
 
+const sameOutlineItems = (left: OutlineItem[], right: OutlineItem[]) =>
+  left.length === right.length &&
+  left.every((item, index) => {
+    const next = right[index];
+    return (
+      item.headingId === next.headingId &&
+      item.level === next.level &&
+      item.title === next.title &&
+      item.from === next.from &&
+      item.to === next.to &&
+      item.contentFrom === next.contentFrom &&
+      item.contentTo === next.contentTo &&
+      item.collapsed === next.collapsed &&
+      item.descendantCount === next.descendantCount &&
+      item.hiddenBlockCount === next.hiddenBlockCount
+    );
+  });
+
 const sameActiveCell = (left: ActiveCell | null, right: ActiveCell | null) => {
   if (left === right) return true;
   if (!left || !right) return false;
@@ -156,7 +174,6 @@ const copyToClipboard = async (text: string): Promise<boolean> => {
 };
 
 export function EditorWorkspace() {
-  const [version, setVersion] = useState(0);
   const [isMounted, setIsMounted] = useState(false);
   const [outlineItems, setOutlineItems] = useState<OutlineItem[]>([]);
   const [isFocusMode, setIsFocusMode] = useState(false);
@@ -180,6 +197,8 @@ export function EditorWorkspace() {
   // AIPanel) when the head advances.
   const [historyHead, setHistoryHead] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const outlineItemsRef = useRef<OutlineItem[]>([]);
+  const outlineFrameRef = useRef<number | null>(null);
   const historyStoreRef = useRef(createHistoryStore());
   const historyHeadRef = useRef<string | null>(null);
   const historyTextRef = useRef('');
@@ -293,19 +312,37 @@ export function EditorWorkspace() {
 
   useEffect(() => {
     if (!editor) {
+      outlineItemsRef.current = [];
       setOutlineItems([]);
       return;
     }
-    const updateOutline = () => {
-      setOutlineItems(getOutlineItems(editor.state));
-      setVersion((value) => value + 1);
+    const publishOutline = () => {
+      const nextItems = getOutlineItems(editor.state);
+      if (sameOutlineItems(outlineItemsRef.current, nextItems)) {
+        return;
+      }
+      outlineItemsRef.current = nextItems;
+      setOutlineItems(nextItems);
     };
-    updateOutline();
-    editor.on('selectionUpdate', updateOutline);
-    editor.on('transaction', updateOutline);
+    const scheduleOutline = () => {
+      if (outlineFrameRef.current !== null) {
+        return;
+      }
+      outlineFrameRef.current = window.requestAnimationFrame(() => {
+        outlineFrameRef.current = null;
+        publishOutline();
+      });
+    };
+    publishOutline();
+    editor.on('selectionUpdate', scheduleOutline);
+    editor.on('transaction', scheduleOutline);
     return () => {
-      editor.off('selectionUpdate', updateOutline);
-      editor.off('transaction', updateOutline);
+      if (outlineFrameRef.current !== null) {
+        window.cancelAnimationFrame(outlineFrameRef.current);
+        outlineFrameRef.current = null;
+      }
+      editor.off('selectionUpdate', scheduleOutline);
+      editor.off('transaction', scheduleOutline);
     };
   }, [editor]);
 
@@ -1076,8 +1113,6 @@ export function EditorWorkspace() {
           </article>
         </div>
       </AppShell>
-
-      <span style={{ display: 'none' }}>{version}</span>
     </div>
   );
 }

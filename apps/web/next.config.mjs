@@ -1,6 +1,14 @@
+const staticExport = process.env.LASH_STATIC_EXPORT === '1';
+
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: true,
+  ...(staticExport
+    ? {
+        output: 'export',
+        trailingSlash: true,
+      }
+    : {}),
   experimental: {
     typedRoutes: true,
   },

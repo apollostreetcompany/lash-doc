@@ -45,6 +45,8 @@ Success criteria:
 20. Bead 20 closes the release with a post-merge audit artifact instead of adding product code; Riddle stays out of implementation.
 21. Lash v1 is complete for the current local product objective after the release-audit cleanup merged and protected `main` CI passed.
 22. Post-v1 mobile hardening landed through the six-agent PR stack in dependency order: foundation (#6), touch targets (#9), hover-on-touch (#10), drawer/editor UX (#5), print (#8), and mobile e2e coverage (#7). Final protected `main` CI passed on `7f03a7e`.
+23. Bead 22 will publish Lash as a public test site on Cloudflare Pages using a static export path, because the current app is a client-side Next.js editor and edge-hosted static assets are the fastest low-risk deployment path. "No lag" is measured against the existing typing SLO: p95 per-character browser work under 8 ms while typing an essay.
+24. Cloudflare Pages public verification passed on `https://lash-9xx.pages.dev/`: smoke loaded, 585-character essay typed in 1026 ms, p95 event work was 0.8 ms, max event work was 6.8 ms, and no long tasks were observed.
 
 ## State
 
@@ -84,10 +86,13 @@ Success criteria:
 - [x] PR #8 merged into `main` as `d23b57ae502ec88703f9e9c8757e1fa4112f6986`.
 - [x] PR #7 merged into `main` as `7f03a7ee736adf7ac24971657dcbad45e7d90786`.
 - [x] Final post-mobile-hardening main push CI passed: run `26022768022`, workflow `CI`, `build-and-test`.
+- [x] Bead 22 - Cloudflare Pages public test deploy and essay typing performance gate.
+- [x] Cloudflare Pages project `lash` deployed at `https://lash-9xx.pages.dev/`.
+- [x] Public smoke/performance verification passed with `make verify-cloudflare URL=https://lash-9xx.pages.dev/`.
 
 ### Now
 
-- No active bead for the current Lash v1 objective.
+- No active bead for the current deploy/performance objective; awaiting PR merge/CI finalization for Bead 22 branch.
 
 ### Next
 
@@ -128,3 +133,9 @@ Success criteria:
 - GitHub PR #9: `https://github.com/apollostreetcompany/lash-doc/pull/9`
 - GitHub PR #10: `https://github.com/apollostreetcompany/lash-doc/pull/10`
 - Post-mobile-hardening main CI run: `https://github.com/apollostreetcompany/lash-doc/actions/runs/26022768022`
+- Cloudflare Pages project: `lash`
+- Cloudflare Pages public test URL: `https://lash-9xx.pages.dev/`
+- `pnpm run build:static`
+- `make deploy-cloudflare`
+- `make verify-cloudflare URL=https://lash-9xx.pages.dev/`
+- `apps/web/e2e/performance/typing-latency.spec.ts`
