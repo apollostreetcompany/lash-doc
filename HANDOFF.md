@@ -82,6 +82,7 @@
 - Bead 32 - Large-Doc Typing Performance.
 - Bead 33 - Presence, Remote Cursors, Sync State.
 - Bead 34 - Invite + Access UX.
+- Bead 35 - Durable Comments/Suggestions.
 
 ## Release Evidence
 
@@ -129,6 +130,8 @@
 - Bead 34 fail-first invite/access UX - pass as evidence: `apps/web/e2e/share/invite-access.spec.ts` first failed because `invite-email-input` did not exist.
 - Bead 34 architecture review - pass: RepoPrompt design-agent review saved to `docs/reviews/bead-34-invite-access-architecture-review.md`; implementation followed the two-tier invite-to-session direction for Worker grant minting and documented the remaining durable invite-store gap.
 - Bead 34 final validation - pass: changed-file Prettier check, `git diff --check`, root typecheck, Worker typecheck, targeted realtime access unit test (6 passed), `pnpm run lint`, `pnpm run test:unit` (85 passed), Worker deploy dry-run, `make verify-realtime-runtime`, normal web build, test-hook web build, invite/share e2e (8 passed), and full online typing e2e (7 passed).
+- Bead 35 fail-first durable comments/suggestions - pass as evidence: `apps/web/e2e/doc-chat/chat-durable.spec.ts` first failed because `chat-reply-input` did not exist, and `apps/web/e2e/suggest-mode/suggest-durable.spec.ts` first failed because `suggestion-resolution-row` did not exist.
+- Bead 35 final validation - pass: changed-file Prettier write, `git diff --check`, root typecheck, `pnpm run lint`, `pnpm run test:unit` (85 passed), normal root build, test-hook web build, durable comments/suggestions e2e (4 passed), full doc-chat/suggest-mode e2e (13 passed), online typing e2e (7 passed), Worker deploy dry-run, and `make verify-realtime-runtime`.
 - Acceptance coverage audit - 86 `agents.md` Test IDs, 117 unit/e2e files, no missing IDs.
 - Skip/todo audit - no `test.todo`, `test.skip`, `describe.skip`, `TODO acceptance`, or `.only(` matches in `apps/web/e2e` or `packages/testing/unit`.
 - Riddle audit - only planning/docs references; no Lash-Riddle runtime integration code.
@@ -147,15 +150,17 @@
 - Realtime Worker room health now reports persistence metadata. Restore is a low-level append-only Yjs update hook; user-facing history restore UI remains separate from this runtime capability.
 - Local browser sessions only connect to the default `ws://127.0.0.1:8787` realtime Worker when `NEXT_PUBLIC_LASH_REALTIME_URL` is set, `?realtime=on` is present, or `localStorage['lash:realtime-enabled']` is `true`. Online typing Playwright tests set the localStorage flag explicitly.
 - Presence is room-scoped on the existing realtime socket. Invite access now exists as local hash-link UX with signed realtime exchange; user/profile naming is still local actor-label derivation until real profiles are introduced.
+- Durable comments/suggestions are stored as document-scoped localStorage in local-only mode and as per-record Y.Map entries in the existing realtime Y.Doc when realtime is enabled. The Durable Object persists those metadata updates through the same append-only Yjs update log/snapshot path as document content.
 
 ## Regression Backlog
 
-- Beads 35-36 - Implement the remaining scoped online typing track exactly as requested.
+- Bead 36 - Implement the remaining collaboration delight layer exactly as requested.
 
 ## Open Items
 
 - User-reported regressions: none currently open.
 - Online typing red gate: Bead 26 online typing tests now pass after Bead 31; Bead 32 adds large-document typing performance coverage and removes the measured normal-editing per-keystroke hot paths. The 50k-word gate still logs non-input rendering long tasks, so deeper document virtualization remains a future performance hardening opportunity.
 - Invite/access UX: Bead 34 provides local/static invite links, collaborator rows, expiry/revoke UI, invited editor capability gating, and signed invite-token realtime session exchange. DO-backed global invite issuance, revocation, audit, real profiles, and server-side fine-grained comment/suggest mutation validation remain follow-up work.
+- Durable comments/suggestions: Bead 35 provides durable/synced thread metadata and suggestion resolution records. A dedicated server comment API, global audit/moderation view, richer suggestion history persistence, and policy-aware server-side distinction between comment/suggest/edit Yjs mutations remain follow-up work.
 - Runtime/deploy: Realtime rooms now have a Cloudflare Durable Object Worker with signed actor session grants, append-only Yjs update persistence, cumulative snapshots, reload hydration, and restore-as-new-head hook. Arbitrary `/doc/[id]` web routes remain local/Next-runtime only; static Cloudflare Pages export is blocked until a web dynamic-route hosting strategy is chosen.
 - Future custom-domain/production hosting decisions and future Riddle integration are separate workstreams; realtime infra should prefer Cloudflare first, then Render only if needed.

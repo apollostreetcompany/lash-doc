@@ -69,6 +69,7 @@ Success criteria:
 44. Bead 34 invite UX is intentionally a local/static bridge until durable invite management lands: invite links use `#invite=<token>`, browser localStorage stores collaborator rows and same-browser revocations, the URL hash is stripped after validation, and the realtime provider forwards the invite token when realtime is enabled. DO-backed invite issuance, global revocation, and audit remain open.
 45. Bead 34 enforces `view`/`comment`/`edit` UX boundaries in the browser and preserves the original scope on realtime grants. Fine-grained server-side distinction between comment/suggest/edit over opaque Yjs updates remains out of scope until durable comments/suggestions and policy-aware mutation validation exist.
 46. Decisions 43-45 supersede the Bead 34 future-work portion of Decision 42; profile names/avatars and server-durable invite management remain future work, but invite/access UX itself is now implemented locally.
+47. Bead 35 persists document chat threads, replies, resolve/reopen status, and suggestion accept/reject resolution records. Local-only docs use document-scoped localStorage; realtime docs mirror each thread/resolution as separate Y.Map keys inside the existing Y.Doc so Bead 31 Durable Object update persistence hydrates them with the document. This does not add a separate comments API, global moderation/audit store, or server-side fine-grained comment/suggest authorization.
 
 ## State
 
@@ -126,14 +127,15 @@ Success criteria:
 - [x] Bead 32 - Large-Doc Typing Performance with 10k/50k-word browser gates, explicit local realtime opt-in, deferred outline scans, and offscreen block containment.
 - [x] Bead 33 - Presence, Remote Cursors, Sync State with room-scoped awareness, collaborator chips, cursor markers, sync acknowledgements, and reconnect/saved UI.
 - [x] Bead 34 - Invite + Access UX with hash invite links, collaborator list, expiry/revoke UI, invited edit/comment access gates, and signed invite-token realtime session exchange.
+- [x] Bead 35 - Durable Comments/Suggestions with persisted/synced chat threads, replies, resolve/reopen status, and suggestion accept/reject resolution records.
 
 ### Now
 
-- Bead 35 - Durable Comments/Suggestions.
+- Bead 36 - Collaboration Delight Layer.
 
 ### Next
 
-- Bead 36 - Collaboration Delight Layer.
+- Scoped online typing track review/subreview and fresh-eyes pass after Bead 36.
 
 ## Open Questions
 
@@ -185,6 +187,8 @@ Success criteria:
 - `apps/web/e2e/sidebar/sidebar-regression.spec.ts`
 - `apps/web/e2e/online-typing/online-typing-entry-gate.spec.ts`
 - `apps/web/e2e/share/invite-access.spec.ts`
+- `apps/web/e2e/doc-chat/chat-durable.spec.ts`
+- `apps/web/e2e/suggest-mode/suggest-durable.spec.ts`
 - `apps/web/e2e/performance/large-doc-typing.spec.ts`
 - `apps/web/e2e/document-identity/document-identity.spec.ts`
 - `apps/web/app/doc/[id]/page.tsx`
