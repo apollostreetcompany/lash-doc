@@ -70,6 +70,7 @@ Success criteria:
 45. Bead 34 enforces `view`/`comment`/`edit` UX boundaries in the browser and preserves the original scope on realtime grants. Fine-grained server-side distinction between comment/suggest/edit over opaque Yjs updates remains out of scope until durable comments/suggestions and policy-aware mutation validation exist.
 46. Decisions 43-45 supersede the Bead 34 future-work portion of Decision 42; profile names/avatars and server-durable invite management remain future work, but invite/access UX itself is now implemented locally.
 47. Bead 35 persists document chat threads, replies, resolve/reopen status, and suggestion accept/reject resolution records. Local-only docs use document-scoped localStorage; realtime docs mirror each thread/resolution as separate Y.Map keys inside the existing Y.Doc so Bead 31 Durable Object update persistence hydrates them with the document. This does not add a separate comments API, global moderation/audit store, or server-side fine-grained comment/suggest authorization.
+48. Bead 36 adds a compact collaboration delight layer without changing realtime protocol or persistence: the presence strip now shows a Ready empty state with an invite shortcut, a live sync feedback chip, and a reconnect retry action. Local tests can override the realtime socket URL with `localStorage['lash:realtime-url']` so parallel online specs can use separate Wrangler ports.
 
 ## State
 
@@ -128,14 +129,15 @@ Success criteria:
 - [x] Bead 33 - Presence, Remote Cursors, Sync State with room-scoped awareness, collaborator chips, cursor markers, sync acknowledgements, and reconnect/saved UI.
 - [x] Bead 34 - Invite + Access UX with hash invite links, collaborator list, expiry/revoke UI, invited edit/comment access gates, and signed invite-token realtime session exchange.
 - [x] Bead 35 - Durable Comments/Suggestions with persisted/synced chat threads, replies, resolve/reopen status, and suggestion accept/reject resolution records.
+- [x] Bead 36 - Collaboration Delight Layer with first-run Ready/share state, sync feedback, and reconnect retry action.
 
 ### Now
 
-- Bead 36 - Collaboration Delight Layer.
+- Scoped online typing track review/subreview and fresh-eyes pass.
 
 ### Next
 
-- Scoped online typing track review/subreview and fresh-eyes pass after Bead 36.
+- PR stack CI/merge readiness, then release review closeout.
 
 ## Open Questions
 
@@ -186,6 +188,7 @@ Success criteria:
 - `apps/web/e2e/mentions/mention-real-editor.spec.ts`
 - `apps/web/e2e/sidebar/sidebar-regression.spec.ts`
 - `apps/web/e2e/online-typing/online-typing-entry-gate.spec.ts`
+- `apps/web/e2e/online-typing/collaboration-delight.spec.ts`
 - `apps/web/e2e/share/invite-access.spec.ts`
 - `apps/web/e2e/doc-chat/chat-durable.spec.ts`
 - `apps/web/e2e/suggest-mode/suggest-durable.spec.ts`

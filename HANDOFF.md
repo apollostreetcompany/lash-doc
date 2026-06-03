@@ -83,6 +83,7 @@
 - Bead 33 - Presence, Remote Cursors, Sync State.
 - Bead 34 - Invite + Access UX.
 - Bead 35 - Durable Comments/Suggestions.
+- Bead 36 - Collaboration Delight Layer.
 
 ## Release Evidence
 
@@ -133,6 +134,8 @@
 - Bead 35 fail-first durable comments/suggestions - pass as evidence: `apps/web/e2e/doc-chat/chat-durable.spec.ts` first failed because `chat-reply-input` did not exist, and `apps/web/e2e/suggest-mode/suggest-durable.spec.ts` first failed because `suggestion-resolution-row` did not exist.
 - Bead 35 final validation - pass: changed-file Prettier write, `git diff --check`, root typecheck, `pnpm run lint`, `pnpm run test:unit` (85 passed), normal root build, test-hook web build, durable comments/suggestions e2e (4 passed), full doc-chat/suggest-mode e2e (13 passed), online typing e2e (7 passed), Worker deploy dry-run, and `make verify-realtime-runtime`.
 - Bead 35 PR: `https://github.com/apollostreetcompany/lash-doc/pull/27` stacked on Bead 34 PR #26.
+- Bead 36 fail-first collaboration delight - pass as evidence: `apps/web/e2e/online-typing/collaboration-delight.spec.ts` first failed because `collaboration-empty-state` and `sync-feedback` did not exist.
+- Bead 36 final validation - pass: changed-file Prettier check, `git diff --check`, root typecheck, `pnpm run lint`, `pnpm run test:unit` (85 passed), normal root build, test-hook web build, Bead 36 e2e (2 passed), full online-typing e2e folder (9 passed), and invite-access e2e (3 passed).
 - Acceptance coverage audit - 86 `agents.md` Test IDs, 117 unit/e2e files, no missing IDs.
 - Skip/todo audit - no `test.todo`, `test.skip`, `describe.skip`, `TODO acceptance`, or `.only(` matches in `apps/web/e2e` or `packages/testing/unit`.
 - Riddle audit - only planning/docs references; no Lash-Riddle runtime integration code.
@@ -152,10 +155,11 @@
 - Local browser sessions only connect to the default `ws://127.0.0.1:8787` realtime Worker when `NEXT_PUBLIC_LASH_REALTIME_URL` is set, `?realtime=on` is present, or `localStorage['lash:realtime-enabled']` is `true`. Online typing Playwright tests set the localStorage flag explicitly.
 - Presence is room-scoped on the existing realtime socket. Invite access now exists as local hash-link UX with signed realtime exchange; user/profile naming is still local actor-label derivation until real profiles are introduced.
 - Durable comments/suggestions are stored as document-scoped localStorage in local-only mode and as per-record Y.Map entries in the existing realtime Y.Doc when realtime is enabled. The Durable Object persists those metadata updates through the same append-only Yjs update log/snapshot path as document content.
+- Collaboration delight now lives in the presence strip: Ready/share empty state, live sync feedback, and retry reconnect action. Local Playwright specs can isolate realtime Workers with `localStorage['lash:realtime-url']`.
 
 ## Regression Backlog
 
-- Bead 36 - Implement the remaining collaboration delight layer exactly as requested.
+- Review/subreview/fresh-eyes pass over Beads 23-36, then PR stack merge readiness.
 
 ## Open Items
 

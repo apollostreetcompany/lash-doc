@@ -19,7 +19,7 @@
 - Check port `3000` before introducing or changing a local web server binding. Set `PORT=3001 make serve` if `3000` is occupied.
 - Check port `8787` before starting the realtime Worker. Use `LASH_REALTIME_PORT=8788 make verify-realtime-runtime` or `make realtime-dev` if `8787` is occupied.
 - Stop the local server before running `pnpm run build` or `pnpm run test:e2e`; `next build` rewrites `apps/web/.next` and can conflict with a running `next start`.
-- Local editor pages do not auto-connect to the default realtime Worker merely because they are on localhost. Enable local realtime with `NEXT_PUBLIC_LASH_REALTIME_URL`, `?realtime=on`, or `localStorage.setItem('lash:realtime-enabled', 'true')`; use `?realtime=off` to force local-only editing.
+- Local editor pages do not auto-connect to the default realtime Worker merely because they are on localhost. Enable local realtime with `NEXT_PUBLIC_LASH_REALTIME_URL`, `?realtime=on`, or `localStorage.setItem('lash:realtime-enabled', 'true')`; use `localStorage.setItem('lash:realtime-url', 'ws://127.0.0.1:<port>')` to point one browser context at a non-default local Worker; use `?realtime=off` to force local-only editing.
 
 ## Deploy Assumptions
 
@@ -40,6 +40,7 @@
 - Bead 33 carries presence on the existing realtime room socket: clients send room-scoped `awareness-update` messages, the Durable Object sends same-room `awareness-state` peer lists, and persisted client updates return `sync-ack` messages for saved/syncing UI.
 - Bead 34 adds invite/access UX and signed invite-token exchange. Local/static Lash invite links use `#invite=<token>` and local browser storage for collaborator rows/revocation; the browser strips the hash after validation and forwards the invite token to realtime session exchange when realtime is enabled. In non-local Worker deployments, `/session` denies requests without a valid signed invite token instead of minting a default edit grant. Durable DO-backed invite issuance, global revocation, and audit remain follow-up work.
 - Bead 35 stores document chat thread metadata and suggestion resolution records in document-scoped localStorage for local-only sessions, and mirrors them into per-record Y.Map entries in the existing realtime Y.Doc when realtime is enabled. No new deploy secret, binding, database, or service is required; Durable Object persistence captures these metadata updates through the same append-only Yjs update log and snapshot path as document content.
+- Bead 36 adds only web UI and local test configurability: collaboration Ready/share, sync feedback, retry reconnect, and the `lash:realtime-url` localStorage override. It does not require a new deploy secret, binding, database, or Worker protocol change.
 - The existing Cloudflare Pages public test site remains the static web host for the merged `main` build. The Bead 27 `/doc/[id]` Next routes are still local/Next-runtime routes until the web app deployment path is moved off static export or given an explicit dynamic route strategy; `pnpm run build:static` is expected to fail on this branch for that reason.
 
 ## Realtime Worker Preflight
