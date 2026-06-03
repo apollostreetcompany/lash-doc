@@ -148,12 +148,14 @@
 - Riddle audit - only planning/docs references; no Lash-Riddle runtime integration code.
 - Post-subreview Bead 36 fix validation - pass: fail-first local-only collaboration test failed because `collaboration-empty-state` rendered while realtime was disabled; fail-first view-invite hydration test failed because owner sync stayed `syncing` without propagated room capabilities; final validation passed `NEXT_PUBLIC_LASH_TEST_HOOKS=true pnpm --filter @lash/web build`, focused Bead 36 e2e (4 passed), realtime access unit file (7 passed), root typecheck, Worker typecheck, lint, full unit suite (86 passed), Worker dry-run, `make verify-realtime-runtime`, full online-typing e2e folder (11 passed), invite-access e2e (3 passed), touched-file Prettier check, `git diff --check`, and normal `pnpm run build`.
 - Fresh-eyes Bead 36 fallback fix validation - pass: fail-first runtime skeleton unit test failed because `isLocalRealtimeFallbackHost` did not exist; final validation passed the targeted runtime skeleton unit file (4 passed), root typecheck, Worker typecheck, lint, full unit suite (87 passed), Worker deploy dry-run, `make verify-realtime-runtime`, hook-enabled web build, isolated collaboration delight e2e (4 passed), serialized full online-typing e2e folder (11 passed), touched-file Prettier write, `git diff --check`, and normal `pnpm run build`. A parallel online-typing folder run had one Wrangler startup timeout in the collaboration-delight `beforeAll`; the same spec passed isolated and the full folder passed serialized.
+- Bead 36 CI hardening commit `fc35d2b` - pass locally: PR #28 remote CI run `26911406655` failed because GitHub Actions used Node 20 while Wrangler 4.97 requires Node 22+, and the full Playwright suite ran with shared-runner contention that surfaced Worker startup/performance/focus-harness noise. CI now uses Node 22 and `pnpm run test:e2e:ci` (`NEXT_PUBLIC_LASH_TEST_HOOKS=true pnpm --filter @lash/web build && playwright test --workers=1`). Local validation passed targeted fixed specs, full serialized E2E (117 passed), lint, typecheck, unit tests (87 passed), `git diff --check`, and normal `pnpm run build`.
 
 ## Operational Notes
 
 - Use `make status` to verify whether the local server is already running.
 - Use `make stop` before `pnpm run build` or `pnpm run test:e2e`.
 - Use `make serve` to restart the local production server.
+- CI browser verification uses `pnpm run test:e2e:ci`; local ad hoc `pnpm run test:e2e` remains parallel by default, while CI is serialized to avoid realtime Worker port contention and performance jitter.
 - Public test deploy target: Cloudflare Pages project `lash`, URL `https://lash-9xx.pages.dev/`.
 - Realtime Worker local verification: `make verify-realtime-runtime`.
 - Realtime Worker deploy preflight: `make realtime-dry-run`.

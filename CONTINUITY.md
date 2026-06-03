@@ -73,6 +73,7 @@ Success criteria:
 48. Bead 36 adds a compact collaboration delight layer without changing realtime protocol or persistence: the presence strip now shows a Ready empty state with an invite shortcut, a live sync feedback chip, and a reconnect retry action. Local tests can override the realtime socket URL with `localStorage['lash:realtime-url']` so parallel online specs can use separate Wrangler ports.
 49. Post-subreview Bead 36 hardening changes the realtime access split: room sockets now require `doc.read` so view invitees can hydrate, accepted `yjs-update` messages require `doc.edit` inside the Durable Object before persistence/broadcast, and the browser provider avoids sending local Yjs updates for read-only session grants. Local-only documents no longer show Ready/Invite collaboration chrome, and visible sync state is not duplicated with the screen-reader live region.
 50. Fresh-eyes Bead 36 hardening restricts the no-secret realtime development fallback to loopback hosts only. A Worker without `LASH_REALTIME_SESSION_SECRET` now denies `/session` minting on non-local hosts instead of silently using the local development secret; local `127.0.0.1`/`localhost` verification remains supported.
+51. CI now runs on Node 22 and uses `pnpm run test:e2e:ci`, which rebuilds the web app with Lash test hooks and runs Playwright with one worker. Wrangler 4.97 requires Node 22+, and the realtime/performance browser suite needs serialized execution on shared CI runners to avoid Worker port contention and scheduling noise that masks product latency.
 
 ## State
 
@@ -135,7 +136,7 @@ Success criteria:
 
 ### Now
 
-- PR stack CI/merge readiness after subreview and fresh-eyes fixes.
+- PR #28 remote CI verification after Node 22 / serialized E2E hardening.
 
 ### Next
 
