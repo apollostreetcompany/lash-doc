@@ -23,7 +23,8 @@
 - Bead 27 PR #19 is open and stacked on PR #18: `https://github.com/apollostreetcompany/lash-doc/pull/19`.
 - Bead 28 is complete on branch `codex/feat/bead-28-realtime-runtime-skeleton`: Cloudflare Workers + Durable Objects was selected for realtime rooms; `packages/realtime-worker` exposes service/room health and WebSocket socket routes with Wrangler local verification and deploy dry-run.
 - Bead 28 PR #20 is open and stacked on PR #19: `https://github.com/apollostreetcompany/lash-doc/pull/20`.
-- Bead 28 does not yet bind TipTap/Yjs or durable document persistence. The Bead 26 online typing gate remains expected-red until Beads 29-31.
+- Bead 29 is complete on branch `codex/feat/bead-29-crdt-editor-binding`: TipTap Collaboration and Yjs now bind the editor to the Bead 28 room socket; the Worker relays Yjs update payloads; online tests prove same-doc remote visibility and concurrent convergence.
+- Bead 29 does not add actor access enforcement or durable document persistence. The Bead 26 online typing gate now has 2 passing tests and 1 expected-red reload durability test until Bead 31.
 - Static Cloudflare Pages export still fails for arbitrary `/doc/[id]`; Bead 28 solves realtime room hosting, not the final web app dynamic-route hosting strategy.
 - Current active scoped goal is Beads 23-36: regressions first, then true responsive online typing through document identity, realtime runtime, CRDT binding, actor/access, persistence, performance, presence, invite UX, durable comments, and collaboration delight.
 - User-reported regressions are tracked in `REGRESSIONS.md`; R-001 title, R-002 @mentions, and R-003 sidebar are fixed.
@@ -62,6 +63,7 @@
 - Bead 26 - Online Typing Entry Gate.
 - Bead 27 - Real Document Identity.
 - Bead 28 - Realtime Runtime Decision + Skeleton.
+- Bead 29 - CRDT Editor Binding.
 
 ## Release Evidence
 
@@ -94,6 +96,8 @@
 - Bead 27 final validation - pass: test-hook web build, document identity e2e (4 passed), adjacent title/outline/offline/smoke e2e (9 passed), lint, typecheck, unit tests (73 passed), normal Next build, and changed TypeScript/Playwright Prettier check. Expected caveat: `pnpm run build:static` fails until a web dynamic-route hosting strategy is chosen for arbitrary `/doc/[id]`.
 - Bead 28 fail-first realtime runtime - pass as evidence: `packages/testing/unit/realtime-runtime/realtime-runtime-skeleton.test.ts` first failed because `packages/realtime-worker/src/routing` did not exist.
 - Bead 28 runtime validation - pass: targeted runtime unit test (3 passed), `pnpm --filter @lash/realtime-worker typecheck`, `pnpm --filter @lash/realtime-worker deploy:dry-run`, and `pnpm run verify:realtime` with service health, room health, and WebSocket `pong` on `http://127.0.0.1:8787`.
+- Bead 29 fail-first CRDT binding - pass as evidence: after Bead 28, `apps/web/e2e/online-typing/online-typing-entry-gate.spec.ts` still failed 3 tests because editor content was not bound to realtime CRDT sync or durability.
+- Bead 29 final validation - pass/expected-red split: online typing e2e now passes same-doc remote visibility and concurrent convergence (2 passed) while reload durability remains expected-red for Bead 31; root typecheck, Worker typecheck, unit tests (76 passed), Worker dry-run, realtime verifier, lint, normal web build, and test-hook web build passed.
 - Acceptance coverage audit - 86 `agents.md` Test IDs, 98 unit/e2e files, no missing IDs.
 - Skip/todo audit - no `test.todo`, `test.skip`, `describe.skip`, `TODO acceptance`, or `.only(` matches in `apps/web/e2e` or `packages/testing/unit`.
 - Riddle audit - only planning/docs references; no Lash-Riddle runtime integration code.
@@ -115,6 +119,6 @@
 ## Open Items
 
 - User-reported regressions: none currently open.
-- Online typing red gate: Bead 26 tests are expected to fail until Beads 29-31 add CRDT binding, access boundaries, and durable persistence.
+- Online typing red gate: Bead 26 remote visibility and convergence tests now pass after Bead 29; reload durability remains expected-red until Bead 31 adds durable persistence.
 - Runtime/deploy: Realtime rooms now have a Cloudflare Durable Object Worker skeleton. Arbitrary `/doc/[id]` web routes remain local/Next-runtime only; static Cloudflare Pages export is blocked until a web dynamic-route hosting strategy is chosen.
 - Future custom-domain/production hosting decisions and future Riddle integration are separate workstreams; realtime infra should prefer Cloudflare first, then Render only if needed.

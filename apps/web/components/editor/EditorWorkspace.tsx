@@ -48,6 +48,7 @@ import {
   upsertDocument,
   type LashDocumentRecord,
 } from '../../lib/documentRegistry';
+import { createLashRealtimeCollaboration } from '../../lib/realtimeCollaboration';
 import { AppShell } from '../shell/AppShell';
 import { Icon } from '../shell/Icon';
 import { RightRail, type RailTab, type RailTabConfig } from '../shell/RightRail';
@@ -248,6 +249,17 @@ export function EditorWorkspace({ documentId = DEFAULT_DOCUMENT_ID }: EditorWork
   }, []);
 
   const imageUploader = useMemo<LashImageUploader>(() => createBrowserImageUploader(), []);
+  const realtimeCollaboration = useMemo(
+    () => createLashRealtimeCollaboration(activeDocumentId),
+    [activeDocumentId],
+  );
+
+  useEffect(() => {
+    return () => {
+      realtimeCollaboration.provider.destroy();
+      realtimeCollaboration.doc.destroy();
+    };
+  }, [realtimeCollaboration]);
 
   useEffect(() => {
     setIsMounted(true);
@@ -337,6 +349,10 @@ export function EditorWorkspace({ documentId = DEFAULT_DOCUMENT_ID }: EditorWork
         image: {
           uploader: imageUploader,
         },
+        collaboration: {
+          document: realtimeCollaboration.doc,
+          field: 'content',
+        },
         chips: {
           resolveDocChip: async (docId) => ({
             title: `Internal Doc ${docId}`,
@@ -344,14 +360,13 @@ export function EditorWorkspace({ documentId = DEFAULT_DOCUMENT_ID }: EditorWork
           }),
         },
       }),
-    [handleLinkCommand, activeDocumentId, outlinePersistence, imageUploader],
+    [handleLinkCommand, activeDocumentId, outlinePersistence, imageUploader, realtimeCollaboration],
   );
 
   const editor = useEditor(
     {
       extensions,
       autofocus: 'end',
-      content: '<p></p>',
       immediatelyRender: false,
       editorProps: {
         attributes: {

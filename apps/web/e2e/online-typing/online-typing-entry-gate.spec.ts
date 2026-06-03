@@ -1,4 +1,6 @@
 import { expect, test, type Browser, type Page } from '@playwright/test';
+import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
+import { once } from 'node:events';
 
 type LashTestWindow = Window & {
   __lashEditor?: {
@@ -11,6 +13,71 @@ type LashTestWindow = Window & {
 };
 
 const EMPTY_DOC = '<p></p>';
+const REALTIME_PORT = 8787;
+const REALTIME_HEALTH_URL = `http://127.0.0.1:${REALTIME_PORT}/api/realtime/health`;
+
+let realtimeWorker: ChildProcess | null = null;
+
+const assertRealtimePortFree = () => {
+  const result = spawnSync('lsof', ['-n', '-P', `-iTCP:${REALTIME_PORT}`, '-sTCP:LISTEN'], {
+    encoding: 'utf8',
+  });
+  if (result.status === 0) {
+    throw new Error(`Realtime test port ${REALTIME_PORT} is already in use:\n${result.stdout}`);
+  }
+};
+
+const waitForRealtimeWorker = async () => {
+  const deadline = Date.now() + 30_000;
+  let lastError = '';
+  while (Date.now() < deadline) {
+    try {
+      const response = await fetch(REALTIME_HEALTH_URL);
+      if (response.ok) return;
+      lastError = `${response.status} ${response.statusText}`;
+    } catch (error) {
+      lastError = error instanceof Error ? error.message : String(error);
+    }
+    await new Promise((resolve) => setTimeout(resolve, 500));
+  }
+  throw new Error(`Realtime worker did not become ready: ${lastError}`);
+};
+
+const startRealtimeWorker = async () => {
+  assertRealtimePortFree();
+  realtimeWorker = spawn(
+    'pnpm',
+    [
+      'exec',
+      'wrangler',
+      'dev',
+      '--config',
+      'packages/realtime-worker/wrangler.jsonc',
+      '--local',
+      '--port',
+      String(REALTIME_PORT),
+      '--log-level',
+      'error',
+    ],
+    {
+      cwd: process.cwd(),
+      env: { ...process.env, NO_COLOR: '1' },
+      stdio: ['ignore', 'ignore', 'pipe'],
+    },
+  );
+  realtimeWorker.stderr?.on('data', (chunk) => process.stderr.write(chunk));
+  await waitForRealtimeWorker();
+};
+
+const stopRealtimeWorker = async () => {
+  const worker = realtimeWorker;
+  realtimeWorker = null;
+  if (!worker || worker.exitCode !== null || worker.signalCode !== null) return;
+  worker.kill('SIGTERM');
+  const timeout = setTimeout(() => worker.kill('SIGKILL'), 5_000);
+  await once(worker, 'exit').catch(() => undefined);
+  clearTimeout(timeout);
+};
 
 const waitForEditor = async (page: Page) => {
   await page.waitForFunction(() => Boolean((window as LashTestWindow).__lashEditor));
@@ -63,7 +130,12 @@ const typeIntoEditor = async (page: Page, text: string) => {
   await expect.poll(() => editorText(page)).toContain(text);
 };
 
+test.describe.configure({ mode: 'serial' });
+
 test.describe('online typing entry gate', () => {
+  test.beforeAll(startRealtimeWorker);
+  test.afterAll(stopRealtimeWorker);
+
   test('same-doc remote visibility shows keystrokes in another browser context', async ({
     browser,
   }) => {

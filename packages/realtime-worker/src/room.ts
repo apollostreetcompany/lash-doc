@@ -13,6 +13,7 @@ type ClientMessage = {
   type?: string;
   requestId?: string;
   payload?: unknown;
+  update?: unknown;
 };
 
 const json = (body: unknown, init: ResponseInit = {}) =>
@@ -113,6 +114,30 @@ export class LashRealtimeRoom extends DurableObject<Env> {
       });
       for (const peer of this.ctx.getWebSockets()) {
         peer.send(payload);
+      }
+      return;
+    }
+
+    if (parsed.type === 'yjs-update') {
+      if (typeof parsed.update !== 'string') {
+        ws.send(
+          JSON.stringify({
+            type: 'error',
+            roomId: attachment.roomId,
+            code: 'invalid_yjs_update',
+          }),
+        );
+        return;
+      }
+      const payload = JSON.stringify({
+        type: 'yjs-update',
+        roomId: attachment.roomId,
+        update: parsed.update,
+      });
+      for (const peer of this.ctx.getWebSockets()) {
+        if (peer !== ws) {
+          peer.send(payload);
+        }
       }
       return;
     }
