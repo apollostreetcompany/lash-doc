@@ -136,6 +136,7 @@
 - Bead 35 PR: `https://github.com/apollostreetcompany/lash-doc/pull/27` stacked on Bead 34 PR #26.
 - Bead 36 fail-first collaboration delight - pass as evidence: `apps/web/e2e/online-typing/collaboration-delight.spec.ts` first failed because `collaboration-empty-state` and `sync-feedback` did not exist.
 - Bead 36 final validation - pass: changed-file Prettier check, `git diff --check`, root typecheck, `pnpm run lint`, `pnpm run test:unit` (85 passed), normal root build, test-hook web build, Bead 36 e2e (2 passed), full online-typing e2e folder (9 passed), and invite-access e2e (3 passed).
+- Bead 36 PR: `https://github.com/apollostreetcompany/lash-doc/pull/28` stacked on Bead 35 PR #27.
 - Acceptance coverage audit - 86 `agents.md` Test IDs, 117 unit/e2e files, no missing IDs.
 - Skip/todo audit - no `test.todo`, `test.skip`, `describe.skip`, `TODO acceptance`, or `.only(` matches in `apps/web/e2e` or `packages/testing/unit`.
 - Riddle audit - only planning/docs references; no Lash-Riddle runtime integration code.
