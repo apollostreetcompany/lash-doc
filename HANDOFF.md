@@ -22,6 +22,7 @@
 - Bead 27 is complete on branch `codex/feat/bead-27-real-document-identity`: `/doc/[id]` routes, local document registry, title metadata isolation, document create/open controls, per-doc outline/history/panel IDs, and routed OfflinePanel IDs are implemented and covered by fail-first Playwright tests.
 - Bead 27 PR #19 is open and stacked on PR #18: `https://github.com/apollostreetcompany/lash-doc/pull/19`.
 - Bead 28 is complete on branch `codex/feat/bead-28-realtime-runtime-skeleton`: Cloudflare Workers + Durable Objects was selected for realtime rooms; `packages/realtime-worker` exposes service/room health and WebSocket socket routes with Wrangler local verification and deploy dry-run.
+- Bead 28 PR #20 is open and stacked on PR #19: `https://github.com/apollostreetcompany/lash-doc/pull/20`.
 - Bead 28 does not yet bind TipTap/Yjs or durable document persistence. The Bead 26 online typing gate remains expected-red until Beads 29-31.
 - Static Cloudflare Pages export still fails for arbitrary `/doc/[id]`; Bead 28 solves realtime room hosting, not the final web app dynamic-route hosting strategy.
 - Current active scoped goal is Beads 23-36: regressions first, then true responsive online typing through document identity, realtime runtime, CRDT binding, actor/access, persistence, performance, presence, invite UX, durable comments, and collaboration delight.
