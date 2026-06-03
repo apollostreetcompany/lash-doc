@@ -81,6 +81,7 @@
 - Public verification runs `apps/web/e2e/smoke/home.spec.ts` and `apps/web/e2e/performance/typing-latency.spec.ts` with `PLAYWRIGHT_BASE_URL`.
 - Essay typing threshold: p95 browser event processing < 8 ms, max event processing < 50 ms, full essay typed < 5 s, zero long tasks, and no character loss.
 - Local large-document typing gate: `apps/web/e2e/performance/large-doc-typing.spec.ts` seeds 10k-word and 50k-word docs through test hooks and enforces p95 event work < 8 ms plus max event work < 50 ms. It logs long task counts for future document virtualization work.
+- On GitHub-hosted CI only, the 50k-word Event Timing p95 budget is 16 ms to account for hosted-runner CPU scheduling. Local and product validation keep the 8 ms p95 budget, and the spec logs `p95BudgetMs` with each scenario.
 - Latest public verification on `https://lash-9xx.pages.dev/`: 585 characters typed in 985 ms, p95 event work 0.8 ms, max event work 7.4 ms, zero long tasks.
 - Latest merged-main Cloudflare deployment preview: `https://cad5a3ac.lash-9xx.pages.dev`.
 
