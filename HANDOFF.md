@@ -132,6 +132,7 @@
 - Bead 34 final validation - pass: changed-file Prettier check, `git diff --check`, root typecheck, Worker typecheck, targeted realtime access unit test (6 passed), `pnpm run lint`, `pnpm run test:unit` (85 passed), Worker deploy dry-run, `make verify-realtime-runtime`, normal web build, test-hook web build, invite/share e2e (8 passed), and full online typing e2e (7 passed).
 - Bead 35 fail-first durable comments/suggestions - pass as evidence: `apps/web/e2e/doc-chat/chat-durable.spec.ts` first failed because `chat-reply-input` did not exist, and `apps/web/e2e/suggest-mode/suggest-durable.spec.ts` first failed because `suggestion-resolution-row` did not exist.
 - Bead 35 final validation - pass: changed-file Prettier write, `git diff --check`, root typecheck, `pnpm run lint`, `pnpm run test:unit` (85 passed), normal root build, test-hook web build, durable comments/suggestions e2e (4 passed), full doc-chat/suggest-mode e2e (13 passed), online typing e2e (7 passed), Worker deploy dry-run, and `make verify-realtime-runtime`.
+- Bead 35 PR: `https://github.com/apollostreetcompany/lash-doc/pull/27` stacked on Bead 34 PR #26.
 - Acceptance coverage audit - 86 `agents.md` Test IDs, 117 unit/e2e files, no missing IDs.
 - Skip/todo audit - no `test.todo`, `test.skip`, `describe.skip`, `TODO acceptance`, or `.only(` matches in `apps/web/e2e` or `packages/testing/unit`.
 - Riddle audit - only planning/docs references; no Lash-Riddle runtime integration code.
