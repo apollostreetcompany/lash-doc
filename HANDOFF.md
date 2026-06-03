@@ -26,7 +26,7 @@
 - Bead 29 is complete on branch `codex/feat/bead-29-crdt-editor-binding`: TipTap Collaboration and Yjs now bind the editor to the Bead 28 room socket; the Worker relays Yjs update payloads; online tests prove same-doc remote visibility and concurrent convergence.
 - Bead 29 PR #21 is open and stacked on PR #20: `https://github.com/apollostreetcompany/lash-doc/pull/21`.
 - Bead 30 is complete on branch `codex/feat/bead-30-actor-access-boundary`: realtime rooms now require signed session grants, room health requires `doc.read`, sockets require `doc.edit`, and the browser provider requests a local actor session before opening the WebSocket.
-- Bead 30 PR #22 is pending/open and stacked on PR #21.
+- Bead 30 PR #22 is open and stacked on PR #21: `https://github.com/apollostreetcompany/lash-doc/pull/22`.
 - Bead 30 does not add real identity providers, roles, invites, or durable document persistence. The Bead 26 online typing gate now has 3 passing tests and 1 expected-red reload durability test until Bead 31.
 - Static Cloudflare Pages export still fails for arbitrary `/doc/[id]`; Bead 28 solves realtime room hosting, not the final web app dynamic-route hosting strategy.
 - Current active scoped goal is Beads 23-36: regressions first, then true responsive online typing through document identity, realtime runtime, CRDT binding, actor/access, persistence, performance, presence, invite UX, durable comments, and collaboration delight.
