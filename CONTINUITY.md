@@ -76,6 +76,7 @@ Success criteria:
 51. CI now runs on Node 22 and uses `pnpm run test:e2e:ci`, which rebuilds the web app with Lash test hooks and runs Playwright with one worker. Wrangler 4.97 requires Node 22+, and the realtime/performance browser suite needs serialized execution on shared CI runners to avoid Worker port contention and scheduling noise that masks product latency.
 52. The 50k-word large-document Event Timing p95 gate remains strict at 8 ms for local/product validation, but allows a CI-only 16 ms runner budget because GitHub-hosted CPU reported 11.3 ms while the same commit measured 4.8 ms locally. The test logs the active budget in metrics so CI cannot silently hide a widened threshold.
 53. PR #28 CI is green after Node 22, serialized E2E, and the CI-only 50k runner budget adjustments: GitHub Actions run `26913596916` passed `build-and-test` on branch `codex/feat/bead-36-collaboration-delight`.
+54. Beads 23-36 landed as one integrated deployable-main merge through PR #28, because intermediate stacked PRs #18-#27 intentionally represented red partial states. PR #28 was retargeted to `main`, squash-merged as `1b85b26682505d5a8e10e6051c4f4464b612898c`, protected `main` CI run `26914289177` passed `build-and-test`, and superseded PRs #15-#27 were closed.
 
 ## State
 
@@ -135,14 +136,17 @@ Success criteria:
 - [x] Bead 34 - Invite + Access UX with hash invite links, collaborator list, expiry/revoke UI, invited edit/comment access gates, and signed invite-token realtime session exchange.
 - [x] Bead 35 - Durable Comments/Suggestions with persisted/synced chat threads, replies, resolve/reopen status, and suggestion accept/reject resolution records.
 - [x] Bead 36 - Collaboration Delight Layer with first-run Ready/share state, sync feedback, and reconnect retry action.
+- [x] PR #28 merged the integrated Beads 23-36 stack into `main` as `1b85b26682505d5a8e10e6051c4f4464b612898c`.
+- [x] Final Beads 23-36 protected `main` CI passed: run `26914289177`, workflow `CI`, job `build-and-test`.
+- [x] Superseded stacked PRs #15-#27 were closed after the integrated merge.
 
 ### Now
 
-- PR stack merge readiness after PR #28 green CI.
+- No active bead; Beads 23-36 are merged and CI-green on `main`.
 
 ### Next
 
-- PR stack CI/merge readiness, then release review closeout.
+- Production web hosting strategy for dynamic `/doc/[id]` routes and any future Riddle integration remain separate workstreams.
 
 ## Open Questions
 
@@ -219,20 +223,9 @@ Success criteria:
 - `packages/testing/unit/realtime-runtime/realtime-runtime-skeleton.test.ts`
 - `scripts/verify-realtime-runtime.mjs`
 - `packages/editor-core/src/schema/mentions.ts`
-- GitHub PR #15: `https://github.com/apollostreetcompany/lash-doc/pull/15`
-- GitHub PR #16: `https://github.com/apollostreetcompany/lash-doc/pull/16`
-- GitHub PR #17: `https://github.com/apollostreetcompany/lash-doc/pull/17`
-- GitHub PR #18: `https://github.com/apollostreetcompany/lash-doc/pull/18` (expected red until Beads 29-31)
-- GitHub PR #19: `https://github.com/apollostreetcompany/lash-doc/pull/19` (expected red until Beads 29-31; stacked on PR #18)
-- GitHub PR #20: `https://github.com/apollostreetcompany/lash-doc/pull/20` (expected red until Beads 29-31; stacked on PR #19)
-- GitHub PR #21: `https://github.com/apollostreetcompany/lash-doc/pull/21` (reload durability expected-red until Bead 31; stacked on PR #20)
-- GitHub PR #22: `https://github.com/apollostreetcompany/lash-doc/pull/22` (reload durability expected-red until Bead 31; stacked on PR #21)
-- GitHub PR #23: `https://github.com/apollostreetcompany/lash-doc/pull/23` (stacked on PR #22)
-- GitHub PR #24: `https://github.com/apollostreetcompany/lash-doc/pull/24` (stacked on PR #23)
-- GitHub PR #25: `https://github.com/apollostreetcompany/lash-doc/pull/25` (stacked on PR #24)
-- GitHub PR #26: `https://github.com/apollostreetcompany/lash-doc/pull/26` (stacked on PR #25)
-- GitHub PR #27: `https://github.com/apollostreetcompany/lash-doc/pull/27` (stacked on PR #26)
-- GitHub PR #28: `https://github.com/apollostreetcompany/lash-doc/pull/28` (stacked on PR #27)
+- Integrated Beads 23-36 PR #28: `https://github.com/apollostreetcompany/lash-doc/pull/28` (merged)
+- Superseded stacked PRs #15-#27: closed after PR #28 landed on `main`
+- Final Beads 23-36 main CI run: `https://github.com/apollostreetcompany/lash-doc/actions/runs/26914289177`
 - GitHub PR #12: `https://github.com/apollostreetcompany/lash-doc/pull/12`
 - Post-deploy main CI run: `https://github.com/apollostreetcompany/lash-doc/actions/runs/26026635724`
 - Final Cloudflare deployment preview: `https://cad5a3ac.lash-9xx.pages.dev`

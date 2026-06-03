@@ -13,33 +13,36 @@
 - Audited main push CI is green: run `25955266966`, workflow `CI`, job `build-and-test`.
 - Post-mobile-hardening main push CI is green: run `26022768022`, workflow `CI`, job `build-and-test`.
 - Bead 22 is merged and deployed: PR #12 squash-merged into `main` as `3f19bc361c3071d9e3f7425bfd064193cd8b83a9`, protected main CI run `26026635724` passed, Cloudflare Pages project `lash` was redeployed from merged main, and production public verification passed on `https://lash-9xx.pages.dev/`.
+- Beads 23-36 are merged: PR #28 was retargeted to `main` and squash-merged as `1b85b26682505d5a8e10e6051c4f4464b612898c`.
+- Final Beads 23-36 protected main CI is green: run `26914289177`, workflow `CI`, job `build-and-test`, completed in 5m32s.
+- Superseded stacked PRs #15-#27 are closed. They were not merged individually because intermediate online-collab branches intentionally represented red partial states before the integrated PR #28 result.
 - Bead 23 is complete on branch `codex/fix/bead-23-title-regression`: title editing, topbar mirroring, reload persistence, and mobile metadata non-overlap are covered by fail-first Playwright regression tests.
 - Bead 24 is complete on branch `codex/fix/bead-24-mentions-regression`: user/date mention suggestions now insert inline atom mention nodes into the editor instead of plain text, with fail-first real-editor Playwright coverage.
 - Bead 25 is complete on branch `codex/fix/bead-25-sidebar-regression`: collapsed desktop sidebars retain an outline access entry, outline jumps focus the intended heading, and the mobile drawer has a visible close path with focus restore, all covered by fail-first Playwright regression tests.
-- Stacked regression PRs are open: Bead 23 PR #15, Bead 24 PR #16, and Bead 25 PR #17.
+- Regression PRs #15-#17 are closed as superseded by the integrated PR #28 merge.
 - Bead 26 is complete on branch `codex/test/bead-26-online-typing-entry-gate`: red two-client Playwright tests now define missing online typing behavior for remote visibility, convergence, and reload durability; docs/comments no longer imply the realtime backend exists.
-- Bead 26 PR #18 is open and expected-red until Beads 28-31 make the online typing gate green.
+- Bead 26 PR #18 is closed as superseded by the integrated PR #28 merge.
 - Bead 27 is complete on branch `codex/feat/bead-27-real-document-identity`: `/doc/[id]` routes, local document registry, title metadata isolation, document create/open controls, per-doc outline/history/panel IDs, and routed OfflinePanel IDs are implemented and covered by fail-first Playwright tests.
-- Bead 27 PR #19 is open and stacked on PR #18: `https://github.com/apollostreetcompany/lash-doc/pull/19`.
+- Bead 27 PR #19 is closed as superseded by the integrated PR #28 merge.
 - Bead 28 is complete on branch `codex/feat/bead-28-realtime-runtime-skeleton`: Cloudflare Workers + Durable Objects was selected for realtime rooms; `packages/realtime-worker` exposes service/room health and WebSocket socket routes with Wrangler local verification and deploy dry-run.
-- Bead 28 PR #20 is open and stacked on PR #19: `https://github.com/apollostreetcompany/lash-doc/pull/20`.
+- Bead 28 PR #20 is closed as superseded by the integrated PR #28 merge.
 - Bead 29 is complete on branch `codex/feat/bead-29-crdt-editor-binding`: TipTap Collaboration and Yjs now bind the editor to the Bead 28 room socket; the Worker relays Yjs update payloads; online tests prove same-doc remote visibility and concurrent convergence.
-- Bead 29 PR #21 is open and stacked on PR #20: `https://github.com/apollostreetcompany/lash-doc/pull/21`.
+- Bead 29 PR #21 is closed as superseded by the integrated PR #28 merge.
 - Bead 30 is complete on branch `codex/feat/bead-30-actor-access-boundary`: realtime rooms now require signed session grants, room health requires `doc.read`, sockets require `doc.edit`, and the browser provider requests a local actor session before opening the WebSocket.
-- Bead 30 PR #22 is open and stacked on PR #21: `https://github.com/apollostreetcompany/lash-doc/pull/22`.
-- Bead 30 does not add real identity providers, roles, invites, or durable document persistence. The Bead 26 online typing gate now has 3 passing tests and 1 expected-red reload durability test until Bead 31.
+- Bead 30 PR #22 is closed as superseded by the integrated PR #28 merge.
+- Bead 30 does not add real identity providers, roles, invites, or durable document persistence. Bead 31 later closed the reload durability gap.
 - Bead 31 is complete on branch `codex/feat/bead-31-durable-persistence`: the realtime Durable Object persists Yjs updates in SQLite before broadcast, compacts cumulative snapshots, hydrates reloaded clients from snapshot plus tail updates, exposes an edit-scoped restore-as-new-head endpoint, and reports persistence metadata in room health.
-- Bead 31 PR #23 is open and stacked on PR #22: `https://github.com/apollostreetcompany/lash-doc/pull/23`.
+- Bead 31 PR #23 is closed as superseded by the integrated PR #28 merge.
 - After Bead 31, the online typing gate has 5 passing tests: unauthorized access denial, same-doc remote visibility, concurrent convergence, reload durability, and snapshot compaction without deleting update history.
 - Bead 32 is complete on branch `codex/perf/bead-32-large-doc-typing-performance`: local documents no longer enable the collaboration runtime unless realtime is explicitly configured/opted in, outline scans are deferred for body-text transactions, offscreen editor blocks use CSS containment, and 10k/50k-word browser typing gates prove p95 input work stays under the 8 ms SLO.
-- Bead 32 PR #24 is open and stacked on PR #23: `https://github.com/apollostreetcompany/lash-doc/pull/24`.
+- Bead 32 PR #24 is closed as superseded by the integrated PR #28 merge.
 - Bead 33 is complete on branch `codex/feat/bead-33-presence-sync-state`: the realtime room now supports same-room awareness broadcasts and sync acknowledgements; the editor shows saved/syncing/reconnecting state, collaborator chips, and remote cursor/selection markers.
-- Bead 33 PR #25 is open and stacked on PR #24: `https://github.com/apollostreetcompany/lash-doc/pull/25`.
+- Bead 33 PR #25 is closed as superseded by the integrated PR #28 merge.
 - Bead 34 is complete on branch `codex/feat/bead-34-invite-access-ux`: the share panel now creates hash invite links, records collaborator rows, supports expiry/revoke UI, invited edit/comment openings resolve scope into editor capabilities, and the realtime Worker validates signed invite tokens before minting production session grants.
-- Bead 34 PR #26 is open and stacked on PR #25: `https://github.com/apollostreetcompany/lash-doc/pull/26`.
+- Bead 34 PR #26 is closed as superseded by the integrated PR #28 merge.
 - Bead 34 includes an Architect review artifact at `docs/reviews/bead-34-invite-access-architecture-review.md`. The highest-risk finding, default edit grants for arbitrary room sessions, is closed for production-shaped Worker environments; DO-backed global invite issuance, revocation, and audit remain a follow-up.
 - Static Cloudflare Pages export still fails for arbitrary `/doc/[id]`; Bead 28 solves realtime room hosting, not the final web app dynamic-route hosting strategy.
-- Current active scoped goal is Beads 23-36: regressions first, then true responsive online typing through document identity, realtime runtime, CRDT binding, actor/access, persistence, performance, presence, invite UX, durable comments, and collaboration delight.
+- Completed scoped goal: Beads 23-36 closed the regressions first, then landed true responsive online typing through document identity, realtime runtime, CRDT binding, actor/access, persistence, performance, presence, invite UX, durable comments, and collaboration delight.
 - User-reported regressions are tracked in `REGRESSIONS.md`; R-001 title, R-002 @mentions, and R-003 sidebar are fixed.
 - Branch protection on `main` is configured with strict required `build-and-test`, admin enforcement, and no force-push/delete.
 - Local product server was not left running during PR integration; use `make serve` to start `http://127.0.0.1:3000`.
@@ -133,10 +136,10 @@
 - Bead 34 final validation - pass: changed-file Prettier check, `git diff --check`, root typecheck, Worker typecheck, targeted realtime access unit test (6 passed), `pnpm run lint`, `pnpm run test:unit` (85 passed), Worker deploy dry-run, `make verify-realtime-runtime`, normal web build, test-hook web build, invite/share e2e (8 passed), and full online typing e2e (7 passed).
 - Bead 35 fail-first durable comments/suggestions - pass as evidence: `apps/web/e2e/doc-chat/chat-durable.spec.ts` first failed because `chat-reply-input` did not exist, and `apps/web/e2e/suggest-mode/suggest-durable.spec.ts` first failed because `suggestion-resolution-row` did not exist.
 - Bead 35 final validation - pass: changed-file Prettier write, `git diff --check`, root typecheck, `pnpm run lint`, `pnpm run test:unit` (85 passed), normal root build, test-hook web build, durable comments/suggestions e2e (4 passed), full doc-chat/suggest-mode e2e (13 passed), online typing e2e (7 passed), Worker deploy dry-run, and `make verify-realtime-runtime`.
-- Bead 35 PR: `https://github.com/apollostreetcompany/lash-doc/pull/27` stacked on Bead 34 PR #26.
+- Bead 35 PR #27: `https://github.com/apollostreetcompany/lash-doc/pull/27` is closed as superseded by the integrated PR #28 merge.
 - Bead 36 fail-first collaboration delight - pass as evidence: `apps/web/e2e/online-typing/collaboration-delight.spec.ts` first failed because `collaboration-empty-state` and `sync-feedback` did not exist.
 - Bead 36 final validation - pass: changed-file Prettier check, `git diff --check`, root typecheck, `pnpm run lint`, `pnpm run test:unit` (85 passed), normal root build, test-hook web build, Bead 36 e2e (2 passed), full online-typing e2e folder (9 passed), and invite-access e2e (3 passed).
-- Bead 36 PR: `https://github.com/apollostreetcompany/lash-doc/pull/28` stacked on Bead 35 PR #27.
+- Bead 36 PR #28: `https://github.com/apollostreetcompany/lash-doc/pull/28` merged the integrated Beads 23-36 stack to `main`.
 - Bead 36 post-subreview fix commit `6e6ffe809de9a365800b9617b07719ae0a4f00b7` is on branch `codex/feat/bead-36-collaboration-delight`: room sockets now require `doc.read`, Yjs mutations are rejected without `doc.edit` inside the Durable Object, the browser provider respects read-only session grants, local-only docs show `Solo` instead of Ready/Invite, and duplicate visible sync text is removed.
 - Bead 36 fresh-eyes fix commit `37fd15ba462f5a7029bd92e87d158bf31d39c2f5` is on branch `codex/feat/bead-36-collaboration-delight`: the no-secret realtime development fallback is now loopback-only, so non-local Worker hosts deny `/session` minting unless `LASH_REALTIME_SESSION_SECRET` is configured.
 - Subreview artifacts for true responsive online typing:
@@ -151,6 +154,8 @@
 - Bead 36 CI hardening commit `fc35d2b` - pass locally: PR #28 remote CI run `26911406655` failed because GitHub Actions used Node 20 while Wrangler 4.97 requires Node 22+, and the full Playwright suite ran with shared-runner contention that surfaced Worker startup/performance/focus-harness noise. CI now uses Node 22 and `pnpm run test:e2e:ci` (`NEXT_PUBLIC_LASH_TEST_HOOKS=true pnpm --filter @lash/web build && playwright test --workers=1`). Local validation passed targeted fixed specs, full serialized E2E (117 passed), lint, typecheck, unit tests (87 passed), `git diff --check`, and normal `pnpm run build`.
 - Bead 36 CI performance-gate commit `f145954` - pass locally: PR #28 remote CI run `26912787883` fixed Node 22 and serialized E2E but failed only the 50k-word large-doc p95 Event Timing gate at 11.3 ms on GitHub-hosted CPU; 116 tests passed remotely, including all realtime cases, and local 50k remained 4.8 ms under the strict 8 ms budget. The spec now keeps 8 ms locally/product-side and logs/uses a 16 ms 50k-only CI runner budget. Local validation passed CI-mode large-doc spec, full serialized E2E (117 passed), lint, typecheck, unit tests (87 passed), `git diff --check`, and normal `pnpm run build`.
 - PR #28 remote CI final pass: GitHub Actions run `26913596916` passed `build-and-test` in 5m46s after the Node 22, serialized E2E, and 50k CI runner-budget adjustments.
+- PR #28 latest-head CI pass: GitHub Actions run `26913934385` passed `build-and-test` in 5m16s on head `7df9376d5f0afa5b7ed193be3b6f40a674166d05`.
+- Integrated main merge pass: PR #28 was squash-merged as `1b85b26682505d5a8e10e6051c4f4464b612898c`; protected main CI run `26914289177` passed `build-and-test` in 5m32s.
 
 ## Operational Notes
 
@@ -174,7 +179,7 @@
 
 ## Regression Backlog
 
-- PR stack merge readiness after subreview and fresh-eyes fixes.
+- None. PR stack merged through PR #28 and superseded PRs #15-#27 are closed.
 
 ## Open Items
 
