@@ -23,6 +23,8 @@ import { EMPTY_HISTORY_DOC, createHistoryStore } from '@lash/history';
 import { createDocumentId, hashCanonical, type EditPatch, type HistoryEntry } from '@lash/types';
 import type { Editor, EditorEvents } from '@tiptap/core';
 import { EditorContent, useEditor } from '@tiptap/react';
+import type { Route } from 'next';
+import { useRouter } from 'next/navigation';
 import {
   type ChangeEvent,
   type MouseEvent as ReactMouseEvent,
@@ -34,6 +36,18 @@ import {
 } from 'react';
 
 import { createBrowserImageUploader } from '../../lib/createBrowserImageUploader';
+import {
+  DEFAULT_DOC_TITLE,
+  DEFAULT_DOCUMENT_ID,
+  createNewDocumentId,
+  documentPath,
+  listDocuments,
+  normalizeDocumentId,
+  readDocumentTitle,
+  saveDocumentTitle,
+  upsertDocument,
+  type LashDocumentRecord,
+} from '../../lib/documentRegistry';
 import { AppShell } from '../shell/AppShell';
 import { Icon } from '../shell/Icon';
 import { RightRail, type RailTab, type RailTabConfig } from '../shell/RightRail';
@@ -65,15 +79,11 @@ const TOOLBAR_META: ToolbarMeta[] = [
   { label: 'Structure', items: toolbarGroups.blocks },
 ];
 
-const OUTLINE_DOC_ID = 'demo-document';
-const HISTORY_DOC_ID = createDocumentId(OUTLINE_DOC_ID);
 const HISTORY_SCHEMA_VERSION = 'lash-schema-v1';
 const HISTORY_ACTOR = { type: 'user', id: 'local-user' } as const;
 const HISTORY_AUDIT = { ua: 'lash-web/local-history' } as const;
 const HISTORY_RECORD_DEBOUNCE_MS = 1800;
 const AI_AUDIT = { ua: 'lash-local-ai-editor' };
-const DEFAULT_DOC_TITLE = 'Untitled document';
-const DOC_TITLE_STORAGE_KEY = `lash:title:${OUTLINE_DOC_ID}`;
 
 type OutlineTransaction = EditorEvents['transaction']['transaction'];
 
@@ -145,15 +155,7 @@ const textToContent = (text: string) => ({
   })),
 });
 
-const persistDocTitle = (title: string) => {
-  const normalizedTitle = title.trim() || DEFAULT_DOC_TITLE;
-  try {
-    window.localStorage.setItem(DOC_TITLE_STORAGE_KEY, normalizedTitle);
-  } catch {
-    // Title persistence is best-effort for private browsing and locked-down previews.
-  }
-  return normalizedTitle;
-};
+const toRoute = (path: string) => path as Route;
 
 // Copy `text` to the clipboard. Prefers the async Clipboard API, but falls
 // back to a transient textarea + execCommand('copy') for HTTP previews,
@@ -187,12 +189,20 @@ const copyToClipboard = async (text: string): Promise<boolean> => {
   return ok;
 };
 
-export function EditorWorkspace() {
+export interface EditorWorkspaceProps {
+  documentId?: string;
+}
+
+export function EditorWorkspace({ documentId = DEFAULT_DOCUMENT_ID }: EditorWorkspaceProps) {
+  const router = useRouter();
+  const activeDocumentId = useMemo(() => normalizeDocumentId(documentId), [documentId]);
+  const historyDocumentId = useMemo(() => createDocumentId(activeDocumentId), [activeDocumentId]);
   const [isMounted, setIsMounted] = useState(false);
   const [outlineItems, setOutlineItems] = useState<OutlineItem[]>([]);
   const [isFocusMode, setIsFocusMode] = useState(false);
   const [isSuggestMode, setIsSuggestMode] = useState(false);
   const [docTitle, setDocTitle] = useState(DEFAULT_DOC_TITLE);
+  const [documents, setDocuments] = useState<LashDocumentRecord[]>([]);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [railOpen, setRailOpen] = useState(true);
   const [activeTab, setActiveTab] = useState<RailTab>('chat');
@@ -232,6 +242,11 @@ export function EditorWorkspace() {
     setHistoryHead(sha);
   }, []);
 
+  const refreshDocuments = useCallback(() => {
+    if (typeof window === 'undefined') return;
+    setDocuments(listDocuments(window.localStorage));
+  }, []);
+
   const imageUploader = useMemo<LashImageUploader>(() => createBrowserImageUploader(), []);
 
   useEffect(() => {
@@ -239,15 +254,20 @@ export function EditorWorkspace() {
   }, []);
 
   useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const storedTitle = readDocumentTitle(window.localStorage, activeDocumentId);
+    setDocTitle(storedTitle);
+    setDocuments(upsertDocument(window.localStorage, { id: activeDocumentId, title: storedTitle }));
+  }, [activeDocumentId]);
+
+  useEffect(() => {
+    if (!isMounted || typeof window === 'undefined') return;
     try {
-      const storedTitle = window.localStorage.getItem(DOC_TITLE_STORAGE_KEY)?.trim();
-      if (storedTitle) {
-        setDocTitle(storedTitle);
-      }
+      setDocuments(listDocuments(window.localStorage));
     } catch {
-      // Title persistence is best-effort for private browsing and locked-down previews.
+      setDocuments([]);
     }
-  }, []);
+  }, [isMounted]);
 
   useEffect(() => {
     if (!isMounted) return;
@@ -311,7 +331,7 @@ export function EditorWorkspace() {
       createLashEditorExtensions({
         onRequestLink: handleLinkCommand,
         outline: {
-          documentId: OUTLINE_DOC_ID,
+          documentId: activeDocumentId,
           persistence: outlinePersistence,
         },
         image: {
@@ -324,7 +344,7 @@ export function EditorWorkspace() {
           }),
         },
       }),
-    [handleLinkCommand, outlinePersistence, imageUploader],
+    [handleLinkCommand, activeDocumentId, outlinePersistence, imageUploader],
   );
 
   const editor = useEditor(
@@ -397,6 +417,15 @@ export function EditorWorkspace() {
     }
 
     let disposed = false;
+    setHistoryEntries([]);
+    setSelectedHistoryEntryId(null);
+    setHistoryAuthorFilter(null);
+    setHistoryTimeFilter(null);
+    setAcceptedSuggestionIds([]);
+    setBlameLines([]);
+    commitHistoryHead(null);
+    historyTextRef.current = editorText(editor);
+    historyQueueRef.current = Promise.resolve();
     hashCanonical(EMPTY_HISTORY_DOC).then((emptySha) => {
       if (disposed) return;
       // Only seed the baseline if the editor hasn't been touched yet —
@@ -428,7 +457,7 @@ export function EditorWorkspace() {
             const expectedParentSha = historyHeadRef.current;
             if (!expectedParentSha || before === after) return;
             const result = await historyStoreRef.current.append({
-              docId: HISTORY_DOC_ID,
+              docId: historyDocumentId,
               actor: HISTORY_ACTOR,
               expectedParentSha,
               schemaVersion: HISTORY_SCHEMA_VERSION,
@@ -439,7 +468,7 @@ export function EditorWorkspace() {
             if (!result.ok) return;
             historyTextRef.current = after;
             commitHistoryHead(result.entry.resultSha);
-            const entries = await historyStoreRef.current.list(HISTORY_DOC_ID);
+            const entries = await historyStoreRef.current.list(historyDocumentId);
             if (disposed) return;
             setHistoryEntries(entries);
             setSelectedHistoryEntryId(result.entry.id);
@@ -457,7 +486,7 @@ export function EditorWorkspace() {
       }
       editor.off('transaction', recordHistory);
     };
-  }, [editor, commitHistoryHead]);
+  }, [editor, historyDocumentId, commitHistoryHead]);
 
   useEffect(() => {
     if (!editor) {
@@ -571,7 +600,7 @@ export function EditorWorkspace() {
         scrollIntoView: false,
       });
     win.__lashSerializeMarkdown = () =>
-      serializeDocToMarkdown(editor.getJSON(), { documentId: OUTLINE_DOC_ID }).markdown;
+      serializeDocToMarkdown(editor.getJSON(), { documentId: activeDocumentId }).markdown;
     win.__lashInsertImageFromArrayBuffer = async (buffer: ArrayBuffer, mimeType = 'image/png') => {
       const file = new File([buffer], `import-${Date.now()}.${mimeType.split('/')[1] ?? 'png'}`, {
         type: mimeType,
@@ -589,7 +618,7 @@ export function EditorWorkspace() {
       delete win.__lashSerializeMarkdown;
       delete win.__lashInsertImageFromArrayBuffer;
     };
-  }, [editor, imageUploader, exposeTestHooks]);
+  }, [editor, imageUploader, activeDocumentId, exposeTestHooks]);
 
   const isEditorReady = Boolean(editor);
 
@@ -671,7 +700,7 @@ export function EditorWorkspace() {
       const expectedParentSha = historyHeadRef.current;
       if (!expectedParentSha) return;
       const result = await historyStoreRef.current.append({
-        docId: HISTORY_DOC_ID,
+        docId: historyDocumentId,
         actor: HISTORY_ACTOR,
         expectedParentSha,
         schemaVersion: HISTORY_SCHEMA_VERSION,
@@ -689,13 +718,13 @@ export function EditorWorkspace() {
       const text = editorText(editor);
       historyTextRef.current = text;
       commitHistoryHead(result.entry.resultSha);
-      const entries = await historyStoreRef.current.list(HISTORY_DOC_ID);
+      const entries = await historyStoreRef.current.list(historyDocumentId);
       setAcceptedSuggestionIds((ids) => (ids.includes(entry.id) ? ids : [...ids, entry.id]));
       setHistoryEntries(entries);
       setSelectedHistoryEntryId(entry.id);
       setBlameLines(blameFor(entries, text));
     },
-    [editor, commitHistoryHead],
+    [editor, historyDocumentId, commitHistoryHead],
   );
 
   const handleRejectSuggestion = useCallback(
@@ -703,13 +732,13 @@ export function EditorWorkspace() {
       if (!editor) return;
       const expectedParentSha = historyHeadRef.current;
       if (!expectedParentSha) return;
-      const parent = await historyStoreRef.current.loadAt(HISTORY_DOC_ID, entry.parentSha);
+      const parent = await historyStoreRef.current.loadAt(historyDocumentId, entry.parentSha);
       const targetText =
         typeof parent === 'object' && parent && 'text' in parent ? String(parent.text) : '';
       const currentText = editorText(editor);
       if (currentText === targetText) return;
       const result = await historyStoreRef.current.append({
-        docId: HISTORY_DOC_ID,
+        docId: historyDocumentId,
         actor: HISTORY_ACTOR,
         expectedParentSha,
         schemaVersion: HISTORY_SCHEMA_VERSION,
@@ -726,25 +755,28 @@ export function EditorWorkspace() {
       }
       historyTextRef.current = targetText;
       commitHistoryHead(result.entry.resultSha);
-      const entries = await historyStoreRef.current.list(HISTORY_DOC_ID);
+      const entries = await historyStoreRef.current.list(historyDocumentId);
       setHistoryEntries(entries);
       setSelectedHistoryEntryId(result.entry.id);
       setBlameLines(blameFor(entries, targetText));
     },
-    [editor, commitHistoryHead],
+    [editor, historyDocumentId, commitHistoryHead],
   );
 
   const handleRestoreHistoryEntry = useCallback(
     async (entry: HistoryEntry) => {
       if (!editor) return;
       const result = await historyStoreRef.current.restore(
-        HISTORY_DOC_ID,
+        historyDocumentId,
         entry.resultSha,
         HISTORY_ACTOR,
         HISTORY_AUDIT,
       );
       if (!result.ok) return;
-      const restored = await historyStoreRef.current.loadAt(HISTORY_DOC_ID, result.entry.resultSha);
+      const restored = await historyStoreRef.current.loadAt(
+        historyDocumentId,
+        result.entry.resultSha,
+      );
       const text =
         typeof restored === 'object' && restored && 'text' in restored ? String(restored.text) : '';
       applyingHistoryRef.current = true;
@@ -752,12 +784,12 @@ export function EditorWorkspace() {
       applyingHistoryRef.current = false;
       historyTextRef.current = text;
       commitHistoryHead(result.entry.resultSha);
-      const entries = await historyStoreRef.current.list(HISTORY_DOC_ID);
+      const entries = await historyStoreRef.current.list(historyDocumentId);
       setHistoryEntries(entries);
       setSelectedHistoryEntryId(result.entry.id);
       setBlameLines(blameFor(entries, text));
     },
-    [editor, commitHistoryHead],
+    [editor, historyDocumentId, commitHistoryHead],
   );
 
   const handleApplyAiPatch = useCallback(
@@ -774,7 +806,7 @@ export function EditorWorkspace() {
 
       const after = applyTextOperations(before, patch.operations);
       const result = await historyStoreRef.current.append({
-        docId: HISTORY_DOC_ID,
+        docId: historyDocumentId,
         actor: patch.author,
         expectedParentSha,
         schemaVersion: patch.schemaVersion,
@@ -792,13 +824,13 @@ export function EditorWorkspace() {
       }
       historyTextRef.current = after;
       commitHistoryHead(result.entry.resultSha);
-      const entries = await historyStoreRef.current.list(HISTORY_DOC_ID);
+      const entries = await historyStoreRef.current.list(historyDocumentId);
       setHistoryEntries(entries);
       setSelectedHistoryEntryId(result.entry.id);
       setBlameLines(blameFor(entries, after));
       return { ok: true };
     },
-    [editor, commitHistoryHead],
+    [editor, historyDocumentId, commitHistoryHead],
   );
 
   // Cmd/Ctrl+Shift+F binding for focus mode. Touch devices never fire this
@@ -856,17 +888,17 @@ export function EditorWorkspace() {
       event.target.value = '';
       if (!file || !editor) return;
       const text = await file.text();
-      const { doc, warnings } = parseMarkdownToDoc(text, { documentId: OUTLINE_DOC_ID });
+      const { doc, warnings } = parseMarkdownToDoc(text, { documentId: activeDocumentId });
       editor.commands.setContent(doc, false);
       showWarnings(warnings);
     },
-    [editor, showWarnings],
+    [editor, activeDocumentId, showWarnings],
   );
 
   const handleExportMarkdown = useCallback(() => {
     if (!editor) return;
     const { markdown, warnings } = serializeDocToMarkdown(editor.getJSON(), {
-      documentId: OUTLINE_DOC_ID,
+      documentId: activeDocumentId,
     });
     showWarnings(warnings);
     if (typeof window !== 'undefined') {
@@ -882,7 +914,7 @@ export function EditorWorkspace() {
     link.click();
     document.body.removeChild(link);
     URL.revokeObjectURL(url);
-  }, [editor, showWarnings]);
+  }, [editor, activeDocumentId, showWarnings]);
 
   const currentText = editor ? editorText(editor) : '';
 
@@ -896,7 +928,7 @@ export function EditorWorkspace() {
       content: (
         <ChatPanel
           editor={editor}
-          docId={HISTORY_DOC_ID}
+          docId={historyDocumentId}
           baseVersion={historyHead}
           currentText={currentText}
         />
@@ -933,7 +965,7 @@ export function EditorWorkspace() {
       content: (
         <AIPanel
           editor={editor}
-          docId={HISTORY_DOC_ID}
+          docId={historyDocumentId}
           baseVersion={historyHead}
           currentText={currentText}
           schemaVersion={HISTORY_SCHEMA_VERSION}
@@ -945,7 +977,7 @@ export function EditorWorkspace() {
       id: 'share',
       label: 'Share',
       icon: 'share',
-      content: <SharePanel editor={editor} docId={HISTORY_DOC_ID} />,
+      content: <SharePanel editor={editor} docId={historyDocumentId} />,
     },
     {
       id: 'activity',
@@ -954,11 +986,67 @@ export function EditorWorkspace() {
       content: (
         <>
           <MentionPanel editor={editor} currentText={currentText} />
-          <OfflinePanel editor={editor} />
+          <OfflinePanel editor={editor} documentId={activeDocumentId} />
         </>
       ),
     },
   ];
+
+  const handleCreateDocument = useCallback(() => {
+    const nextDocumentId = createNewDocumentId();
+    if (typeof window !== 'undefined') {
+      upsertDocument(window.localStorage, { id: nextDocumentId, title: DEFAULT_DOC_TITLE });
+      refreshDocuments();
+    }
+    router.push(toRoute(documentPath(nextDocumentId)));
+  }, [refreshDocuments, router]);
+
+  const handleOpenDocument = useCallback(
+    (event: ChangeEvent<HTMLSelectElement>) => {
+      router.push(toRoute(event.target.value));
+    },
+    [router],
+  );
+
+  const documentOptions = documents.some((record) => record.id === activeDocumentId)
+    ? documents
+    : [
+        {
+          id: activeDocumentId,
+          title: docTitle.trim() || DEFAULT_DOC_TITLE,
+          createdAt: new Date(0).toISOString(),
+          updatedAt: new Date(0).toISOString(),
+        },
+        ...documents,
+      ];
+
+  const documentControls = (
+    <div className="lash-document-controls">
+      <select
+        aria-label="Open document"
+        className="lash-document-select"
+        data-testid="document-open-select"
+        onChange={handleOpenDocument}
+        value={documentPath(activeDocumentId)}
+      >
+        {documentOptions.map((record) => (
+          <option key={record.id} value={documentPath(record.id)}>
+            {record.title}
+          </option>
+        ))}
+      </select>
+      <button
+        type="button"
+        className="lash-icon-btn lash-new-doc-button"
+        aria-label="New document"
+        data-testid="new-document-button"
+        data-tooltip="New document"
+        onClick={handleCreateDocument}
+      >
+        <Icon name="plus" />
+      </button>
+    </div>
+  );
 
   const handleShareClick = useCallback((event: ReactMouseEvent<HTMLButtonElement>) => {
     setActiveTab('share');
@@ -986,15 +1074,28 @@ export function EditorWorkspace() {
     mobileRailTriggerRef.current?.focus();
   }, []);
 
-  const handleDocTitleChange = useCallback((event: ChangeEvent<HTMLInputElement>) => {
-    const nextTitle = event.target.value;
-    setDocTitle(nextTitle);
-    persistDocTitle(nextTitle);
-  }, []);
+  const handleDocTitleChange = useCallback(
+    (event: ChangeEvent<HTMLInputElement>) => {
+      const nextTitle = event.target.value;
+      setDocTitle(nextTitle);
+      if (typeof window !== 'undefined') {
+        saveDocumentTitle(window.localStorage, activeDocumentId, nextTitle);
+        refreshDocuments();
+      }
+    },
+    [activeDocumentId, refreshDocuments],
+  );
 
   const handleDocTitleBlur = useCallback(() => {
-    setDocTitle((value) => persistDocTitle(value));
-  }, []);
+    setDocTitle((value) => {
+      const normalizedTitle =
+        typeof window === 'undefined'
+          ? value.trim() || DEFAULT_DOC_TITLE
+          : saveDocumentTitle(window.localStorage, activeDocumentId, value);
+      refreshDocuments();
+      return normalizedTitle;
+    });
+  }, [activeDocumentId, refreshDocuments]);
 
   const topBar = (
     <TopBar
@@ -1007,6 +1108,7 @@ export function EditorWorkspace() {
       onToggleSuggestMode={() => setIsSuggestMode((value) => !value)}
       onShareClick={handleShareClick}
       onOpenMobileSidebar={handleOpenMobileSidebar}
+      extras={documentControls}
     />
   );
 
@@ -1095,6 +1197,8 @@ export function EditorWorkspace() {
                 <span>
                   {outlineItems.length} section{outlineItems.length === 1 ? '' : 's'}
                 </span>
+                <span className="lash-doc-meta-dot" aria-hidden="true" />
+                <span data-testid="lash-doc-route">{documentPath(activeDocumentId)}</span>
                 {isSuggestMode ? (
                   <>
                     <span className="lash-doc-meta-dot" aria-hidden="true" />

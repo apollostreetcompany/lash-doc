@@ -29,6 +29,7 @@
 - Branch protection is configured on `main` with strict required `build-and-test`, admin enforcement, and no force-push/delete.
 - Latest protected `main` CI is green on deploy commit `3f19bc361c3071d9e3f7425bfd064193cd8b83a9` via run `26026635724`; check GitHub Actions for future changes.
 - Container/runtime binding assumptions are not applicable to the Cloudflare Pages test site because it serves static assets at the edge. The existing local `next start` path remains unchanged.
+- Bead 27 introduces arbitrary `/doc/[id]` routes for local/Next runtime use. The current static Cloudflare Pages export does not provide a durable arbitrary-route backend; Bead 28 must choose the Cloudflare Worker/Durable Object or fallback runtime path before these document routes are treated as production deployable. Verified result: `pnpm run build:static` currently fails because `/doc/[id]` is missing `generateStaticParams()` under `output: export`.
 
 ## Cloudflare Pages Preflight
 

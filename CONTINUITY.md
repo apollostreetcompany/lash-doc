@@ -55,6 +55,7 @@ Success criteria:
 30. Bead 24 makes mentions real editor content by adding an inline atom `mention` node to the editor schema and replacing typed `@query` text with user/date mention chips on suggestion selection; the side-panel chip list remains as secondary activity evidence.
 31. Bead 25 fixes the sidebar regression by keeping an explicit outline entry available while the desktop sidebar is collapsed and by exposing the mobile drawer close control for the tested close/focus-restore path; it does not change sidebar routing, permissions, or Riddle integration.
 32. Bead 26 is an intentional red entry gate for true online typing: two-client browser tests now prove remote visibility, same-doc convergence, and reload durability are absent, while docs/comments now distinguish local collaboration-shaped scaffolds from implemented realtime backend behavior.
+33. Bead 27 introduces real local document identity with `/doc/[id]` routing, a local document registry, per-doc title metadata, per-doc outline/history/panel IDs, and document create/open controls. It deliberately does not add realtime sync or durable document-body persistence; static export is now known to fail for arbitrary doc routes until Bead 28 chooses a runtime.
 
 ## State
 
@@ -104,14 +105,14 @@ Success criteria:
 - [x] Bead 24 - Fix @mention regression with fail-first real-editor coverage, inline user/date mention nodes, and existing RBAC/privacy mention e2e preserved.
 - [x] Bead 25 - Fix sidebar regression with fail-first desktop/mobile coverage, collapsed outline access, heading jump focus, and mobile close/focus restore.
 - [x] Bead 26 - Online Typing Entry Gate with intentional red two-client browser tests and realtime-overclaim docs cleanup.
+- [x] Bead 27 - Real Document Identity with `/doc/[id]` routing, local document registry, title isolation, create/open controls, and per-doc outline state.
 
 ### Now
 
-- Bead 27 - Real Document Identity.
+- Bead 28 - Realtime Runtime Decision + Skeleton.
 
 ### Next
 
-- Bead 28 - Realtime Runtime Decision + Skeleton.
 - Bead 29 - CRDT Editor Binding.
 - Bead 30 - Actor Identity + Access Boundary.
 - Bead 31 - Durable Persistence, Snapshots, Restore.
@@ -167,8 +168,12 @@ Success criteria:
 - `apps/web/e2e/mentions/mention-real-editor.spec.ts`
 - `apps/web/e2e/sidebar/sidebar-regression.spec.ts`
 - `apps/web/e2e/online-typing/online-typing-entry-gate.spec.ts`
+- `apps/web/e2e/document-identity/document-identity.spec.ts`
+- `apps/web/app/doc/[id]/page.tsx`
+- `apps/web/lib/documentRegistry.ts`
 - `apps/web/components/editor/EditorWorkspace.tsx`
 - `apps/web/components/editor/panels/MentionPanel.tsx`
+- `apps/web/components/editor/panels/OfflinePanel.tsx`
 - `apps/web/components/shell/Sidebar.tsx`
 - `packages/collab-service/src/index.ts`
 - `packages/editor-core/src/schema/mentions.ts`

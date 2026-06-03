@@ -1,5 +1,7 @@
 import dynamic from 'next/dynamic';
 
+import { DEFAULT_DOCUMENT_ID } from '../lib/documentRegistry';
+
 const EditorWorkspace = dynamic(() => import('../components/editor/EditorWorkspace'), {
   ssr: false,
 });
@@ -11,7 +13,7 @@ export default function HomePage() {
         Lash Collaborative Editor
       </h1>
       <section aria-label="Document editor">
-        <EditorWorkspace />
+        <EditorWorkspace documentId={DEFAULT_DOCUMENT_ID} />
       </section>
     </main>
   );

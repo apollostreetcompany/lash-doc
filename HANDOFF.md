@@ -19,6 +19,8 @@
 - Stacked regression PRs are open: Bead 23 PR #15, Bead 24 PR #16, and Bead 25 PR #17.
 - Bead 26 is complete on branch `codex/test/bead-26-online-typing-entry-gate`: red two-client Playwright tests now define missing online typing behavior for remote visibility, convergence, and reload durability; docs/comments no longer imply the realtime backend exists.
 - Bead 26 PR #18 is open and expected-red until Beads 27-31 make the online typing gate green.
+- Bead 27 is complete on branch `codex/feat/bead-27-real-document-identity`: `/doc/[id]` routes, local document registry, title metadata isolation, document create/open controls, per-doc outline/history/panel IDs, and routed OfflinePanel IDs are implemented and covered by fail-first Playwright tests.
+- Bead 27 normal Next runtime build passes, but static export fails for `/doc/[id]`; Bead 28 must choose Cloudflare Worker/Durable Object or a fallback runtime before arbitrary document routes are production deployable.
 - Current active scoped goal is Beads 23-36: regressions first, then true responsive online typing through document identity, realtime runtime, CRDT binding, actor/access, persistence, performance, presence, invite UX, durable comments, and collaboration delight.
 - User-reported regressions are tracked in `REGRESSIONS.md`; R-001 title, R-002 @mentions, and R-003 sidebar are fixed.
 - Branch protection on `main` is configured with strict required `build-and-test`, admin enforcement, and no force-push/delete.
@@ -54,6 +56,7 @@
 - Bead 24 - Fix @mention regression.
 - Bead 25 - Fix sidebar regression.
 - Bead 26 - Online Typing Entry Gate.
+- Bead 27 - Real Document Identity.
 
 ## Release Evidence
 
@@ -82,6 +85,8 @@
 - Bead 25 final validation - pass: test-hook web build, sidebar e2e (2 passed), adjacent mobile/outline/focus e2e (7 passed), lint, typecheck, unit tests (73 passed), normal web build, and changed TypeScript/Playwright Prettier check.
 - Bead 26 red online typing gate - expected failure as evidence: `apps/web/e2e/online-typing/online-typing-entry-gate.spec.ts` failed 3 tests because client B did not receive client A text, two clients did not converge to both edits, and reload lost document text.
 - Bead 26 non-red validation - pass: test-hook web build, lint, typecheck, unit tests (73 passed), normal web build, changed TypeScript/Playwright Prettier check, and realtime-overclaim grep audit.
+- Bead 27 fail-first document identity - pass as evidence: `apps/web/e2e/document-identity/document-identity.spec.ts` first failed 4 tests because `/doc/[id]`, `new-document-button`, `document-open-select`, and routed editor hooks were missing.
+- Bead 27 final validation - pass: test-hook web build, document identity e2e (4 passed), adjacent title/outline/offline/smoke e2e (9 passed), lint, typecheck, unit tests (73 passed), normal Next build, and changed TypeScript/Playwright Prettier check. Expected caveat: `pnpm run build:static` fails until Bead 28 provides a runtime/static fallback for arbitrary `/doc/[id]`.
 - Acceptance coverage audit - 86 `agents.md` Test IDs, 98 unit/e2e files, no missing IDs.
 - Skip/todo audit - no `test.todo`, `test.skip`, `describe.skip`, `TODO acceptance`, or `.only(` matches in `apps/web/e2e` or `packages/testing/unit`.
 - Riddle audit - only planning/docs references; no Lash-Riddle runtime integration code.
@@ -95,10 +100,11 @@
 
 ## Regression Backlog
 
-- Beads 27-36 - Implement the scoped online typing track exactly as requested.
+- Beads 28-36 - Implement the scoped online typing track exactly as requested.
 
 ## Open Items
 
 - User-reported regressions: none currently open.
 - Online typing red gate: Bead 26 tests are expected to fail until Beads 27-31 add real document identity, realtime runtime, CRDT binding, access boundaries, and durable persistence.
+- Runtime/deploy: Bead 27 makes arbitrary `/doc/[id]` routes local-runtime only; static Cloudflare Pages export is blocked until Bead 28 chooses the realtime/runtime host.
 - Future custom-domain/production hosting decisions and future Riddle integration are separate workstreams; realtime infra should prefer Cloudflare first, then Render only if needed.
