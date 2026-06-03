@@ -218,6 +218,7 @@ Success criteria:
 - GitHub PR #23: `https://github.com/apollostreetcompany/lash-doc/pull/23` (stacked on PR #22)
 - GitHub PR #24: `https://github.com/apollostreetcompany/lash-doc/pull/24` (stacked on PR #23)
 - GitHub PR #25: `https://github.com/apollostreetcompany/lash-doc/pull/25` (stacked on PR #24)
+- GitHub PR #26: `https://github.com/apollostreetcompany/lash-doc/pull/26` (stacked on PR #25)
 - GitHub PR #12: `https://github.com/apollostreetcompany/lash-doc/pull/12`
 - Post-deploy main CI run: `https://github.com/apollostreetcompany/lash-doc/actions/runs/26026635724`
 - Final Cloudflare deployment preview: `https://cad5a3ac.lash-9xx.pages.dev`

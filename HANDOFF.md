@@ -36,6 +36,7 @@
 - Bead 33 is complete on branch `codex/feat/bead-33-presence-sync-state`: the realtime room now supports same-room awareness broadcasts and sync acknowledgements; the editor shows saved/syncing/reconnecting state, collaborator chips, and remote cursor/selection markers.
 - Bead 33 PR #25 is open and stacked on PR #24: `https://github.com/apollostreetcompany/lash-doc/pull/25`.
 - Bead 34 is complete on branch `codex/feat/bead-34-invite-access-ux`: the share panel now creates hash invite links, records collaborator rows, supports expiry/revoke UI, invited edit/comment openings resolve scope into editor capabilities, and the realtime Worker validates signed invite tokens before minting production session grants.
+- Bead 34 PR #26 is open and stacked on PR #25: `https://github.com/apollostreetcompany/lash-doc/pull/26`.
 - Bead 34 includes an Architect review artifact at `docs/reviews/bead-34-invite-access-architecture-review.md`. The highest-risk finding, default edit grants for arbitrary room sessions, is closed for production-shaped Worker environments; DO-backed global invite issuance, revocation, and audit remain a follow-up.
 - Static Cloudflare Pages export still fails for arbitrary `/doc/[id]`; Bead 28 solves realtime room hosting, not the final web app dynamic-route hosting strategy.
 - Current active scoped goal is Beads 23-36: regressions first, then true responsive online typing through document identity, realtime runtime, CRDT binding, actor/access, persistence, performance, presence, invite UX, durable comments, and collaboration delight.
