@@ -16,11 +16,11 @@ test.describe('md-h2-shorthand', () => {
     await expect(editor.locator('h2')).toHaveText('Outline Title');
 
     await page.keyboard.press(`${modKey}+B`);
-    await page.keyboard.type('Bold');
+    await page.keyboard.insertText('Bold');
     await page.keyboard.press(`${modKey}+B`);
-    await page.keyboard.type(' ');
+    await page.keyboard.insertText(' ');
     await page.keyboard.press(`${modKey}+I`);
-    await page.keyboard.type('Italic');
+    await page.keyboard.insertText('Italic');
     await page.keyboard.press(`${modKey}+I`);
 
     const finalDoc = await page.evaluate(() => {

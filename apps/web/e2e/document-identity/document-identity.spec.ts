@@ -71,6 +71,7 @@ test.describe('real document identity', () => {
     await page.goto(docUrl(beta));
     await expect(page.getByTestId('lash-doc-title-input')).toHaveValue('Untitled document');
     await page.getByTestId('lash-doc-title-input').fill('Beta brief');
+    await expect(page.getByTestId('topbar-doc-title')).toHaveText('Beta brief');
 
     await page.goto(docUrl(alpha));
     await expect(page.getByTestId('lash-doc-title-input')).toHaveValue('Alpha brief');
