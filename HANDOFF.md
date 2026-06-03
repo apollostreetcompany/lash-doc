@@ -137,9 +137,15 @@
 - Bead 36 fail-first collaboration delight - pass as evidence: `apps/web/e2e/online-typing/collaboration-delight.spec.ts` first failed because `collaboration-empty-state` and `sync-feedback` did not exist.
 - Bead 36 final validation - pass: changed-file Prettier check, `git diff --check`, root typecheck, `pnpm run lint`, `pnpm run test:unit` (85 passed), normal root build, test-hook web build, Bead 36 e2e (2 passed), full online-typing e2e folder (9 passed), and invite-access e2e (3 passed).
 - Bead 36 PR: `https://github.com/apollostreetcompany/lash-doc/pull/28` stacked on Bead 35 PR #27.
+- Bead 36 post-subreview fix commit `6e6ffe809de9a365800b9617b07719ae0a4f00b7` is on branch `codex/feat/bead-36-collaboration-delight`: room sockets now require `doc.read`, Yjs mutations are rejected without `doc.edit` inside the Durable Object, the browser provider respects read-only session grants, local-only docs show `Solo` instead of Ready/Invite, and duplicate visible sync text is removed.
+- Subreview artifacts for true responsive online typing:
+  - Key features: `/Users/borker/.subreview/runs/lash-doc-518b8af4/2026-06-03T19-54-54-308Z/claude.md`
+  - Delight: `/Users/borker/.subreview/runs/lash-doc-518b8af4/2026-06-03T20-01-31-383Z/claude.md`
+  - Performance: `/Users/borker/.subreview/runs/lash-doc-518b8af4/2026-06-03T20-07-25-075Z/claude.md`
 - Acceptance coverage audit - 86 `agents.md` Test IDs, 117 unit/e2e files, no missing IDs.
 - Skip/todo audit - no `test.todo`, `test.skip`, `describe.skip`, `TODO acceptance`, or `.only(` matches in `apps/web/e2e` or `packages/testing/unit`.
 - Riddle audit - only planning/docs references; no Lash-Riddle runtime integration code.
+- Post-subreview Bead 36 fix validation - pass: fail-first local-only collaboration test failed because `collaboration-empty-state` rendered while realtime was disabled; fail-first view-invite hydration test failed because owner sync stayed `syncing` without propagated room capabilities; final validation passed `NEXT_PUBLIC_LASH_TEST_HOOKS=true pnpm --filter @lash/web build`, focused Bead 36 e2e (4 passed), realtime access unit file (7 passed), root typecheck, Worker typecheck, lint, full unit suite (86 passed), Worker dry-run, `make verify-realtime-runtime`, full online-typing e2e folder (11 passed), invite-access e2e (3 passed), touched-file Prettier check, `git diff --check`, and normal `pnpm run build`.
 
 ## Operational Notes
 
@@ -157,16 +163,17 @@
 - Presence is room-scoped on the existing realtime socket. Invite access now exists as local hash-link UX with signed realtime exchange; user/profile naming is still local actor-label derivation until real profiles are introduced.
 - Durable comments/suggestions are stored as document-scoped localStorage in local-only mode and as per-record Y.Map entries in the existing realtime Y.Doc when realtime is enabled. The Durable Object persists those metadata updates through the same append-only Yjs update log/snapshot path as document content.
 - Collaboration delight now lives in the presence strip: Ready/share empty state, live sync feedback, and retry reconnect action. Local Playwright specs can isolate realtime Workers with `localStorage['lash:realtime-url']`.
+- View invitees can now open the realtime socket and hydrate document state because socket join requires `doc.read`; only `yjs-update` mutation messages require `doc.edit` and are rejected by the Durable Object with `scope_mismatch` before persistence or broadcast.
 
 ## Regression Backlog
 
-- Review/subreview/fresh-eyes pass over Beads 23-36, then PR stack merge readiness.
+- Fresh-eyes pass over Beads 23-36 after the post-subreview Bead 36 fix, then PR stack merge readiness.
 
 ## Open Items
 
 - User-reported regressions: none currently open.
 - Online typing red gate: Bead 26 online typing tests now pass after Bead 31; Bead 32 adds large-document typing performance coverage and removes the measured normal-editing per-keystroke hot paths. The 50k-word gate still logs non-input rendering long tasks, so deeper document virtualization remains a future performance hardening opportunity.
-- Invite/access UX: Bead 34 provides local/static invite links, collaborator rows, expiry/revoke UI, invited editor capability gating, and signed invite-token realtime session exchange. DO-backed global invite issuance, revocation, audit, real profiles, and server-side fine-grained comment/suggest mutation validation remain follow-up work.
+- Invite/access UX: Bead 34 provides local/static invite links, collaborator rows, expiry/revoke UI, invited editor capability gating, and signed invite-token realtime session exchange. Post-subreview Bead 36 hardening allows view invitees to hydrate realtime rooms while keeping Yjs mutation persistence edit-gated. DO-backed global invite issuance, revocation, audit, real profiles, and server-side fine-grained comment/suggest mutation validation remain follow-up work.
 - Durable comments/suggestions: Bead 35 provides durable/synced thread metadata and suggestion resolution records. A dedicated server comment API, global audit/moderation view, richer suggestion history persistence, and policy-aware server-side distinction between comment/suggest/edit Yjs mutations remain follow-up work.
 - Runtime/deploy: Realtime rooms now have a Cloudflare Durable Object Worker with signed actor session grants, append-only Yjs update persistence, cumulative snapshots, reload hydration, and restore-as-new-head hook. Arbitrary `/doc/[id]` web routes remain local/Next-runtime only; static Cloudflare Pages export is blocked until a web dynamic-route hosting strategy is chosen.
 - Future custom-domain/production hosting decisions and future Riddle integration are separate workstreams; realtime infra should prefer Cloudflare first, then Render only if needed.
