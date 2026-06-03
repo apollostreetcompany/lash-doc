@@ -52,6 +52,7 @@ Success criteria:
 27. Bead 22 is merged and deployed from `main`: PR #12 squash-merged as `3f19bc3`, protected main CI run `26026635724` passed, Cloudflare redeploy produced preview `https://cad5a3ac.lash-9xx.pages.dev`, and production verification passed on `https://lash-9xx.pages.dev/` with 585 characters typed in 985 ms, p95 event work 0.8 ms, max event work 7.4 ms, and zero long tasks.
 28. User-reported public-test regressions are tracked in `REGRESSIONS.md` and should be handled as Beads 23-25: title, @mentions, and sidebar. Each bead must first reproduce the failure with a failing test before implementation.
 29. Bead 23 fixes the title regression with a local document-title metadata path under `lash:title:demo-document`; this is intentionally a bridge until Bead 27 replaces hardcoded document identity with real `/doc/[id]` routing and persisted metadata.
+30. Bead 24 makes mentions real editor content by adding an inline atom `mention` node to the editor schema and replacing typed `@query` text with user/date mention chips on suggestion selection; the side-panel chip list remains as secondary activity evidence.
 
 ## State
 
@@ -98,14 +99,14 @@ Success criteria:
 - [x] Final post-deploy main push CI passed: run `26026635724`, workflow `CI`, `build-and-test`.
 - [x] Final Cloudflare production redeploy from merged `main` passed public smoke/performance verification.
 - [x] Bead 23 - Fix title regression with fail-first Playwright coverage, editable title UI, topbar mirroring, reload persistence, and mobile non-overlap guard.
+- [x] Bead 24 - Fix @mention regression with fail-first real-editor coverage, inline user/date mention nodes, and existing RBAC/privacy mention e2e preserved.
 
 ### Now
 
-- Bead 24 - Fix @mention regression with fail-first real-editor workflow coverage.
+- Bead 25 - Fix sidebar regression with fail-first desktop/mobile workflow coverage.
 
 ### Next
 
-- Bead 25 - Fix sidebar regression.
 - Bead 26 - Online Typing Entry Gate.
 - Bead 27 - Real Document Identity.
 - Bead 28 - Realtime Runtime Decision + Skeleton.
@@ -161,7 +162,10 @@ Success criteria:
 - `make verify-cloudflare URL=https://lash-9xx.pages.dev/`
 - `apps/web/e2e/performance/typing-latency.spec.ts`
 - `apps/web/e2e/title/title-edit.spec.ts`
+- `apps/web/e2e/mentions/mention-real-editor.spec.ts`
 - `apps/web/components/editor/EditorWorkspace.tsx`
+- `apps/web/components/editor/panels/MentionPanel.tsx`
+- `packages/editor-core/src/schema/mentions.ts`
 - GitHub PR #12: `https://github.com/apollostreetcompany/lash-doc/pull/12`
 - Post-deploy main CI run: `https://github.com/apollostreetcompany/lash-doc/actions/runs/26026635724`
 - Final Cloudflare deployment preview: `https://cad5a3ac.lash-9xx.pages.dev`

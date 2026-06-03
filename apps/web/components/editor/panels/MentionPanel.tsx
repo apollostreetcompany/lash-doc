@@ -39,6 +39,8 @@ const hiddenMentions = (
     (mention): mention is Extract<MentionResolveResult, { visible: false }> => !mention.visible,
   );
 
+const activeTrigger = (text: string) => text.match(/@([^@\n]{1,40})$/)?.[0] ?? null;
+
 export function MentionPanel({ editor, currentText }: MentionPanelProps) {
   const [suggestions, setSuggestions] = useState<
     Extract<MentionResolveResult, { visible: true }>[]
@@ -115,7 +117,28 @@ export function MentionPanel({ editor, currentText }: MentionPanelProps) {
 
   const insertMention = (mention: Extract<MentionResolveResult, { visible: true }>) => {
     setChips((items) => [...items, mention]);
-    editor?.chain().focus().insertContent(` ${mention.display} `).run();
+    if (!editor) return;
+
+    const trigger = activeTrigger(currentText);
+    const to = editor.state.selection.from;
+    const from = trigger ? Math.max(1, to - trigger.length) : to;
+    editor
+      .chain()
+      .focus()
+      .deleteRange({ from, to })
+      .insertContent([
+        {
+          type: 'mention',
+          attrs: {
+            kind: mention.kind,
+            refId: mention.refId,
+            display: mention.display,
+            iso: mention.iso ?? null,
+          },
+        },
+        { type: 'text', text: ' ' },
+      ])
+      .run();
   };
 
   return (
