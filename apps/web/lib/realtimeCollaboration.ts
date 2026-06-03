@@ -80,6 +80,8 @@ const defaultSocketBaseUrl = () => {
   if (typeof window === 'undefined') return null;
   const params = new URLSearchParams(window.location.search);
   if (params.get('realtime') === 'off') return null;
+  const localUrlOverride = window.localStorage.getItem('lash:realtime-url')?.trim();
+  if (localUrlOverride) return localUrlOverride;
   const localRealtimeEnabled =
     params.get('realtime') === 'on' ||
     window.localStorage.getItem('lash:realtime-enabled') === 'true';
@@ -284,6 +286,10 @@ export class LashRealtimeYjsProvider {
   }
 
   reconnectForTest() {
+    this.reconnectNow();
+  }
+
+  reconnectNow() {
     if (!this.socketBaseUrl || this.destroyed) return;
     this.clearReconnectTimer();
     void this.authorizeAndConnect();

@@ -1395,7 +1395,33 @@ export function EditorWorkspace({ documentId = DEFAULT_DOCUMENT_ID }: EditorWork
     </div>
   );
 
+  const openSharePanel = useCallback((trigger?: HTMLElement | null) => {
+    setActiveTab('share');
+    setRailOpen(true);
+    // On narrow widths the rail is a slide-in drawer.
+    if (typeof window !== 'undefined' && window.matchMedia('(max-width: 767px)').matches) {
+      if (trigger) {
+        mobileRailTriggerRef.current = trigger;
+      }
+      setMobileRailOpen(true);
+    }
+  }, []);
+
+  const handleShareClick = useCallback(
+    (event: ReactMouseEvent<HTMLButtonElement>) => {
+      openSharePanel(event.currentTarget);
+    },
+    [openSharePanel],
+  );
+
+  const handleRealtimeRetry = useCallback(() => {
+    realtimeCollaboration.provider.reconnectNow();
+  }, [realtimeCollaboration]);
+
   const remotePeers = realtimeSnapshot.peers;
+  const realtimeLabel = realtimeSyncLabels[realtimeSnapshot.syncState];
+  const showRealtimeRetry =
+    realtimeSnapshot.syncState === 'reconnecting' || realtimeSnapshot.syncState === 'offline';
   const realtimePresence = (
     <div
       className="lash-realtime-presence"
@@ -1407,8 +1433,21 @@ export function EditorWorkspace({ documentId = DEFAULT_DOCUMENT_ID }: EditorWork
         data-testid="realtime-sync-state"
         data-state={realtimeSnapshot.syncState}
       >
-        {realtimeSyncLabels[realtimeSnapshot.syncState]}
+        {realtimeLabel}
       </span>
+      <span className="lash-sync-feedback" data-testid="sync-feedback" aria-live="polite">
+        {realtimeLabel}
+      </span>
+      {showRealtimeRetry ? (
+        <button
+          type="button"
+          className="lash-sync-retry-button"
+          data-testid="sync-retry-button"
+          onClick={handleRealtimeRetry}
+        >
+          Retry
+        </button>
+      ) : null}
       {remotePeers.length ? (
         <div className="lash-realtime-peers" aria-label="Collaborators online">
           {remotePeers.map((peer) => (
@@ -1425,9 +1464,20 @@ export function EditorWorkspace({ documentId = DEFAULT_DOCUMENT_ID }: EditorWork
           ))}
         </div>
       ) : (
-        <span className="lash-realtime-empty" data-testid="remote-collaborator-empty">
-          Solo
-        </span>
+        <div className="lash-collaboration-empty" data-testid="collaboration-empty-state">
+          <span className="lash-realtime-empty" data-testid="remote-collaborator-empty">
+            Ready
+          </span>
+          <button
+            type="button"
+            className="lash-collaboration-share-shortcut"
+            data-testid="collaboration-share-shortcut"
+            aria-label="Invite collaborator"
+            onClick={() => openSharePanel()}
+          >
+            Invite
+          </button>
+        </div>
       )}
     </div>
   );
@@ -1450,16 +1500,6 @@ export function EditorWorkspace({ documentId = DEFAULT_DOCUMENT_ID }: EditorWork
       </span>
     );
   });
-
-  const handleShareClick = useCallback((event: ReactMouseEvent<HTMLButtonElement>) => {
-    setActiveTab('share');
-    setRailOpen(true);
-    // On narrow widths the rail is a slide-in drawer.
-    if (typeof window !== 'undefined' && window.matchMedia('(max-width: 767px)').matches) {
-      mobileRailTriggerRef.current = event.currentTarget;
-      setMobileRailOpen(true);
-    }
-  }, []);
 
   const handleOpenMobileSidebar = useCallback((event: ReactMouseEvent<HTMLButtonElement>) => {
     mobileSidebarTriggerRef.current = event.currentTarget;
