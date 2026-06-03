@@ -11,7 +11,6 @@ import type { ReactNode } from 'react';
 import { Icon, type IconName } from './Icon';
 import { OutlinePanel } from '../editor/panels/OutlinePanel';
 
-
 export interface SidebarProps {
   collapsed: boolean;
   onToggleCollapsed: () => void;
@@ -81,6 +80,20 @@ export function Sidebar({
           <NavItem key={item.label} {...item} />
         ))}
 
+        {showOutline && collapsed ? (
+          <button
+            type="button"
+            className="lash-sidebar-item"
+            aria-label="Show outline"
+            title="Show outline"
+            onClick={onToggleCollapsed}
+            data-testid="sidebar-outline-access"
+          >
+            <Icon name="list-bullet" />
+            <span className="lash-sidebar-item-label">Outline</span>
+          </button>
+        ) : null}
+
         {showOutline ? (
           <SidebarOutline
             items={outlineItems}
@@ -113,6 +126,7 @@ export function Sidebar({
             className="lash-sidebar-toggle"
             aria-label="Close menu"
             onClick={onCloseMobile}
+            data-testid="sidebar-mobile-close"
             style={{ marginLeft: 'auto' }}
           >
             <Icon name="close" />

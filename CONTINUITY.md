@@ -53,6 +53,7 @@ Success criteria:
 28. User-reported public-test regressions are tracked in `REGRESSIONS.md` and should be handled as Beads 23-25: title, @mentions, and sidebar. Each bead must first reproduce the failure with a failing test before implementation.
 29. Bead 23 fixes the title regression with a local document-title metadata path under `lash:title:demo-document`; this is intentionally a bridge until Bead 27 replaces hardcoded document identity with real `/doc/[id]` routing and persisted metadata.
 30. Bead 24 makes mentions real editor content by adding an inline atom `mention` node to the editor schema and replacing typed `@query` text with user/date mention chips on suggestion selection; the side-panel chip list remains as secondary activity evidence.
+31. Bead 25 fixes the sidebar regression by keeping an explicit outline entry available while the desktop sidebar is collapsed and by exposing the mobile drawer close control for the tested close/focus-restore path; it does not change sidebar routing, permissions, or Riddle integration.
 
 ## State
 
@@ -100,14 +101,14 @@ Success criteria:
 - [x] Final Cloudflare production redeploy from merged `main` passed public smoke/performance verification.
 - [x] Bead 23 - Fix title regression with fail-first Playwright coverage, editable title UI, topbar mirroring, reload persistence, and mobile non-overlap guard.
 - [x] Bead 24 - Fix @mention regression with fail-first real-editor coverage, inline user/date mention nodes, and existing RBAC/privacy mention e2e preserved.
+- [x] Bead 25 - Fix sidebar regression with fail-first desktop/mobile coverage, collapsed outline access, heading jump focus, and mobile close/focus restore.
 
 ### Now
 
-- Bead 25 - Fix sidebar regression with fail-first desktop/mobile workflow coverage.
+- Bead 26 - Online Typing Entry Gate.
 
 ### Next
 
-- Bead 26 - Online Typing Entry Gate.
 - Bead 27 - Real Document Identity.
 - Bead 28 - Realtime Runtime Decision + Skeleton.
 - Bead 29 - CRDT Editor Binding.
@@ -163,8 +164,10 @@ Success criteria:
 - `apps/web/e2e/performance/typing-latency.spec.ts`
 - `apps/web/e2e/title/title-edit.spec.ts`
 - `apps/web/e2e/mentions/mention-real-editor.spec.ts`
+- `apps/web/e2e/sidebar/sidebar-regression.spec.ts`
 - `apps/web/components/editor/EditorWorkspace.tsx`
 - `apps/web/components/editor/panels/MentionPanel.tsx`
+- `apps/web/components/shell/Sidebar.tsx`
 - `packages/editor-core/src/schema/mentions.ts`
 - GitHub PR #12: `https://github.com/apollostreetcompany/lash-doc/pull/12`
 - Post-deploy main CI run: `https://github.com/apollostreetcompany/lash-doc/actions/runs/26026635724`

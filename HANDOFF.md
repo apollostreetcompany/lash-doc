@@ -15,8 +15,9 @@
 - Bead 22 is merged and deployed: PR #12 squash-merged into `main` as `3f19bc361c3071d9e3f7425bfd064193cd8b83a9`, protected main CI run `26026635724` passed, Cloudflare Pages project `lash` was redeployed from merged main, and production public verification passed on `https://lash-9xx.pages.dev/`.
 - Bead 23 is complete on branch `codex/fix/bead-23-title-regression`: title editing, topbar mirroring, reload persistence, and mobile metadata non-overlap are covered by fail-first Playwright regression tests.
 - Bead 24 is complete on branch `codex/fix/bead-24-mentions-regression`: user/date mention suggestions now insert inline atom mention nodes into the editor instead of plain text, with fail-first real-editor Playwright coverage.
+- Bead 25 is complete on branch `codex/fix/bead-25-sidebar-regression`: collapsed desktop sidebars retain an outline access entry, outline jumps focus the intended heading, and the mobile drawer has a visible close path with focus restore, all covered by fail-first Playwright regression tests.
 - Current active scoped goal is Beads 23-36: regressions first, then true responsive online typing through document identity, realtime runtime, CRDT binding, actor/access, persistence, performance, presence, invite UX, durable comments, and collaboration delight.
-- User-reported regressions are tracked in `REGRESSIONS.md`; R-001 title and R-002 @mentions are fixed, R-003 sidebar remains open.
+- User-reported regressions are tracked in `REGRESSIONS.md`; R-001 title, R-002 @mentions, and R-003 sidebar are fixed.
 - Branch protection on `main` is configured with strict required `build-and-test`, admin enforcement, and no force-push/delete.
 - Local product server was not left running during PR integration; use `make serve` to start `http://127.0.0.1:3000`.
 - Product decision: Riddle is optional/deferred. Do not implement Lash-Riddle integration until Riddle stabilizes as its own product and default Zed integration.
@@ -48,6 +49,7 @@
 - Bead 22 - Cloudflare Pages public test deploy and essay typing performance gate.
 - Bead 23 - Fix title regression.
 - Bead 24 - Fix @mention regression.
+- Bead 25 - Fix sidebar regression.
 
 ## Release Evidence
 
@@ -72,6 +74,8 @@
 - Bead 23 final validation - pass: web build, title e2e (2 passed), home smoke e2e (1 passed), lint, typecheck, unit tests (73 passed), and changed TypeScript/Playwright Prettier check.
 - Bead 24 fail-first @mention regression - pass as evidence: `apps/web/e2e/mentions/mention-real-editor.spec.ts` first failed because `lash-inline-mention` was missing after selecting suggestions.
 - Bead 24 final validation - pass: test-hook web build, mention e2e folder (7 passed), normal web build, lint, typecheck, unit tests (73 passed), and changed TypeScript/Playwright Prettier check.
+- Bead 25 fail-first sidebar regression - pass as evidence: `apps/web/e2e/sidebar/sidebar-regression.spec.ts` first failed because `sidebar-outline-access` and `sidebar-mobile-close` were missing.
+- Bead 25 final validation - pass: test-hook web build, sidebar e2e (2 passed), adjacent mobile/outline/focus e2e (7 passed), lint, typecheck, unit tests (73 passed), normal web build, and changed TypeScript/Playwright Prettier check.
 - Acceptance coverage audit - 86 `agents.md` Test IDs, 98 unit/e2e files, no missing IDs.
 - Skip/todo audit - no `test.todo`, `test.skip`, `describe.skip`, `TODO acceptance`, or `.only(` matches in `apps/web/e2e` or `packages/testing/unit`.
 - Riddle audit - only planning/docs references; no Lash-Riddle runtime integration code.
@@ -85,11 +89,10 @@
 
 ## Regression Backlog
 
-- Bead 25 - Fix sidebar regression. First reproduce the broken sidebar workflow, then fix desktop collapse/outline behavior and mobile drawer/focus/scroll behavior.
 - Bead 26 - Online Typing Entry Gate.
 - Beads 27-36 - Implement the scoped online typing track exactly as requested.
 
 ## Open Items
 
-- User-reported regressions: sidebar.
+- User-reported regressions: none currently open.
 - Future custom-domain/production hosting decisions and future Riddle integration are separate workstreams; realtime infra should prefer Cloudflare first, then Render only if needed.

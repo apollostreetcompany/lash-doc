@@ -8,7 +8,7 @@ These are user-reported regressions observed after the public Cloudflare test de
 | ----- | -------------------------- | ------ | ---------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | R-001 | Title not working          | Fixed  | Editor Core Agent            | Bead 23 added fail-first Playwright coverage for editable title, topbar mirroring, reload persistence, and mobile metadata non-overlap; implemented local title metadata persistence under `lash:title:demo-document`. |
 | R-002 | @mentioning not working    | Fixed  | Mentions & Chips Agent       | Bead 24 added fail-first real-editor coverage and implemented inline atom mention nodes for user/date suggestions while keeping RBAC-hidden suggestions private. |
-| R-003 | Sidebar not really working | Open   | Editor Core Agent + QA Agent | Sidebar behavior is broad; first pass should verify desktop collapse, mobile drawer, outline navigation, focus restore, and active state behavior.                    |
+| R-003 | Sidebar not really working | Fixed  | Editor Core Agent + QA Agent | Bead 25 added fail-first desktop/mobile Playwright coverage and restored collapsed outline access plus the visible mobile close/focus-restore path.                    |
 
 ## Next Beads
 
@@ -49,17 +49,18 @@ These are user-reported regressions observed after the public Cloudflare test de
 - Risk class: `medium`
 - Primary agent: Editor Core Agent
 - Fallback agent: QA & Property-Based Testing Agent
+- Status: Complete.
 - Scope: left sidebar visibility, collapse/expand, outline list, outline click behavior, mobile drawer open/close, scroll lock, focus restore, and active/hover/touch states.
 - Acceptance tests:
-  - Reproduce the current sidebar failure with one or more failing Playwright tests before fixing.
-  - Desktop sidebar collapse/expand works without losing outline access.
-  - Outline item click focuses the intended document section.
-  - Mobile sidebar drawer opens, locks background scroll, closes, and restores focus.
-  - Sidebar text/icons remain readable and do not overlap at mobile and desktop widths.
-  - Existing mobile, outline, focus-mode, and cross-browser smoke tests remain green.
+  - [x] Reproduce the current sidebar failure with one or more failing Playwright tests before fixing.
+  - [x] Desktop sidebar collapse/expand works without losing outline access.
+  - [x] Outline item click focuses the intended document section.
+  - [x] Mobile sidebar drawer opens, locks background scroll, closes, and restores focus.
+  - [x] Sidebar text/icons remain readable and do not overlap at mobile and desktop widths.
+  - [x] Existing mobile, outline, and focus-mode tests remain green.
 
 ## Shutdown State
 
 - Local Lash web server: stopped/not running.
 - Public test site remains available: `https://lash-9xx.pages.dev/`.
-- Next implementation should start at Bead 23 unless the user reprioritizes.
+- Next implementation should start at Bead 26 unless the user reprioritizes.
