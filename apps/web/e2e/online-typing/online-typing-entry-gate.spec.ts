@@ -1,4 +1,4 @@
-import { expect, test, type Browser, type Page } from '@playwright/test';
+import { expect, test, type Browser, type BrowserContext, type Page } from '@playwright/test';
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
 import { once } from 'node:events';
 
@@ -104,9 +104,15 @@ const openDocument = async (page: Page, documentId: string) => {
   await seedEmptyDoc(page);
 };
 
+const enableLocalRealtime = (context: BrowserContext) =>
+  context.addInitScript(() => {
+    window.localStorage.setItem('lash:realtime-enabled', 'true');
+  });
+
 const openTwoClientsOnSameDoc = async (browser: Browser) => {
   const contextA = await browser.newContext();
   const contextB = await browser.newContext();
+  await Promise.all([enableLocalRealtime(contextA), enableLocalRealtime(contextB)]);
   const pageA = await contextA.newPage();
   const pageB = await contextB.newPage();
 
@@ -271,6 +277,7 @@ test.describe('online typing entry gate', () => {
 
   test('typed document content survives reload of the same document', async ({ browser }) => {
     const context = await browser.newContext();
+    await enableLocalRealtime(context);
     const page = await context.newPage();
 
     try {
@@ -295,6 +302,7 @@ test.describe('online typing entry gate', () => {
   test('durable room compacts snapshots without deleting update history', async ({ browser }) => {
     const roomId = `bead-31-snapshot-${Date.now()}`;
     const context = await browser.newContext();
+    await enableLocalRealtime(context);
     const page = await context.newPage();
 
     try {

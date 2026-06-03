@@ -56,8 +56,9 @@
   --color-info-bg: #e3f3ff;
 
   /* Type scale */
-  --font-sans: var(--font-inter), 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI',
-    'Helvetica Neue', sans-serif;
+  --font-sans:
+    var(--font-inter), 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue',
+    sans-serif;
   --font-serif: 'Source Serif Pro', 'Charter', Georgia, serif;
   --font-mono: var(--font-jetbrains-mono), 'JetBrains Mono', 'SF Mono', Menlo, Consolas, monospace;
 
@@ -1102,6 +1103,18 @@ main[data-testid='lash-home'] > section {
 
 .lash-editor-content > * + * {
   margin-top: 0;
+}
+
+.lash-editor-content > p,
+.lash-editor-content > h1,
+.lash-editor-content > h2,
+.lash-editor-content > h3,
+.lash-editor-content > ul,
+.lash-editor-content > ol,
+.lash-editor-content > blockquote,
+.lash-editor-content > pre {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 2.2rem;
 }
 
 .lash-editor-content p {
@@ -3050,11 +3063,21 @@ li[data-type='taskItem'] > div p {
   animation: lash-fade-up 280ms var(--ease-out-quart) both;
 }
 
-.lash-app[data-entrance='true'] .lash-topbar-actions > *:nth-child(1) { animation-delay: 220ms; }
-.lash-app[data-entrance='true'] .lash-topbar-actions > *:nth-child(2) { animation-delay: 250ms; }
-.lash-app[data-entrance='true'] .lash-topbar-actions > *:nth-child(3) { animation-delay: 280ms; }
-.lash-app[data-entrance='true'] .lash-topbar-actions > *:nth-child(4) { animation-delay: 310ms; }
-.lash-app[data-entrance='true'] .lash-topbar-actions > *:nth-child(5) { animation-delay: 340ms; }
+.lash-app[data-entrance='true'] .lash-topbar-actions > *:nth-child(1) {
+  animation-delay: 220ms;
+}
+.lash-app[data-entrance='true'] .lash-topbar-actions > *:nth-child(2) {
+  animation-delay: 250ms;
+}
+.lash-app[data-entrance='true'] .lash-topbar-actions > *:nth-child(3) {
+  animation-delay: 280ms;
+}
+.lash-app[data-entrance='true'] .lash-topbar-actions > *:nth-child(4) {
+  animation-delay: 310ms;
+}
+.lash-app[data-entrance='true'] .lash-topbar-actions > *:nth-child(5) {
+  animation-delay: 340ms;
+}
 
 /* -- Sidebar nav stagger ------------------------------------------------ */
 
@@ -3062,12 +3085,24 @@ li[data-type='taskItem'] > div p {
   animation: lash-fade-up 260ms var(--ease-out-quart) both;
 }
 
-.lash-app[data-entrance='true'] .lash-sidebar-nav > .lash-sidebar-item:nth-child(1) { animation-delay: 180ms; }
-.lash-app[data-entrance='true'] .lash-sidebar-nav > .lash-sidebar-item:nth-child(2) { animation-delay: 210ms; }
-.lash-app[data-entrance='true'] .lash-sidebar-nav > .lash-sidebar-item:nth-child(3) { animation-delay: 240ms; }
-.lash-app[data-entrance='true'] .lash-sidebar-nav > .lash-sidebar-item:nth-child(4) { animation-delay: 270ms; }
-.lash-app[data-entrance='true'] .lash-sidebar-nav > .lash-sidebar-item:nth-child(5) { animation-delay: 300ms; }
-.lash-app[data-entrance='true'] .lash-sidebar-nav > .lash-sidebar-item:nth-child(6) { animation-delay: 330ms; }
+.lash-app[data-entrance='true'] .lash-sidebar-nav > .lash-sidebar-item:nth-child(1) {
+  animation-delay: 180ms;
+}
+.lash-app[data-entrance='true'] .lash-sidebar-nav > .lash-sidebar-item:nth-child(2) {
+  animation-delay: 210ms;
+}
+.lash-app[data-entrance='true'] .lash-sidebar-nav > .lash-sidebar-item:nth-child(3) {
+  animation-delay: 240ms;
+}
+.lash-app[data-entrance='true'] .lash-sidebar-nav > .lash-sidebar-item:nth-child(4) {
+  animation-delay: 270ms;
+}
+.lash-app[data-entrance='true'] .lash-sidebar-nav > .lash-sidebar-item:nth-child(5) {
+  animation-delay: 300ms;
+}
+.lash-app[data-entrance='true'] .lash-sidebar-nav > .lash-sidebar-item:nth-child(6) {
+  animation-delay: 330ms;
+}
 
 /* -- Rail tab + section entrance ---------------------------------------- */
 
@@ -3075,21 +3110,41 @@ li[data-type='taskItem'] > div p {
   animation: lash-fade-up 260ms var(--ease-out-quart) both;
 }
 
-.lash-app[data-entrance='true'] .lash-rail-tabs .lash-rail-tab:nth-child(1) { animation-delay: 260ms; }
-.lash-app[data-entrance='true'] .lash-rail-tabs .lash-rail-tab:nth-child(2) { animation-delay: 285ms; }
-.lash-app[data-entrance='true'] .lash-rail-tabs .lash-rail-tab:nth-child(3) { animation-delay: 310ms; }
-.lash-app[data-entrance='true'] .lash-rail-tabs .lash-rail-tab:nth-child(4) { animation-delay: 335ms; }
-.lash-app[data-entrance='true'] .lash-rail-tabs .lash-rail-tab:nth-child(5) { animation-delay: 360ms; }
+.lash-app[data-entrance='true'] .lash-rail-tabs .lash-rail-tab:nth-child(1) {
+  animation-delay: 260ms;
+}
+.lash-app[data-entrance='true'] .lash-rail-tabs .lash-rail-tab:nth-child(2) {
+  animation-delay: 285ms;
+}
+.lash-app[data-entrance='true'] .lash-rail-tabs .lash-rail-tab:nth-child(3) {
+  animation-delay: 310ms;
+}
+.lash-app[data-entrance='true'] .lash-rail-tabs .lash-rail-tab:nth-child(4) {
+  animation-delay: 335ms;
+}
+.lash-app[data-entrance='true'] .lash-rail-tabs .lash-rail-tab:nth-child(5) {
+  animation-delay: 360ms;
+}
 
 .lash-app[data-entrance='true'] .lash-rail-section {
   animation: lash-fade-up 320ms var(--ease-out-quart) both;
 }
 
-.lash-app[data-entrance='true'] .lash-rail-section:nth-of-type(1) { animation-delay: 320ms; }
-.lash-app[data-entrance='true'] .lash-rail-section:nth-of-type(2) { animation-delay: 360ms; }
-.lash-app[data-entrance='true'] .lash-rail-section:nth-of-type(3) { animation-delay: 400ms; }
-.lash-app[data-entrance='true'] .lash-rail-section:nth-of-type(4) { animation-delay: 440ms; }
-.lash-app[data-entrance='true'] .lash-rail-section:nth-of-type(5) { animation-delay: 480ms; }
+.lash-app[data-entrance='true'] .lash-rail-section:nth-of-type(1) {
+  animation-delay: 320ms;
+}
+.lash-app[data-entrance='true'] .lash-rail-section:nth-of-type(2) {
+  animation-delay: 360ms;
+}
+.lash-app[data-entrance='true'] .lash-rail-section:nth-of-type(3) {
+  animation-delay: 400ms;
+}
+.lash-app[data-entrance='true'] .lash-rail-section:nth-of-type(4) {
+  animation-delay: 440ms;
+}
+.lash-app[data-entrance='true'] .lash-rail-section:nth-of-type(5) {
+  animation-delay: 480ms;
+}
 
 /* The active section's coral ring should glide in, not pop. */
 .lash-rail-section {
@@ -3315,10 +3370,18 @@ li[data-type='taskItem'] > div p {
   animation: lash-pop-in 320ms var(--ease-out-quart) both;
 }
 
-.lash-app[data-entrance='true'] .lash-avatar-stack .lash-avatar:nth-child(1) { animation-delay: 240ms; }
-.lash-app[data-entrance='true'] .lash-avatar-stack .lash-avatar:nth-child(2) { animation-delay: 280ms; }
-.lash-app[data-entrance='true'] .lash-avatar-stack .lash-avatar:nth-child(3) { animation-delay: 320ms; }
-.lash-app[data-entrance='true'] .lash-avatar-stack .lash-avatar:nth-child(4) { animation-delay: 360ms; }
+.lash-app[data-entrance='true'] .lash-avatar-stack .lash-avatar:nth-child(1) {
+  animation-delay: 240ms;
+}
+.lash-app[data-entrance='true'] .lash-avatar-stack .lash-avatar:nth-child(2) {
+  animation-delay: 280ms;
+}
+.lash-app[data-entrance='true'] .lash-avatar-stack .lash-avatar:nth-child(3) {
+  animation-delay: 320ms;
+}
+.lash-app[data-entrance='true'] .lash-avatar-stack .lash-avatar:nth-child(4) {
+  animation-delay: 360ms;
+}
 
 .lash-avatar {
   transition: transform var(--dur-base) var(--ease-out-quart);

@@ -44,7 +44,15 @@ const defaultSocketBaseUrl = () => {
   const configured = process.env.NEXT_PUBLIC_LASH_REALTIME_URL?.trim();
   if (configured) return configured;
   if (typeof window === 'undefined') return null;
-  if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
+  const params = new URLSearchParams(window.location.search);
+  if (params.get('realtime') === 'off') return null;
+  const localRealtimeEnabled =
+    params.get('realtime') === 'on' ||
+    window.localStorage.getItem('lash:realtime-enabled') === 'true';
+  if (
+    localRealtimeEnabled &&
+    (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')
+  ) {
     return 'ws://127.0.0.1:8787';
   }
   return null;
@@ -208,11 +216,12 @@ export class LashRealtimeYjsProvider {
 
 export const createLashRealtimeCollaboration = (roomId: string) => {
   const doc = new Y.Doc();
+  const socketBaseUrl = defaultSocketBaseUrl();
   const provider = new LashRealtimeYjsProvider({
     actorId: localActorId(),
     doc,
     roomId,
-    socketBaseUrl: defaultSocketBaseUrl(),
+    socketBaseUrl,
   });
-  return { doc, provider };
+  return { doc, enabled: Boolean(socketBaseUrl), provider };
 };

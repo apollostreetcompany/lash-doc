@@ -19,6 +19,7 @@
 - Check port `3000` before introducing or changing a local web server binding. Set `PORT=3001 make serve` if `3000` is occupied.
 - Check port `8787` before starting the realtime Worker. Use `LASH_REALTIME_PORT=8788 make verify-realtime-runtime` or `make realtime-dev` if `8787` is occupied.
 - Stop the local server before running `pnpm run build` or `pnpm run test:e2e`; `next build` rewrites `apps/web/.next` and can conflict with a running `next start`.
+- Local editor pages do not auto-connect to the default realtime Worker merely because they are on localhost. Enable local realtime with `NEXT_PUBLIC_LASH_REALTIME_URL`, `?realtime=on`, or `localStorage.setItem('lash:realtime-enabled', 'true')`; use `?realtime=off` to force local-only editing.
 
 ## Deploy Assumptions
 
@@ -35,6 +36,7 @@
 - Bead 28 chooses Cloudflare Durable Objects as the realtime room runtime. The app now has a deploy-shaped `lash-realtime` Worker with `/api/realtime/health`, `/api/realtime/rooms/:id/health`, and `/api/realtime/rooms/:id/socket` endpoints. Verified result: `pnpm --filter @lash/realtime-worker deploy:dry-run` bundles successfully with Durable Object binding `LASH_REALTIME_ROOM`.
 - Bead 30 gates realtime room access with signed session grants. Browsers first request `GET /api/realtime/rooms/:id/session?actorId=<actor>` and then pass the returned `accessToken` to room health/socket requests. Local development uses a non-production fallback secret; production must set `LASH_REALTIME_SESSION_SECRET` before publishing the Worker.
 - Bead 31 persists realtime document CRDT state in the per-document Durable Object using SQLite-backed storage. Each accepted Yjs update is appended before broadcast, snapshots compact hydration state periodically, new sockets hydrate from the latest snapshot plus later updates, and restore appends a new head update instead of deleting history.
+- Bead 32 makes realtime opt-in for unconfigured local browser sessions so normal large-document typing does not pay collaboration runtime overhead. Online typing Playwright coverage opts in explicitly before opening document pages.
 - The existing Cloudflare Pages public test site remains the static web host for the merged `main` build. The Bead 27 `/doc/[id]` Next routes are still local/Next-runtime routes until the web app deployment path is moved off static export or given an explicit dynamic route strategy; `pnpm run build:static` is expected to fail on this branch for that reason.
 
 ## Realtime Worker Preflight
@@ -69,6 +71,7 @@
 
 - Public verification runs `apps/web/e2e/smoke/home.spec.ts` and `apps/web/e2e/performance/typing-latency.spec.ts` with `PLAYWRIGHT_BASE_URL`.
 - Essay typing threshold: p95 browser event processing < 8 ms, max event processing < 50 ms, full essay typed < 5 s, zero long tasks, and no character loss.
+- Local large-document typing gate: `apps/web/e2e/performance/large-doc-typing.spec.ts` seeds 10k-word and 50k-word docs through test hooks and enforces p95 event work < 8 ms plus max event work < 50 ms. It logs long task counts for future document virtualization work.
 - Latest public verification on `https://lash-9xx.pages.dev/`: 585 characters typed in 985 ms, p95 event work 0.8 ms, max event work 7.4 ms, zero long tasks.
 - Latest merged-main Cloudflare deployment preview: `https://cad5a3ac.lash-9xx.pages.dev`.
 

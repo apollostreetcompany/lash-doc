@@ -61,6 +61,8 @@ Success criteria:
 36. Bead 30 introduces a signed actor grant boundary for realtime rooms. Browsers request a short-lived session token from `/api/realtime/rooms/:id/session`, room health requires `doc.read`, room sockets require `doc.edit`, and the Worker passes trusted actor context into the Durable Object. This is a local/session-token bridge only; real identity, roles, invites, and persistence remain later beads.
 37. Bead 31 should persist document CRDT state inside the per-document Cloudflare Durable Object using SQLite-backed storage: append every accepted Yjs update before broadcast, compact periodically into a snapshot, hydrate new sockets from the latest snapshot plus later updates, and implement restore by appending a new head update rather than deleting historical rows.
 38. Bead 31 implements Durable Object CRDT persistence with an append-only `yjs_updates` table, cumulative `yjs_snapshots`, socket hydration from snapshot plus tail updates, `POST /api/realtime/rooms/:id/restore` as an edit-scoped append-only restore hook, and persistence metadata in room health. Full online typing now passes unauthorized access, remote visibility, convergence, reload durability, and snapshot compaction.
+39. Bead 32 keeps local realtime explicit opt-in unless `NEXT_PUBLIC_LASH_REALTIME_URL` is configured: local documents use plain TipTap without the Collaboration extension by default, while online typing tests opt in through `lash:realtime-enabled` or `?realtime=on`.
+40. Bead 32 adds 10k/50k-word browser typing gates and removes the measured hot paths from normal local editing: outline publication is deferred for body-text transactions, offscreen document blocks use `content-visibility`, and the release gate enforces p95/max per-input event work under the typing SLO while logging residual rendering long tasks for future virtualization work.
 
 ## State
 
@@ -115,14 +117,14 @@ Success criteria:
 - [x] Bead 29 - CRDT Editor Binding with TipTap Collaboration, Yjs room provider, Worker update relay, and two-client convergence.
 - [x] Bead 30 - Actor Identity + Access Boundary with signed realtime session grants, token-gated room reads/sockets, and unauthorized room denial coverage.
 - [x] Bead 31 - Durable Persistence, Snapshots, Restore with SQLite-backed Yjs update logs, cumulative snapshots, reload hydration, and append-only restore hook.
+- [x] Bead 32 - Large-Doc Typing Performance with 10k/50k-word browser gates, explicit local realtime opt-in, deferred outline scans, and offscreen block containment.
 
 ### Now
 
-- Bead 32 - Large-Doc Typing Performance.
+- Bead 33 - Presence, Remote Cursors, Sync State.
 
 ### Next
 
-- Bead 33 - Presence, Remote Cursors, Sync State.
 - Bead 34 - Invite + Access UX.
 - Bead 35 - Durable Comments/Suggestions.
 - Bead 36 - Collaboration Delight Layer.
@@ -176,6 +178,7 @@ Success criteria:
 - `apps/web/e2e/mentions/mention-real-editor.spec.ts`
 - `apps/web/e2e/sidebar/sidebar-regression.spec.ts`
 - `apps/web/e2e/online-typing/online-typing-entry-gate.spec.ts`
+- `apps/web/e2e/performance/large-doc-typing.spec.ts`
 - `apps/web/e2e/document-identity/document-identity.spec.ts`
 - `apps/web/app/doc/[id]/page.tsx`
 - `apps/web/lib/documentRegistry.ts`

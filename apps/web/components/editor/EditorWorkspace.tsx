@@ -225,6 +225,7 @@ export function EditorWorkspace({ documentId = DEFAULT_DOCUMENT_ID }: EditorWork
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const outlineItemsRef = useRef<OutlineItem[]>([]);
   const outlineFrameRef = useRef<number | null>(null);
+  const outlineIdleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const historyStoreRef = useRef(createHistoryStore());
   const historyHeadRef = useRef<string | null>(null);
   const historyTextRef = useRef('');
@@ -349,10 +350,12 @@ export function EditorWorkspace({ documentId = DEFAULT_DOCUMENT_ID }: EditorWork
         image: {
           uploader: imageUploader,
         },
-        collaboration: {
-          document: realtimeCollaboration.doc,
-          field: 'content',
-        },
+        collaboration: realtimeCollaboration.enabled
+          ? {
+              document: realtimeCollaboration.doc,
+              field: 'content',
+            }
+          : undefined,
         chips: {
           resolveDocChip: async (docId) => ({
             title: `Internal Doc ${docId}`,
@@ -395,7 +398,26 @@ export function EditorWorkspace({ documentId = DEFAULT_DOCUMENT_ID }: EditorWork
       if (transaction && !transaction.docChanged && !hasOutlineTransactionMeta(transaction)) {
         return;
       }
+      const shouldPublishSoon =
+        !transaction ||
+        hasOutlineTransactionMeta(transaction) ||
+        transaction.selection.$from.parent.type.name === 'heading' ||
+        transaction.selection.$to.parent.type.name === 'heading';
+      if (shouldPublishSoon && outlineIdleTimerRef.current !== null) {
+        clearTimeout(outlineIdleTimerRef.current);
+        outlineIdleTimerRef.current = null;
+      }
       if (outlineFrameRef.current !== null) {
+        return;
+      }
+      if (!shouldPublishSoon) {
+        if (outlineIdleTimerRef.current !== null) {
+          return;
+        }
+        outlineIdleTimerRef.current = setTimeout(() => {
+          outlineIdleTimerRef.current = null;
+          publishOutline();
+        }, 500);
         return;
       }
       outlineFrameRef.current = window.requestAnimationFrame(() => {
@@ -412,6 +434,10 @@ export function EditorWorkspace({ documentId = DEFAULT_DOCUMENT_ID }: EditorWork
       if (outlineFrameRef.current !== null) {
         window.cancelAnimationFrame(outlineFrameRef.current);
         outlineFrameRef.current = null;
+      }
+      if (outlineIdleTimerRef.current !== null) {
+        clearTimeout(outlineIdleTimerRef.current);
+        outlineIdleTimerRef.current = null;
       }
       editor.off('transaction', handleTransaction);
     };
