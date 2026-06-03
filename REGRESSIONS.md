@@ -6,7 +6,7 @@ These are user-reported regressions observed after the public Cloudflare test de
 
 | ID    | Title                      | Status | Owner Profile                | Notes                                                                                                                                                                 |
 | ----- | -------------------------- | ------ | ---------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| R-001 | Title not working          | Open   | Editor Core Agent            | Document title behavior needs triage. Confirm whether the failure is editing, persistence, layout, export, or all of those.                                           |
+| R-001 | Title not working          | Fixed  | Editor Core Agent            | Bead 23 added fail-first Playwright coverage for editable title, topbar mirroring, reload persistence, and mobile metadata non-overlap; implemented local title metadata persistence under `lash:title:demo-document`. |
 | R-002 | @mentioning not working    | Open   | Mentions & Chips Agent       | Mention trigger/insertion must be checked in the real editor path, not just panel/test-hook paths. Existing tests may be passing against an incomplete user workflow. |
 | R-003 | Sidebar not really working | Open   | Editor Core Agent + QA Agent | Sidebar behavior is broad; first pass should verify desktop collapse, mobile drawer, outline navigation, focus restore, and active state behavior.                    |
 
@@ -18,13 +18,14 @@ These are user-reported regressions observed after the public Cloudflare test de
 - Risk class: `medium`
 - Primary agent: Editor Core Agent
 - Fallback agent: QA & Property-Based Testing Agent
+- Status: Complete.
 - Scope: document title editing, visible title state, persistence/reload behavior, and any title handoff into history/autosave if currently implied by the UI.
 - Acceptance tests:
-  - Reproduce the current failure with a failing Playwright test before fixing.
-  - A user can edit the title from the main editor UI.
-  - The title survives reload or the currently supported persistence boundary.
-  - Title text does not overlap chrome on desktop or mobile.
-  - Relevant lint, typecheck, unit/e2e, and build checks pass.
+  - [x] Reproduce the current failure with a failing Playwright test before fixing.
+  - [x] A user can edit the title from the main editor UI.
+  - [x] The title survives reload or the currently supported persistence boundary.
+  - [x] Title text does not overlap chrome on mobile.
+  - [x] Relevant lint, typecheck, unit/e2e, and build checks pass.
 
 ### Bead 24 - Fix @Mention Regression
 

@@ -72,7 +72,8 @@ const HISTORY_ACTOR = { type: 'user', id: 'local-user' } as const;
 const HISTORY_AUDIT = { ua: 'lash-web/local-history' } as const;
 const HISTORY_RECORD_DEBOUNCE_MS = 1800;
 const AI_AUDIT = { ua: 'lash-local-ai-editor' };
-const DOC_TITLE = 'Untitled document';
+const DEFAULT_DOC_TITLE = 'Untitled document';
+const DOC_TITLE_STORAGE_KEY = `lash:title:${OUTLINE_DOC_ID}`;
 
 type OutlineTransaction = EditorEvents['transaction']['transaction'];
 
@@ -144,6 +145,16 @@ const textToContent = (text: string) => ({
   })),
 });
 
+const persistDocTitle = (title: string) => {
+  const normalizedTitle = title.trim() || DEFAULT_DOC_TITLE;
+  try {
+    window.localStorage.setItem(DOC_TITLE_STORAGE_KEY, normalizedTitle);
+  } catch {
+    // Title persistence is best-effort for private browsing and locked-down previews.
+  }
+  return normalizedTitle;
+};
+
 // Copy `text` to the clipboard. Prefers the async Clipboard API, but falls
 // back to a transient textarea + execCommand('copy') for HTTP previews,
 // iframes, and older Safari that can't acquire clipboard-write permission.
@@ -181,6 +192,7 @@ export function EditorWorkspace() {
   const [outlineItems, setOutlineItems] = useState<OutlineItem[]>([]);
   const [isFocusMode, setIsFocusMode] = useState(false);
   const [isSuggestMode, setIsSuggestMode] = useState(false);
+  const [docTitle, setDocTitle] = useState(DEFAULT_DOC_TITLE);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [railOpen, setRailOpen] = useState(true);
   const [activeTab, setActiveTab] = useState<RailTab>('chat');
@@ -225,6 +237,23 @@ export function EditorWorkspace() {
   useEffect(() => {
     setIsMounted(true);
   }, []);
+
+  useEffect(() => {
+    try {
+      const storedTitle = window.localStorage.getItem(DOC_TITLE_STORAGE_KEY)?.trim();
+      if (storedTitle) {
+        setDocTitle(storedTitle);
+      }
+    } catch {
+      // Title persistence is best-effort for private browsing and locked-down previews.
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!isMounted) return;
+    const normalizedTitle = docTitle.trim() || DEFAULT_DOC_TITLE;
+    document.title = `${normalizedTitle} — Lash`;
+  }, [docTitle, isMounted]);
 
   useEffect(() => {
     suggestModeRef.current = isSuggestMode;
@@ -957,10 +986,20 @@ export function EditorWorkspace() {
     mobileRailTriggerRef.current?.focus();
   }, []);
 
+  const handleDocTitleChange = useCallback((event: ChangeEvent<HTMLInputElement>) => {
+    const nextTitle = event.target.value;
+    setDocTitle(nextTitle);
+    persistDocTitle(nextTitle);
+  }, []);
+
+  const handleDocTitleBlur = useCallback(() => {
+    setDocTitle((value) => persistDocTitle(value));
+  }, []);
+
   const topBar = (
     <TopBar
       editor={editor}
-      docTitle={DOC_TITLE}
+      docTitle={docTitle.trim() || DEFAULT_DOC_TITLE}
       focusMode={isFocusMode}
       suggestMode={isSuggestMode}
       railOpen={railOpen}
@@ -1032,10 +1071,21 @@ export function EditorWorkspace() {
         <div className="lash-doc-wrap">
           <article className="lash-doc-paper" aria-labelledby="lash-doc-title-text">
             <header className="lash-doc-header">
-              <h1 className="lash-doc-title" id="lash-doc-title-text">
-                {DOC_TITLE}
-              </h1>
-              <div className="lash-doc-meta" aria-label="Document metadata">
+              <input
+                aria-label="Document title"
+                className="lash-doc-title lash-doc-title-input"
+                data-testid="lash-doc-title-input"
+                id="lash-doc-title-text"
+                onBlur={handleDocTitleBlur}
+                onChange={handleDocTitleChange}
+                type="text"
+                value={docTitle}
+              />
+              <div
+                className="lash-doc-meta"
+                aria-label="Document metadata"
+                data-testid="lash-doc-meta"
+              >
                 <span>Edited by Apollo</span>
                 <span className="lash-doc-meta-dot" aria-hidden="true" />
                 <span>

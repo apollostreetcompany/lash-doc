@@ -2,14 +2,14 @@
 
 ## Goal (incl. success criteria)
 
-Ship Lash v1 as the full local collaborative editor product described in `agents.md`, with all acceptance gates passing. Riddle is optional/deferred; no Lash-Riddle code integration until Riddle stabilizes as its own product.
+Complete Beads 23-36: close the public-test regressions for title, @mentions, and sidebar, then implement the true responsive online typing track through document identity, realtime runtime, CRDT binding, actor/access boundaries, durable persistence, large-doc performance, presence/sync state, invite/access UX, durable comments/suggestions, and collaboration delight. Riddle is optional/deferred; no Lash-Riddle code integration until Riddle stabilizes as its own product.
 
 Success criteria:
 
-- Product scope covers the `agents.md` v1 acceptance matrix, not a single-feature MVP.
-- All unit, e2e, lint, typecheck, build, and local run gates pass.
-- Every `agents.md` Test ID has executable unit or Playwright coverage and no acceptance skips/todos remain.
-- GitHub remote/default branch/protection/CI are configured and green.
+- Every scoped bead has fail-first test evidence before implementation.
+- Every scoped bead passes its targeted tests plus appropriate lint, typecheck, unit, build, e2e, and deployment gates for its risk class.
+- True online typing is proven by real two-client browser tests, not local-only mocks.
+- `subreview` and a fresh-eyes review pass over the completed scoped bead set.
 - Riddle remains planning-only in Lash.
 
 ## Constraints/Assumptions
@@ -19,7 +19,7 @@ Success criteria:
 - Default branch is `main`.
 - Branch protection on `main` requires strict `build-and-test`, enforces admins, and disallows force-push/delete.
 - Riddle integration is planning-only; do not touch `/Users/borker/dev/riddle`.
-- No production deployment target is configured; v1 validation is local product/runtime plus GitHub CI.
+- Cloudflare Pages hosts the current static public test site; future realtime infra should prefer Cloudflare Workers/Durable Objects first, then Render only if Cloudflare is insufficient.
 
 ## Key Decisions
 
@@ -51,6 +51,7 @@ Success criteria:
 26. CI performance assertions distinguish product latency from runner scheduling jitter: typing keeps the p95 < 8 ms and zero-long-task gates, while large-table SLO enforcement stays on synchronous dispatch with looser frame-settle smoke bounds.
 27. Bead 22 is merged and deployed from `main`: PR #12 squash-merged as `3f19bc3`, protected main CI run `26026635724` passed, Cloudflare redeploy produced preview `https://cad5a3ac.lash-9xx.pages.dev`, and production verification passed on `https://lash-9xx.pages.dev/` with 585 characters typed in 985 ms, p95 event work 0.8 ms, max event work 7.4 ms, and zero long tasks.
 28. User-reported public-test regressions are tracked in `REGRESSIONS.md` and should be handled as Beads 23-25: title, @mentions, and sidebar. Each bead must first reproduce the failure with a failing test before implementation.
+29. Bead 23 fixes the title regression with a local document-title metadata path under `lash:title:demo-document`; this is intentionally a bridge until Bead 27 replaces hardcoded document identity with real `/doc/[id]` routing and persisted metadata.
 
 ## State
 
@@ -96,22 +97,31 @@ Success criteria:
 - [x] PR #12 merged into `main` as `3f19bc361c3071d9e3f7425bfd064193cd8b83a9`.
 - [x] Final post-deploy main push CI passed: run `26026635724`, workflow `CI`, `build-and-test`.
 - [x] Final Cloudflare production redeploy from merged `main` passed public smoke/performance verification.
+- [x] Bead 23 - Fix title regression with fail-first Playwright coverage, editable title UI, topbar mirroring, reload persistence, and mobile non-overlap guard.
 
 ### Now
 
-- Shutdown handoff complete: local Lash web server is stopped/not running; regression backlog is recorded for Beads 23-25.
+- Bead 24 - Fix @mention regression with fail-first real-editor workflow coverage.
 
 ### Next
 
-- Bead 23 - Fix title regression.
-- Bead 24 - Fix @mention regression.
 - Bead 25 - Fix sidebar regression.
-- Future work outside the regression set: production/custom-domain decision and any Riddle integration after Riddle has its own stable product/Zed integration.
+- Bead 26 - Online Typing Entry Gate.
+- Bead 27 - Real Document Identity.
+- Bead 28 - Realtime Runtime Decision + Skeleton.
+- Bead 29 - CRDT Editor Binding.
+- Bead 30 - Actor Identity + Access Boundary.
+- Bead 31 - Durable Persistence, Snapshots, Restore.
+- Bead 32 - Large-Doc Typing Performance.
+- Bead 33 - Presence, Remote Cursors, Sync State.
+- Bead 34 - Invite + Access UX.
+- Bead 35 - Durable Comments/Suggestions.
+- Bead 36 - Collaboration Delight Layer.
 
 ## Open Questions
 
 - UNCONFIRMED: Whether retrospective review for M1/B1 and M1/B3 is still required before later post-v1 work.
-- UNCONFIRMED: Production hosting target is not selected.
+- UNCONFIRMED: Exact realtime backend topology until Bead 28 decides between Cloudflare Durable Objects and fallback hosting.
 
 ## Working Set
 
@@ -150,6 +160,8 @@ Success criteria:
 - `make deploy-cloudflare`
 - `make verify-cloudflare URL=https://lash-9xx.pages.dev/`
 - `apps/web/e2e/performance/typing-latency.spec.ts`
+- `apps/web/e2e/title/title-edit.spec.ts`
+- `apps/web/components/editor/EditorWorkspace.tsx`
 - GitHub PR #12: `https://github.com/apollostreetcompany/lash-doc/pull/12`
 - Post-deploy main CI run: `https://github.com/apollostreetcompany/lash-doc/actions/runs/26026635724`
 - Final Cloudflare deployment preview: `https://cad5a3ac.lash-9xx.pages.dev`
