@@ -15,12 +15,22 @@ import {
 } from '@lash/share';
 import type { DiffJSON, DocumentId, ShareScope } from '@lash/types';
 import type { Editor } from '@tiptap/core';
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
+
+import {
+  createInviteRecord,
+  expiryForOption,
+  inviteCapabilities,
+  listInviteRecords,
+  revokeInviteRecord,
+  type InviteRecord,
+} from '../../../lib/inviteAccess';
 
 export interface SharePanelProps {
   editor: Editor | null;
   docId: DocumentId;
   open?: boolean;
+  accessScope?: ShareScope | null;
 }
 
 const REDACTION_POLICY: RedactionPolicy = {
@@ -47,7 +57,7 @@ const SAMPLE_DIFF: DiffJSON = {
 const hasCapability = (scope: ShareScope | null, capability: Capability) =>
   scope ? capabilitiesForScope(scope).includes(capability) : false;
 
-export function SharePanel({ docId, open = true }: SharePanelProps) {
+export function SharePanel({ docId, open = true, accessScope = null }: SharePanelProps) {
   const auditLog = useMemo(() => createAuditLog({ adapter: 'memory' }), []);
   const revocations = useMemo(() => createMemoryRevocationStore(), []);
   const policies = useMemo(() => createStaticPolicyStore(REDACTION_POLICY), []);
@@ -65,6 +75,23 @@ export function SharePanel({ docId, open = true }: SharePanelProps) {
   const [validation, setValidation] = useState('No link created');
   const [events, setEvents] = useState<AuditEvent[]>([]);
   const [redactedCount, setRedactedCount] = useState(0);
+  const [inviteEmail, setInviteEmail] = useState('');
+  const [inviteRole, setInviteRole] = useState<ShareScope>('comment');
+  const [inviteExpiry, setInviteExpiry] = useState<'never' | '7d' | 'expired'>('7d');
+  const [inviteCopyStatus, setInviteCopyStatus] = useState('No invite copied');
+  const [inviteRecords, setInviteRecords] = useState<InviteRecord[]>([]);
+
+  const docKey = docId.toString();
+
+  const refreshInviteRecords = () => {
+    if (typeof window === 'undefined') return;
+    setInviteRecords(listInviteRecords(window.localStorage, docKey));
+  };
+
+  useEffect(() => {
+    refreshInviteRecords();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [docKey]);
 
   if (!open) return null;
 
@@ -87,10 +114,42 @@ export function SharePanel({ docId, open = true }: SharePanelProps) {
     setEvents(await auditLog.query({ docId }));
   };
 
-  const canComment = hasCapability(scope, 'doc.comment');
-  const canSuggest = hasCapability(scope, 'doc.suggest');
-  const canEdit = hasCapability(scope, 'doc.edit');
-  const canAccept = hasCapability(scope, 'doc.history.restore');
+  const createInvite = async () => {
+    if (typeof window === 'undefined') return;
+    const email = inviteEmail.trim() || 'collaborator@example.com';
+    const invite = await createInviteRecord({
+      storage: window.localStorage,
+      docId: docKey,
+      email,
+      scope: inviteRole,
+      expiresAt: expiryForOption(inviteExpiry),
+      origin: window.location.origin,
+    });
+    (window as Window & { __lashLastInviteLink?: string }).__lashLastInviteLink = invite.link;
+    try {
+      await navigator.clipboard?.writeText(invite.link);
+    } catch {
+      // HTTP previews may not expose clipboard; the hook still records the copied link.
+    }
+    setInviteEmail('');
+    setInviteCopyStatus('Copied invite link');
+    setScope(inviteRole);
+    refreshInviteRecords();
+  };
+
+  const revokeInvite = async (jti: string) => {
+    if (typeof window === 'undefined') return;
+    await revokeInviteRecord(window.localStorage, jti);
+    setInviteCopyStatus('Invite revoked');
+    refreshInviteRecords();
+  };
+
+  const effectiveScope = accessScope ?? scope;
+  const inviteCaps = inviteCapabilities(effectiveScope);
+  const canComment = inviteCaps.canComment || hasCapability(effectiveScope, 'doc.comment');
+  const canSuggest = inviteCaps.canSuggest || hasCapability(effectiveScope, 'doc.suggest');
+  const canEdit = inviteCaps.canEdit || hasCapability(effectiveScope, 'doc.edit');
+  const canAccept = inviteCaps.canAccept || hasCapability(effectiveScope, 'doc.history.restore');
 
   return (
     <section className="lash-share-panel" data-testid="share-panel" aria-label="Share links">
@@ -131,6 +190,81 @@ export function SharePanel({ docId, open = true }: SharePanelProps) {
         >
           Expired link
         </button>
+      </div>
+
+      <div className="invite-controls" data-testid="invite-controls">
+        <label className="invite-field">
+          <span>Invite</span>
+          <input
+            data-testid="invite-email-input"
+            value={inviteEmail}
+            onChange={(event) => setInviteEmail(event.target.value)}
+            placeholder="collaborator@example.com"
+            type="email"
+          />
+        </label>
+        <label className="invite-field">
+          <span>Role</span>
+          <select
+            data-testid="invite-role-select"
+            value={inviteRole}
+            onChange={(event) => setInviteRole(event.target.value as ShareScope)}
+          >
+            <option value="view">view</option>
+            <option value="comment">comment</option>
+            <option value="suggest">suggest</option>
+            <option value="edit">edit</option>
+          </select>
+        </label>
+        <label className="invite-field">
+          <span>Expiry</span>
+          <select
+            data-testid="invite-expiry-select"
+            value={inviteExpiry}
+            onChange={(event) => setInviteExpiry(event.target.value as typeof inviteExpiry)}
+          >
+            <option value="7d">7 days</option>
+            <option value="never">never</option>
+            <option value="expired">expired</option>
+          </select>
+        </label>
+        <button
+          type="button"
+          className="share-action-button"
+          data-testid="invite-create"
+          onClick={() => void createInvite()}
+        >
+          Create invite
+        </button>
+        <span data-testid="invite-copy-status">{inviteCopyStatus}</span>
+      </div>
+
+      <div className="invite-list" data-testid="invite-collaborator-list">
+        {inviteRecords.length ? (
+          inviteRecords.map((invite) => (
+            <div
+              key={invite.jti}
+              className="invite-row"
+              data-testid="invite-collaborator-row"
+              data-status={invite.status}
+            >
+              <span>{invite.email}</span>
+              <span>{invite.scope}</span>
+              <span>{invite.status}</span>
+              <button
+                type="button"
+                className="share-action-button"
+                data-testid="invite-revoke-button"
+                disabled={invite.status === 'revoked'}
+                onClick={() => void revokeInvite(invite.jti)}
+              >
+                Revoke
+              </button>
+            </div>
+          ))
+        ) : (
+          <span data-testid="invite-collaborator-empty">No collaborators invited</span>
+        )}
       </div>
 
       <div className="share-capabilities" data-testid="share-capabilities">

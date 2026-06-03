@@ -10,6 +10,8 @@
     "test": "pnpm run lint && pnpm run test:unit && pnpm run test:e2e",
     "test:unit": "vitest run",
     "test:e2e": "NEXT_PUBLIC_LASH_TEST_HOOKS=true pnpm --filter @lash/web build && playwright test",
+    "test:e2e:ci": "NEXT_PUBLIC_LASH_TEST_HOOKS=true pnpm --filter @lash/web build && playwright test --workers=1",
+    "verify:realtime": "node scripts/verify-realtime-runtime.mjs",
     "format": "prettier --check \"**/*.{ts,tsx,js,jsx,json,md}\"",
     "format:write": "prettier --write \"**/*.{ts,tsx,js,jsx,json,md}\""
   },
@@ -25,6 +27,7 @@
     "jsdom": "^24.0.0",
     "prettier": "^3.3.3",
     "typescript": "^5.4.5",
-    "vitest": "^1.6.1"
+    "vitest": "^1.6.1",
+    "wrangler": "^4.97.0"
   }
 }

@@ -10,6 +10,13 @@ import type { Editor } from '@tiptap/core';
 export type HistoryTimeFilter = 'last-7-days' | null;
 
 type TextDiffSpan = Extract<DiffSpan, { kind: 'inserted' | 'deleted' }>;
+type SuggestionResolutionRecord = {
+  id: string;
+  entryId: string;
+  action: 'accepted' | 'rejected';
+  ts: string;
+  actorId: string;
+};
 
 export interface HistoryPanelProps {
   editor: Editor | null;
@@ -18,6 +25,7 @@ export interface HistoryPanelProps {
   authorFilter: string | null;
   timeFilter: HistoryTimeFilter;
   acceptedSuggestionIds: string[];
+  suggestionResolutions: SuggestionResolutionRecord[];
   open?: boolean;
   onSelect: (entryId: string) => void;
   onRestore: (entry: HistoryEntry) => void;
@@ -110,6 +118,7 @@ export function HistoryPanel({
   authorFilter,
   timeFilter,
   acceptedSuggestionIds,
+  suggestionResolutions,
   open = true,
   onSelect,
   onRestore,
@@ -136,6 +145,9 @@ export function HistoryPanel({
   const selectedSuggestionAccepted = selectedEntry
     ? acceptedSuggestionIds.includes(selectedEntry.id)
     : false;
+  const selectedSuggestionResolution = selectedEntry
+    ? suggestionResolutions.find((record) => record.entryId === selectedEntry.id)
+    : null;
   const diffDescriptionId = selectedEntry
     ? `history-diff-announcement-${selectedEntry.id}`
     : undefined;
@@ -206,6 +218,23 @@ export function HistoryPanel({
         </span>
       ) : null}
 
+      {suggestionResolutions.length ? (
+        <ol className="suggestion-resolution-list" data-testid="suggestion-resolution-list">
+          {suggestionResolutions.map((record) => (
+            <li
+              key={record.id}
+              className="suggestion-resolution-row"
+              data-testid="suggestion-resolution-row"
+              data-entry-id={record.entryId}
+              data-action={record.action}
+            >
+              <span>{record.action} suggestion</span>
+              <span>{record.actorId}</span>
+            </li>
+          ))}
+        </ol>
+      ) : null}
+
       {visibleEntries.length ? (
         <ol className="history-version-list" data-testid="history-version-list">
           {visibleEntries.map((entry) => {
@@ -241,7 +270,11 @@ export function HistoryPanel({
           </div>
           {selectedEntry.intent === 'suggest' ? (
             <div className="history-suggestion-status" data-testid="history-suggestion-status">
-              {selectedSuggestionAccepted ? 'Accepted suggestion' : 'Pending suggestion'}
+              {selectedSuggestionResolution?.action === 'rejected'
+                ? 'Rejected suggestion'
+                : selectedSuggestionAccepted
+                  ? 'Accepted suggestion'
+                  : 'Pending suggestion'}
             </div>
           ) : null}
           <pre

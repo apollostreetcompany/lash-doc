@@ -23,12 +23,14 @@
  */
 
 import { Extension, type Editor, type Extensions } from '@tiptap/core';
+import CollaborationExtension from '@tiptap/extension-collaboration';
 import LinkExtension from '@tiptap/extension-link';
 import TaskItemExtension from '@tiptap/extension-task-item';
 import TaskListExtension from '@tiptap/extension-task-list';
 import UnderlineExtension from '@tiptap/extension-underline';
 import { Plugin, PluginKey, TextSelection } from '@tiptap/pm/state';
 import StarterKitExtension from '@tiptap/starter-kit';
+import type * as Y from 'yjs';
 
 import { LashHeading } from '../extensions/heading';
 import { LashImage, type LashImageUploader } from '../extensions/image';
@@ -50,6 +52,10 @@ export interface LashSchemaOptions {
     initialWidth?: number;
   };
   table?: LashTableOptions;
+  collaboration?: {
+    document: Y.Doc;
+    field?: string;
+  };
 }
 
 const LashKeyboardShortcuts = Extension.create<LashSchemaOptions>({
@@ -144,9 +150,17 @@ export const buildBaseExtensions = (options?: LashSchemaOptions): Extensions => 
       dropcursor: false,
       gapcursor: false,
       horizontalRule: false,
-      history: { depth: 500 },
+      history: options?.collaboration ? false : { depth: 500 },
       code: { HTMLAttributes: { class: 'lash-inline-code' } },
     }),
+    ...(options?.collaboration
+      ? [
+          CollaborationExtension.configure({
+            document: options.collaboration.document,
+            field: options.collaboration.field,
+          }),
+        ]
+      : []),
     LashHeading.configure({ levels: [1, 2, 3] }),
     OutlineManager.configure({
       documentId: outlineOptions.documentId ?? 'default',

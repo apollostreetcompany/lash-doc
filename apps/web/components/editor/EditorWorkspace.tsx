@@ -20,11 +20,20 @@ import {
   type ToolbarButtonSpec,
 } from '@lash/editor-core';
 import { EMPTY_HISTORY_DOC, createHistoryStore } from '@lash/history';
-import { createDocumentId, hashCanonical, type EditPatch, type HistoryEntry } from '@lash/types';
+import {
+  createDocumentId,
+  hashCanonical,
+  type DocumentId,
+  type EditPatch,
+  type HistoryEntry,
+} from '@lash/types';
 import type { Editor, EditorEvents } from '@tiptap/core';
 import { EditorContent, useEditor } from '@tiptap/react';
+import type { Route } from 'next';
+import { useRouter } from 'next/navigation';
 import {
   type ChangeEvent,
+  type CSSProperties,
   type MouseEvent as ReactMouseEvent,
   useCallback,
   useEffect,
@@ -32,8 +41,31 @@ import {
   useRef,
   useState,
 } from 'react';
+import type * as Y from 'yjs';
 
 import { createBrowserImageUploader } from '../../lib/createBrowserImageUploader';
+import {
+  DEFAULT_DOC_TITLE,
+  DEFAULT_DOCUMENT_ID,
+  createNewDocumentId,
+  documentPath,
+  listDocuments,
+  normalizeDocumentId,
+  readDocumentTitle,
+  saveDocumentTitle,
+  upsertDocument,
+  type LashDocumentRecord,
+} from '../../lib/documentRegistry';
+import {
+  inviteTokenFromLocation,
+  validateInviteAccess,
+  type InviteAccess,
+} from '../../lib/inviteAccess';
+import {
+  createLashRealtimeCollaboration,
+  type RealtimeSnapshot,
+  type RealtimeSyncState,
+} from '../../lib/realtimeCollaboration';
 import { AppShell } from '../shell/AppShell';
 import { Icon } from '../shell/Icon';
 import { RightRail, type RailTab, type RailTabConfig } from '../shell/RightRail';
@@ -65,16 +97,22 @@ const TOOLBAR_META: ToolbarMeta[] = [
   { label: 'Structure', items: toolbarGroups.blocks },
 ];
 
-const OUTLINE_DOC_ID = 'demo-document';
-const HISTORY_DOC_ID = createDocumentId(OUTLINE_DOC_ID);
 const HISTORY_SCHEMA_VERSION = 'lash-schema-v1';
 const HISTORY_ACTOR = { type: 'user', id: 'local-user' } as const;
 const HISTORY_AUDIT = { ua: 'lash-web/local-history' } as const;
 const HISTORY_RECORD_DEBOUNCE_MS = 1800;
 const AI_AUDIT = { ua: 'lash-local-ai-editor' };
-const DOC_TITLE = 'Untitled document';
+const SUGGESTION_RESOLUTIONS_YMAP = 'lash:suggestion-resolutions';
 
 type OutlineTransaction = EditorEvents['transaction']['transaction'];
+type SuggestionResolutionAction = 'accepted' | 'rejected';
+type SuggestionResolutionRecord = {
+  id: string;
+  entryId: string;
+  action: SuggestionResolutionAction;
+  ts: string;
+  actorId: string;
+};
 
 const textReplaceOp = (before: string, after: string) => {
   let prefix = 0;
@@ -136,6 +174,15 @@ const sameActiveCell = (left: ActiveCell | null, right: ActiveCell | null) => {
   );
 };
 
+const realtimeSyncLabels: Record<RealtimeSyncState, string> = {
+  disabled: 'Local only',
+  connecting: 'Connecting',
+  reconnecting: 'Reconnecting',
+  syncing: 'Saving',
+  saved: 'Saved',
+  offline: 'Offline',
+};
+
 const textToContent = (text: string) => ({
   type: 'doc',
   content: text.split('\n').map((line) => ({
@@ -143,6 +190,111 @@ const textToContent = (text: string) => ({
     content: line ? [{ type: 'text', text: line }] : undefined,
   })),
 });
+
+const suggestionResolutionStorageKey = (docId: DocumentId) =>
+  `lash:suggestion-resolutions:${docId}`;
+const suggestionResolutionYMapPrefix = (docId: DocumentId) => `${String(docId)}:`;
+const suggestionResolutionYMapKey = (docId: DocumentId, recordId: string) =>
+  `${suggestionResolutionYMapPrefix(docId)}${recordId}`;
+
+const sameSuggestionResolutions = (
+  left: SuggestionResolutionRecord[],
+  right: SuggestionResolutionRecord[],
+) => JSON.stringify(left) === JSON.stringify(right);
+
+const normalizeSuggestionResolution = (value: unknown): SuggestionResolutionRecord | null => {
+  if (!value || typeof value !== 'object') return null;
+  const record = value as Partial<SuggestionResolutionRecord>;
+  if (
+    typeof record.id !== 'string' ||
+    typeof record.entryId !== 'string' ||
+    typeof record.ts !== 'string' ||
+    typeof record.actorId !== 'string' ||
+    (record.action !== 'accepted' && record.action !== 'rejected')
+  ) {
+    return null;
+  }
+  return {
+    id: record.id,
+    entryId: record.entryId,
+    action: record.action,
+    ts: record.ts,
+    actorId: record.actorId,
+  };
+};
+
+const parseSuggestionResolutions = (value: string | null | undefined) => {
+  if (!value) return [];
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+      .map(normalizeSuggestionResolution)
+      .filter((record): record is SuggestionResolutionRecord => Boolean(record));
+  } catch {
+    return [];
+  }
+};
+
+const parseSuggestionResolution = (value: string | null | undefined) => {
+  if (!value) return null;
+  try {
+    return normalizeSuggestionResolution(JSON.parse(value) as unknown);
+  } catch {
+    return null;
+  }
+};
+
+const readSuggestionResolutionsFromStorage = (docId: DocumentId) => {
+  if (typeof window === 'undefined') return [];
+  try {
+    return parseSuggestionResolutions(
+      window.localStorage.getItem(suggestionResolutionStorageKey(docId)),
+    );
+  } catch {
+    return [];
+  }
+};
+
+const writeSuggestionResolutionsToStorage = (
+  docId: DocumentId,
+  records: SuggestionResolutionRecord[],
+) => {
+  if (typeof window === 'undefined') return;
+  try {
+    window.localStorage.setItem(suggestionResolutionStorageKey(docId), JSON.stringify(records));
+  } catch {
+    // Best-effort local durability; online docs also persist the Yjs side channel.
+  }
+};
+
+const readSuggestionResolutionsFromYMap = (map: Y.Map<string> | null, docId: DocumentId) =>
+  map
+    ? Array.from(map.entries())
+        .filter(([key]) => key.startsWith(suggestionResolutionYMapPrefix(docId)))
+        .map(([, value]) => parseSuggestionResolution(value))
+        .filter((record): record is SuggestionResolutionRecord => Boolean(record))
+        .sort((left, right) => left.ts.localeCompare(right.ts) || left.id.localeCompare(right.id))
+    : [];
+
+const writeSuggestionResolutionsToYMap = (
+  map: Y.Map<string> | null,
+  docId: DocumentId,
+  records: SuggestionResolutionRecord[],
+) => {
+  if (!map) return;
+  records.forEach((record) => {
+    map.set(suggestionResolutionYMapKey(docId, record.id), JSON.stringify(record));
+  });
+};
+
+const acceptedIdsFromResolutions = (records: SuggestionResolutionRecord[]) =>
+  records
+    .filter((record) => record.action === 'accepted')
+    .map((record) => record.entryId)
+    .sort();
+
+const toRoute = (path: string) => path as Route;
 
 // Copy `text` to the clipboard. Prefers the async Clipboard API, but falls
 // back to a transient textarea + execCommand('copy') for HTTP previews,
@@ -176,11 +328,20 @@ const copyToClipboard = async (text: string): Promise<boolean> => {
   return ok;
 };
 
-export function EditorWorkspace() {
+export interface EditorWorkspaceProps {
+  documentId?: string;
+}
+
+export function EditorWorkspace({ documentId = DEFAULT_DOCUMENT_ID }: EditorWorkspaceProps) {
+  const router = useRouter();
+  const activeDocumentId = useMemo(() => normalizeDocumentId(documentId), [documentId]);
+  const historyDocumentId = useMemo(() => createDocumentId(activeDocumentId), [activeDocumentId]);
   const [isMounted, setIsMounted] = useState(false);
   const [outlineItems, setOutlineItems] = useState<OutlineItem[]>([]);
   const [isFocusMode, setIsFocusMode] = useState(false);
   const [isSuggestMode, setIsSuggestMode] = useState(false);
+  const [docTitle, setDocTitle] = useState(DEFAULT_DOC_TITLE);
+  const [documents, setDocuments] = useState<LashDocumentRecord[]>([]);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [railOpen, setRailOpen] = useState(true);
   const [activeTab, setActiveTab] = useState<RailTab>('chat');
@@ -191,7 +352,11 @@ export function EditorWorkspace() {
   const [selectedHistoryEntryId, setSelectedHistoryEntryId] = useState<string | null>(null);
   const [historyAuthorFilter, setHistoryAuthorFilter] = useState<string | null>(null);
   const [historyTimeFilter, setHistoryTimeFilter] = useState<HistoryTimeFilter>(null);
+  const [inviteAccess, setInviteAccess] = useState<InviteAccess | null>(null);
   const [acceptedSuggestionIds, setAcceptedSuggestionIds] = useState<string[]>([]);
+  const [suggestionResolutions, setSuggestionResolutions] = useState<SuggestionResolutionRecord[]>(
+    [],
+  );
   const [blameLines, setBlameLines] = useState<Array<{ line: number; authorId: string | null }>>(
     [],
   );
@@ -202,6 +367,7 @@ export function EditorWorkspace() {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const outlineItemsRef = useRef<OutlineItem[]>([]);
   const outlineFrameRef = useRef<number | null>(null);
+  const outlineIdleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const historyStoreRef = useRef(createHistoryStore());
   const historyHeadRef = useRef<string | null>(null);
   const historyTextRef = useRef('');
@@ -209,7 +375,9 @@ export function EditorWorkspace() {
   const historyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const applyingHistoryRef = useRef(false);
   const suggestModeRef = useRef(false);
+  const suggestionResolutionsRef = useRef<SuggestionResolutionRecord[]>([]);
   const activeTableCellRef = useRef<ActiveCell | null>(null);
+  const inviteAccessDocumentRef = useRef<string | null>(null);
   // Refs to the buttons that opened the mobile drawers, so focus can
   // return to them on close (a11y requirement: focus must not be lost).
   const mobileSidebarTriggerRef = useRef<HTMLElement | null>(null);
@@ -220,11 +388,120 @@ export function EditorWorkspace() {
     setHistoryHead(sha);
   }, []);
 
+  const refreshDocuments = useCallback(() => {
+    if (typeof window === 'undefined') return;
+    setDocuments(listDocuments(window.localStorage));
+  }, []);
+
   const imageUploader = useMemo<LashImageUploader>(() => createBrowserImageUploader(), []);
+  const realtimeCollaboration = useMemo(
+    () => createLashRealtimeCollaboration(activeDocumentId),
+    [activeDocumentId],
+  );
+  const [realtimeSnapshot, setRealtimeSnapshot] = useState<RealtimeSnapshot>(() =>
+    realtimeCollaboration.provider.getSnapshot(),
+  );
+
+  useEffect(() => {
+    return () => {
+      realtimeCollaboration.provider.destroy();
+      realtimeCollaboration.doc.destroy();
+    };
+  }, [realtimeCollaboration]);
+
+  useEffect(
+    () => realtimeCollaboration.provider.subscribe(setRealtimeSnapshot),
+    [realtimeCollaboration],
+  );
+
+  const publishSuggestionResolutions = useCallback(
+    (
+      nextRecords: SuggestionResolutionRecord[],
+      options: { persist: boolean } = { persist: true },
+    ) => {
+      suggestionResolutionsRef.current = nextRecords;
+      setSuggestionResolutions((current) =>
+        sameSuggestionResolutions(current, nextRecords) ? current : nextRecords,
+      );
+      if (!options.persist) return;
+      writeSuggestionResolutionsToStorage(historyDocumentId, nextRecords);
+      const yMap = realtimeCollaboration.enabled
+        ? realtimeCollaboration.doc.getMap<string>(SUGGESTION_RESOLUTIONS_YMAP)
+        : null;
+      writeSuggestionResolutionsToYMap(yMap, historyDocumentId, nextRecords);
+    },
+    [historyDocumentId, realtimeCollaboration],
+  );
+
+  useEffect(() => {
+    const yMap = realtimeCollaboration.enabled
+      ? realtimeCollaboration.doc.getMap<string>(SUGGESTION_RESOLUTIONS_YMAP)
+      : null;
+    const storedRecords = readSuggestionResolutionsFromStorage(historyDocumentId);
+    const yRecordsExist =
+      yMap &&
+      Array.from(yMap.keys()).some((key) =>
+        key.startsWith(suggestionResolutionYMapPrefix(historyDocumentId)),
+      );
+    const initialRecords = yRecordsExist
+      ? readSuggestionResolutionsFromYMap(yMap, historyDocumentId)
+      : storedRecords;
+    publishSuggestionResolutions(initialRecords, { persist: false });
+    if (yMap && !yRecordsExist && storedRecords.length) {
+      writeSuggestionResolutionsToYMap(yMap, historyDocumentId, storedRecords);
+    }
+
+    const handleStorage = (event: StorageEvent) => {
+      if (event.key !== suggestionResolutionStorageKey(historyDocumentId) || yMap) return;
+      publishSuggestionResolutions(parseSuggestionResolutions(event.newValue), { persist: false });
+    };
+    window.addEventListener('storage', handleStorage);
+
+    const handleRemoteRecords = (event: Y.YMapEvent<string>) => {
+      if (
+        ![...event.keysChanged].some((key) =>
+          key.startsWith(suggestionResolutionYMapPrefix(historyDocumentId)),
+        )
+      ) {
+        return;
+      }
+      const nextRecords = readSuggestionResolutionsFromYMap(yMap, historyDocumentId);
+      writeSuggestionResolutionsToStorage(historyDocumentId, nextRecords);
+      publishSuggestionResolutions(nextRecords, { persist: false });
+    };
+    yMap?.observe(handleRemoteRecords);
+
+    return () => {
+      window.removeEventListener('storage', handleStorage);
+      yMap?.unobserve(handleRemoteRecords);
+    };
+  }, [historyDocumentId, publishSuggestionResolutions, realtimeCollaboration]);
 
   useEffect(() => {
     setIsMounted(true);
   }, []);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const storedTitle = readDocumentTitle(window.localStorage, activeDocumentId);
+    setDocTitle(storedTitle);
+    setDocuments(upsertDocument(window.localStorage, { id: activeDocumentId, title: storedTitle }));
+  }, [activeDocumentId]);
+
+  useEffect(() => {
+    if (!isMounted || typeof window === 'undefined') return;
+    try {
+      setDocuments(listDocuments(window.localStorage));
+    } catch {
+      setDocuments([]);
+    }
+  }, [isMounted]);
+
+  useEffect(() => {
+    if (!isMounted) return;
+    const normalizedTitle = docTitle.trim() || DEFAULT_DOC_TITLE;
+    document.title = `${normalizedTitle} — Lash`;
+  }, [docTitle, isMounted]);
 
   useEffect(() => {
     suggestModeRef.current = isSuggestMode;
@@ -282,12 +559,18 @@ export function EditorWorkspace() {
       createLashEditorExtensions({
         onRequestLink: handleLinkCommand,
         outline: {
-          documentId: OUTLINE_DOC_ID,
+          documentId: activeDocumentId,
           persistence: outlinePersistence,
         },
         image: {
           uploader: imageUploader,
         },
+        collaboration: realtimeCollaboration.enabled
+          ? {
+              document: realtimeCollaboration.doc,
+              field: 'content',
+            }
+          : undefined,
         chips: {
           resolveDocChip: async (docId) => ({
             title: `Internal Doc ${docId}`,
@@ -295,14 +578,13 @@ export function EditorWorkspace() {
           }),
         },
       }),
-    [handleLinkCommand, outlinePersistence, imageUploader],
+    [handleLinkCommand, activeDocumentId, outlinePersistence, imageUploader, realtimeCollaboration],
   );
 
   const editor = useEditor(
     {
       extensions,
       autofocus: 'end',
-      content: '<p></p>',
       immediatelyRender: false,
       editorProps: {
         attributes: {
@@ -312,6 +594,65 @@ export function EditorWorkspace() {
     },
     [extensions],
   );
+
+  const inviteScope = inviteAccess?.ok ? inviteAccess.scope : null;
+  const canEditDocument =
+    inviteAccess === null || (inviteAccess.ok && inviteAccess.scope === 'edit');
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    let disposed = false;
+    const inviteStorageKey = `lash:invite-token:${activeDocumentId}`;
+    const token =
+      inviteTokenFromLocation(window.location) ?? window.sessionStorage.getItem(inviteStorageKey);
+    if (!token) {
+      if (inviteAccessDocumentRef.current !== activeDocumentId) {
+        inviteAccessDocumentRef.current = null;
+        setInviteAccess(null);
+      }
+      return;
+    }
+    void validateInviteAccess(window.localStorage, activeDocumentId, token).then((result) => {
+      if (disposed) return;
+      inviteAccessDocumentRef.current = activeDocumentId;
+      setInviteAccess(result);
+      try {
+        if (result?.ok) {
+          window.sessionStorage.setItem(inviteStorageKey, token);
+        } else {
+          window.sessionStorage.removeItem(inviteStorageKey);
+        }
+      } catch {
+        // Session storage is best-effort; the URL hash still authorized this page load.
+      }
+      if (window.location.hash.includes('invite=')) {
+        window.history.replaceState(null, '', window.location.pathname + window.location.search);
+      }
+    });
+    return () => {
+      disposed = true;
+    };
+  }, [activeDocumentId]);
+
+  useEffect(() => {
+    editor?.setEditable(canEditDocument);
+  }, [editor, canEditDocument]);
+
+  useEffect(() => {
+    if (!editor || !realtimeCollaboration.enabled) return;
+    const publishSelection = () => {
+      const { from, to } = editor.state.selection;
+      realtimeCollaboration.provider.setLocalSelection({ from, to });
+    };
+    publishSelection();
+    editor.on('selectionUpdate', publishSelection);
+    editor.on('transaction', publishSelection);
+    return () => {
+      editor.off('selectionUpdate', publishSelection);
+      editor.off('transaction', publishSelection);
+      realtimeCollaboration.provider.setLocalSelection(null);
+    };
+  }, [editor, realtimeCollaboration]);
 
   useEffect(() => {
     if (!editor) {
@@ -331,7 +672,26 @@ export function EditorWorkspace() {
       if (transaction && !transaction.docChanged && !hasOutlineTransactionMeta(transaction)) {
         return;
       }
+      const shouldPublishSoon =
+        !transaction ||
+        hasOutlineTransactionMeta(transaction) ||
+        transaction.selection.$from.parent.type.name === 'heading' ||
+        transaction.selection.$to.parent.type.name === 'heading';
+      if (shouldPublishSoon && outlineIdleTimerRef.current !== null) {
+        clearTimeout(outlineIdleTimerRef.current);
+        outlineIdleTimerRef.current = null;
+      }
       if (outlineFrameRef.current !== null) {
+        return;
+      }
+      if (!shouldPublishSoon) {
+        if (outlineIdleTimerRef.current !== null) {
+          return;
+        }
+        outlineIdleTimerRef.current = setTimeout(() => {
+          outlineIdleTimerRef.current = null;
+          publishOutline();
+        }, 500);
         return;
       }
       outlineFrameRef.current = window.requestAnimationFrame(() => {
@@ -349,6 +709,10 @@ export function EditorWorkspace() {
         window.cancelAnimationFrame(outlineFrameRef.current);
         outlineFrameRef.current = null;
       }
+      if (outlineIdleTimerRef.current !== null) {
+        clearTimeout(outlineIdleTimerRef.current);
+        outlineIdleTimerRef.current = null;
+      }
       editor.off('transaction', handleTransaction);
     };
   }, [editor]);
@@ -359,7 +723,7 @@ export function EditorWorkspace() {
       setSelectedHistoryEntryId(null);
       setHistoryAuthorFilter(null);
       setHistoryTimeFilter(null);
-      setAcceptedSuggestionIds([]);
+      setAcceptedSuggestionIds(acceptedIdsFromResolutions(suggestionResolutionsRef.current));
       setBlameLines([]);
       commitHistoryHead(null);
       historyTextRef.current = '';
@@ -368,6 +732,15 @@ export function EditorWorkspace() {
     }
 
     let disposed = false;
+    setHistoryEntries([]);
+    setSelectedHistoryEntryId(null);
+    setHistoryAuthorFilter(null);
+    setHistoryTimeFilter(null);
+    setAcceptedSuggestionIds(acceptedIdsFromResolutions(suggestionResolutionsRef.current));
+    setBlameLines([]);
+    commitHistoryHead(null);
+    historyTextRef.current = editorText(editor);
+    historyQueueRef.current = Promise.resolve();
     hashCanonical(EMPTY_HISTORY_DOC).then((emptySha) => {
       if (disposed) return;
       // Only seed the baseline if the editor hasn't been touched yet —
@@ -399,7 +772,7 @@ export function EditorWorkspace() {
             const expectedParentSha = historyHeadRef.current;
             if (!expectedParentSha || before === after) return;
             const result = await historyStoreRef.current.append({
-              docId: HISTORY_DOC_ID,
+              docId: historyDocumentId,
               actor: HISTORY_ACTOR,
               expectedParentSha,
               schemaVersion: HISTORY_SCHEMA_VERSION,
@@ -410,7 +783,7 @@ export function EditorWorkspace() {
             if (!result.ok) return;
             historyTextRef.current = after;
             commitHistoryHead(result.entry.resultSha);
-            const entries = await historyStoreRef.current.list(HISTORY_DOC_ID);
+            const entries = await historyStoreRef.current.list(historyDocumentId);
             if (disposed) return;
             setHistoryEntries(entries);
             setSelectedHistoryEntryId(result.entry.id);
@@ -428,7 +801,11 @@ export function EditorWorkspace() {
       }
       editor.off('transaction', recordHistory);
     };
-  }, [editor, commitHistoryHead]);
+  }, [editor, historyDocumentId, commitHistoryHead]);
+
+  useEffect(() => {
+    setAcceptedSuggestionIds(acceptedIdsFromResolutions(suggestionResolutions));
+  }, [suggestionResolutions]);
 
   useEffect(() => {
     if (!editor) {
@@ -542,7 +919,13 @@ export function EditorWorkspace() {
         scrollIntoView: false,
       });
     win.__lashSerializeMarkdown = () =>
-      serializeDocToMarkdown(editor.getJSON(), { documentId: OUTLINE_DOC_ID }).markdown;
+      serializeDocToMarkdown(editor.getJSON(), { documentId: activeDocumentId }).markdown;
+    const realtimeApi = {
+      getSnapshot: () => realtimeCollaboration.provider.getSnapshot(),
+      disconnectForTest: () => realtimeCollaboration.provider.disconnectForTest(),
+      reconnectForTest: () => realtimeCollaboration.provider.reconnectForTest(),
+    };
+    win.__lashRealtime = realtimeApi;
     win.__lashInsertImageFromArrayBuffer = async (buffer: ArrayBuffer, mimeType = 'image/png') => {
       const file = new File([buffer], `import-${Date.now()}.${mimeType.split('/')[1] ?? 'png'}`, {
         type: mimeType,
@@ -558,9 +941,10 @@ export function EditorWorkspace() {
       delete win.__lashInsertTable;
       delete win.__lashSelectTableCells;
       delete win.__lashSerializeMarkdown;
+      if (win.__lashRealtime === realtimeApi) delete win.__lashRealtime;
       delete win.__lashInsertImageFromArrayBuffer;
     };
-  }, [editor, imageUploader, exposeTestHooks]);
+  }, [editor, imageUploader, activeDocumentId, exposeTestHooks, realtimeCollaboration]);
 
   const isEditorReady = Boolean(editor);
 
@@ -636,13 +1020,30 @@ export function EditorWorkspace() {
     });
   }, [historyAuthorFilter, historyTimeFilter]);
 
+  const recordSuggestionResolution = useCallback(
+    (entry: HistoryEntry, action: SuggestionResolutionAction) => {
+      const record: SuggestionResolutionRecord = {
+        id: `suggestion-resolution:${entry.id}:${action}`,
+        entryId: entry.id,
+        action,
+        ts: new Date().toISOString(),
+        actorId: HISTORY_ACTOR.id,
+      };
+      publishSuggestionResolutions([
+        ...suggestionResolutionsRef.current.filter((item) => item.entryId !== entry.id),
+        record,
+      ]);
+    },
+    [publishSuggestionResolutions],
+  );
+
   const handleAcceptSuggestion = useCallback(
     async (entry: HistoryEntry) => {
       if (!editor) return;
       const expectedParentSha = historyHeadRef.current;
       if (!expectedParentSha) return;
       const result = await historyStoreRef.current.append({
-        docId: HISTORY_DOC_ID,
+        docId: historyDocumentId,
         actor: HISTORY_ACTOR,
         expectedParentSha,
         schemaVersion: HISTORY_SCHEMA_VERSION,
@@ -660,13 +1061,14 @@ export function EditorWorkspace() {
       const text = editorText(editor);
       historyTextRef.current = text;
       commitHistoryHead(result.entry.resultSha);
-      const entries = await historyStoreRef.current.list(HISTORY_DOC_ID);
+      const entries = await historyStoreRef.current.list(historyDocumentId);
+      recordSuggestionResolution(entry, 'accepted');
       setAcceptedSuggestionIds((ids) => (ids.includes(entry.id) ? ids : [...ids, entry.id]));
       setHistoryEntries(entries);
       setSelectedHistoryEntryId(entry.id);
       setBlameLines(blameFor(entries, text));
     },
-    [editor, commitHistoryHead],
+    [editor, historyDocumentId, commitHistoryHead, recordSuggestionResolution],
   );
 
   const handleRejectSuggestion = useCallback(
@@ -674,13 +1076,13 @@ export function EditorWorkspace() {
       if (!editor) return;
       const expectedParentSha = historyHeadRef.current;
       if (!expectedParentSha) return;
-      const parent = await historyStoreRef.current.loadAt(HISTORY_DOC_ID, entry.parentSha);
+      const parent = await historyStoreRef.current.loadAt(historyDocumentId, entry.parentSha);
       const targetText =
         typeof parent === 'object' && parent && 'text' in parent ? String(parent.text) : '';
       const currentText = editorText(editor);
       if (currentText === targetText) return;
       const result = await historyStoreRef.current.append({
-        docId: HISTORY_DOC_ID,
+        docId: historyDocumentId,
         actor: HISTORY_ACTOR,
         expectedParentSha,
         schemaVersion: HISTORY_SCHEMA_VERSION,
@@ -697,25 +1099,29 @@ export function EditorWorkspace() {
       }
       historyTextRef.current = targetText;
       commitHistoryHead(result.entry.resultSha);
-      const entries = await historyStoreRef.current.list(HISTORY_DOC_ID);
+      const entries = await historyStoreRef.current.list(historyDocumentId);
+      recordSuggestionResolution(entry, 'rejected');
       setHistoryEntries(entries);
       setSelectedHistoryEntryId(result.entry.id);
       setBlameLines(blameFor(entries, targetText));
     },
-    [editor, commitHistoryHead],
+    [editor, historyDocumentId, commitHistoryHead, recordSuggestionResolution],
   );
 
   const handleRestoreHistoryEntry = useCallback(
     async (entry: HistoryEntry) => {
       if (!editor) return;
       const result = await historyStoreRef.current.restore(
-        HISTORY_DOC_ID,
+        historyDocumentId,
         entry.resultSha,
         HISTORY_ACTOR,
         HISTORY_AUDIT,
       );
       if (!result.ok) return;
-      const restored = await historyStoreRef.current.loadAt(HISTORY_DOC_ID, result.entry.resultSha);
+      const restored = await historyStoreRef.current.loadAt(
+        historyDocumentId,
+        result.entry.resultSha,
+      );
       const text =
         typeof restored === 'object' && restored && 'text' in restored ? String(restored.text) : '';
       applyingHistoryRef.current = true;
@@ -723,12 +1129,12 @@ export function EditorWorkspace() {
       applyingHistoryRef.current = false;
       historyTextRef.current = text;
       commitHistoryHead(result.entry.resultSha);
-      const entries = await historyStoreRef.current.list(HISTORY_DOC_ID);
+      const entries = await historyStoreRef.current.list(historyDocumentId);
       setHistoryEntries(entries);
       setSelectedHistoryEntryId(result.entry.id);
       setBlameLines(blameFor(entries, text));
     },
-    [editor, commitHistoryHead],
+    [editor, historyDocumentId, commitHistoryHead],
   );
 
   const handleApplyAiPatch = useCallback(
@@ -745,7 +1151,7 @@ export function EditorWorkspace() {
 
       const after = applyTextOperations(before, patch.operations);
       const result = await historyStoreRef.current.append({
-        docId: HISTORY_DOC_ID,
+        docId: historyDocumentId,
         actor: patch.author,
         expectedParentSha,
         schemaVersion: patch.schemaVersion,
@@ -763,13 +1169,13 @@ export function EditorWorkspace() {
       }
       historyTextRef.current = after;
       commitHistoryHead(result.entry.resultSha);
-      const entries = await historyStoreRef.current.list(HISTORY_DOC_ID);
+      const entries = await historyStoreRef.current.list(historyDocumentId);
       setHistoryEntries(entries);
       setSelectedHistoryEntryId(result.entry.id);
       setBlameLines(blameFor(entries, after));
       return { ok: true };
     },
-    [editor, commitHistoryHead],
+    [editor, historyDocumentId, commitHistoryHead],
   );
 
   // Cmd/Ctrl+Shift+F binding for focus mode. Touch devices never fire this
@@ -827,17 +1233,17 @@ export function EditorWorkspace() {
       event.target.value = '';
       if (!file || !editor) return;
       const text = await file.text();
-      const { doc, warnings } = parseMarkdownToDoc(text, { documentId: OUTLINE_DOC_ID });
+      const { doc, warnings } = parseMarkdownToDoc(text, { documentId: activeDocumentId });
       editor.commands.setContent(doc, false);
       showWarnings(warnings);
     },
-    [editor, showWarnings],
+    [editor, activeDocumentId, showWarnings],
   );
 
   const handleExportMarkdown = useCallback(() => {
     if (!editor) return;
     const { markdown, warnings } = serializeDocToMarkdown(editor.getJSON(), {
-      documentId: OUTLINE_DOC_ID,
+      documentId: activeDocumentId,
     });
     showWarnings(warnings);
     if (typeof window !== 'undefined') {
@@ -853,7 +1259,7 @@ export function EditorWorkspace() {
     link.click();
     document.body.removeChild(link);
     URL.revokeObjectURL(url);
-  }, [editor, showWarnings]);
+  }, [editor, activeDocumentId, showWarnings]);
 
   const currentText = editor ? editorText(editor) : '';
 
@@ -867,9 +1273,10 @@ export function EditorWorkspace() {
       content: (
         <ChatPanel
           editor={editor}
-          docId={HISTORY_DOC_ID}
+          docId={historyDocumentId}
           baseVersion={historyHead}
           currentText={currentText}
+          realtimeDoc={realtimeCollaboration.enabled ? realtimeCollaboration.doc : null}
         />
       ),
     },
@@ -886,6 +1293,7 @@ export function EditorWorkspace() {
           authorFilter={historyAuthorFilter}
           timeFilter={historyTimeFilter}
           acceptedSuggestionIds={acceptedSuggestionIds}
+          suggestionResolutions={suggestionResolutions}
           onSelect={handleSelectHistoryEntry}
           onRestore={handleRestoreHistoryEntry}
           onSetAuthorFilter={setHistoryAuthorFilter}
@@ -904,7 +1312,7 @@ export function EditorWorkspace() {
       content: (
         <AIPanel
           editor={editor}
-          docId={HISTORY_DOC_ID}
+          docId={historyDocumentId}
           baseVersion={historyHead}
           currentText={currentText}
           schemaVersion={HISTORY_SCHEMA_VERSION}
@@ -916,7 +1324,7 @@ export function EditorWorkspace() {
       id: 'share',
       label: 'Share',
       icon: 'share',
-      content: <SharePanel editor={editor} docId={HISTORY_DOC_ID} />,
+      content: <SharePanel editor={editor} docId={historyDocumentId} accessScope={inviteScope} />,
     },
     {
       id: 'activity',
@@ -925,21 +1333,181 @@ export function EditorWorkspace() {
       content: (
         <>
           <MentionPanel editor={editor} currentText={currentText} />
-          <OfflinePanel editor={editor} />
+          <OfflinePanel editor={editor} documentId={activeDocumentId} />
         </>
       ),
     },
   ];
 
-  const handleShareClick = useCallback((event: ReactMouseEvent<HTMLButtonElement>) => {
+  const handleCreateDocument = useCallback(() => {
+    const nextDocumentId = createNewDocumentId();
+    if (typeof window !== 'undefined') {
+      upsertDocument(window.localStorage, { id: nextDocumentId, title: DEFAULT_DOC_TITLE });
+      refreshDocuments();
+    }
+    router.push(toRoute(documentPath(nextDocumentId)));
+  }, [refreshDocuments, router]);
+
+  const handleOpenDocument = useCallback(
+    (event: ChangeEvent<HTMLSelectElement>) => {
+      router.push(toRoute(event.target.value));
+    },
+    [router],
+  );
+
+  const documentOptions = documents.some((record) => record.id === activeDocumentId)
+    ? documents
+    : [
+        {
+          id: activeDocumentId,
+          title: docTitle.trim() || DEFAULT_DOC_TITLE,
+          createdAt: new Date(0).toISOString(),
+          updatedAt: new Date(0).toISOString(),
+        },
+        ...documents,
+      ];
+
+  const documentControls = (
+    <div className="lash-document-controls">
+      <select
+        aria-label="Open document"
+        className="lash-document-select"
+        data-testid="document-open-select"
+        onChange={handleOpenDocument}
+        value={documentPath(activeDocumentId)}
+      >
+        {documentOptions.map((record) => (
+          <option key={record.id} value={documentPath(record.id)}>
+            {record.title}
+          </option>
+        ))}
+      </select>
+      <button
+        type="button"
+        className="lash-icon-btn lash-new-doc-button"
+        aria-label="New document"
+        data-testid="new-document-button"
+        data-tooltip="New document"
+        onClick={handleCreateDocument}
+      >
+        <Icon name="plus" />
+      </button>
+    </div>
+  );
+
+  const openSharePanel = useCallback((trigger?: HTMLElement | null) => {
     setActiveTab('share');
     setRailOpen(true);
     // On narrow widths the rail is a slide-in drawer.
     if (typeof window !== 'undefined' && window.matchMedia('(max-width: 767px)').matches) {
-      mobileRailTriggerRef.current = event.currentTarget;
+      if (trigger) {
+        mobileRailTriggerRef.current = trigger;
+      }
       setMobileRailOpen(true);
     }
   }, []);
+
+  const handleShareClick = useCallback(
+    (event: ReactMouseEvent<HTMLButtonElement>) => {
+      openSharePanel(event.currentTarget);
+    },
+    [openSharePanel],
+  );
+
+  const handleRealtimeRetry = useCallback(() => {
+    realtimeCollaboration.provider.reconnectNow();
+  }, [realtimeCollaboration]);
+
+  const remotePeers = realtimeSnapshot.peers;
+  const realtimeLabel = realtimeSyncLabels[realtimeSnapshot.syncState];
+  const showRealtimeRetry =
+    realtimeSnapshot.enabled &&
+    (realtimeSnapshot.syncState === 'reconnecting' || realtimeSnapshot.syncState === 'offline');
+  const realtimePresence = (
+    <div
+      className="lash-realtime-presence"
+      data-testid="realtime-presence-bar"
+      data-enabled={realtimeSnapshot.enabled ? 'true' : 'false'}
+    >
+      <span
+        className="lash-realtime-sync-state"
+        data-testid="realtime-sync-state"
+        data-state={realtimeSnapshot.syncState}
+        aria-hidden={realtimeSnapshot.enabled ? 'true' : undefined}
+      >
+        {realtimeLabel}
+      </span>
+      {realtimeSnapshot.enabled ? (
+        <span className="sr-only" data-testid="sync-feedback" aria-live="polite">
+          {realtimeLabel}
+        </span>
+      ) : null}
+      {showRealtimeRetry ? (
+        <button
+          type="button"
+          className="lash-sync-retry-button"
+          data-testid="sync-retry-button"
+          onClick={handleRealtimeRetry}
+        >
+          Retry
+        </button>
+      ) : null}
+      {remotePeers.length ? (
+        <div className="lash-realtime-peers" aria-label="Collaborators online">
+          {remotePeers.map((peer) => (
+            <span
+              key={peer.actorId}
+              className="lash-realtime-peer"
+              data-testid="remote-collaborator"
+              data-actor-id={peer.actorId}
+              style={{ '--presence-color': peer.color } as CSSProperties}
+              title={`${peer.label} is in this document`}
+            >
+              {peer.label}
+            </span>
+          ))}
+        </div>
+      ) : realtimeSnapshot.enabled ? (
+        <div className="lash-collaboration-empty" data-testid="collaboration-empty-state">
+          <span className="lash-realtime-empty" data-testid="remote-collaborator-empty">
+            Ready
+          </span>
+          <button
+            type="button"
+            className="lash-collaboration-share-shortcut"
+            data-testid="collaboration-share-shortcut"
+            aria-label="Invite collaborator"
+            onClick={() => openSharePanel()}
+          >
+            Invite
+          </button>
+        </div>
+      ) : (
+        <span className="lash-realtime-empty" data-testid="remote-collaborator-empty">
+          Solo
+        </span>
+      )}
+    </div>
+  );
+
+  const remoteCursorMarkers = remotePeers.map((peer) => {
+    const cursorText = peer.selection
+      ? peer.selection.from === peer.selection.to
+        ? `cursor ${peer.selection.from}`
+        : `selection ${peer.selection.from}-${peer.selection.to}`
+      : 'online';
+    return (
+      <span
+        key={peer.actorId}
+        className="lash-remote-cursor-marker"
+        data-testid="remote-cursor-marker"
+        data-actor-id={peer.actorId}
+        style={{ '--presence-color': peer.color } as CSSProperties}
+      >
+        {peer.label}: {cursorText}
+      </span>
+    );
+  });
 
   const handleOpenMobileSidebar = useCallback((event: ReactMouseEvent<HTMLButtonElement>) => {
     mobileSidebarTriggerRef.current = event.currentTarget;
@@ -957,10 +1525,33 @@ export function EditorWorkspace() {
     mobileRailTriggerRef.current?.focus();
   }, []);
 
+  const handleDocTitleChange = useCallback(
+    (event: ChangeEvent<HTMLInputElement>) => {
+      const nextTitle = event.target.value;
+      setDocTitle(nextTitle);
+      if (typeof window !== 'undefined') {
+        saveDocumentTitle(window.localStorage, activeDocumentId, nextTitle);
+        refreshDocuments();
+      }
+    },
+    [activeDocumentId, refreshDocuments],
+  );
+
+  const handleDocTitleBlur = useCallback(() => {
+    setDocTitle((value) => {
+      const normalizedTitle =
+        typeof window === 'undefined'
+          ? value.trim() || DEFAULT_DOC_TITLE
+          : saveDocumentTitle(window.localStorage, activeDocumentId, value);
+      refreshDocuments();
+      return normalizedTitle;
+    });
+  }, [activeDocumentId, refreshDocuments]);
+
   const topBar = (
     <TopBar
       editor={editor}
-      docTitle={DOC_TITLE}
+      docTitle={docTitle.trim() || DEFAULT_DOC_TITLE}
       focusMode={isFocusMode}
       suggestMode={isSuggestMode}
       railOpen={railOpen}
@@ -968,6 +1559,7 @@ export function EditorWorkspace() {
       onToggleSuggestMode={() => setIsSuggestMode((value) => !value)}
       onShareClick={handleShareClick}
       onOpenMobileSidebar={handleOpenMobileSidebar}
+      extras={documentControls}
     />
   );
 
@@ -1032,10 +1624,21 @@ export function EditorWorkspace() {
         <div className="lash-doc-wrap">
           <article className="lash-doc-paper" aria-labelledby="lash-doc-title-text">
             <header className="lash-doc-header">
-              <h1 className="lash-doc-title" id="lash-doc-title-text">
-                {DOC_TITLE}
-              </h1>
-              <div className="lash-doc-meta" aria-label="Document metadata">
+              <input
+                aria-label="Document title"
+                className="lash-doc-title lash-doc-title-input"
+                data-testid="lash-doc-title-input"
+                id="lash-doc-title-text"
+                onBlur={handleDocTitleBlur}
+                onChange={handleDocTitleChange}
+                type="text"
+                value={docTitle}
+              />
+              <div
+                className="lash-doc-meta"
+                aria-label="Document metadata"
+                data-testid="lash-doc-meta"
+              >
                 <span>Edited by Apollo</span>
                 <span className="lash-doc-meta-dot" aria-hidden="true" />
                 <span>
@@ -1044,6 +1647,16 @@ export function EditorWorkspace() {
                 <span className="lash-doc-meta-dot" aria-hidden="true" />
                 <span>
                   {outlineItems.length} section{outlineItems.length === 1 ? '' : 's'}
+                </span>
+                <span className="lash-doc-meta-dot" aria-hidden="true" />
+                <span data-testid="lash-doc-route">{documentPath(activeDocumentId)}</span>
+                <span className="lash-doc-meta-dot" aria-hidden="true" />
+                <span data-testid="invite-access-status">
+                  {inviteAccess === null
+                    ? 'Owner access'
+                    : inviteAccess.ok
+                      ? `Access granted: ${inviteAccess.scope}`
+                      : `Denied: ${inviteAccess.reason}`}
                 </span>
                 {isSuggestMode ? (
                   <>
@@ -1062,6 +1675,7 @@ export function EditorWorkspace() {
                   </>
                 ) : null}
               </div>
+              {realtimePresence}
             </header>
 
             {isEditorReady && activeTableCell && !isFocusMode ? (
@@ -1074,6 +1688,11 @@ export function EditorWorkspace() {
             ) : null}
 
             <div className="lash-editor-content-wrapper" role="region" aria-label="Document editor">
+              {remoteCursorMarkers.length ? (
+                <div className="lash-remote-cursor-layer" aria-label="Remote cursors">
+                  {remoteCursorMarkers}
+                </div>
+              ) : null}
               {!isMounted || !isEditorReady ? (
                 <div className="editor-loading">Preparing your editor…</div>
               ) : (

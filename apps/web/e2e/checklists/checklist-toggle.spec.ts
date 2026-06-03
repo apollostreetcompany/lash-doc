@@ -20,10 +20,10 @@ test.describe('checklist-toggle', () => {
     const editor = page.getByTestId('lash-editor-content');
     await editor.click();
 
-    await page.keyboard.type('Parent');
+    await page.keyboard.insertText('Parent');
     await page.keyboard.press(toggleChecklistShortcut);
     await page.keyboard.press('Enter');
-    await page.keyboard.type('Child');
+    await page.keyboard.insertText('Child');
     await page.keyboard.press('Tab');
 
     const items = editor.locator("li[data-type='taskItem']");

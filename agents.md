@@ -32,6 +32,11 @@ This doc is both an architectural overview and a **test‑driven contract**. It 
 
 ## High‑Level Architecture
 
+This is the target architecture for true online collaboration. As of Bead 26,
+the public Lash build is still a static local-first editor: history, share,
+offline, presence, and chat surfaces are local product contracts, not a
+production realtime backend.
+
 ```
 [Web App (Next.js/React)]
    ├── Editor Core (TipTap/ProseMirror or Lexical)
@@ -40,7 +45,7 @@ This doc is both an architectural overview and a **test‑driven contract**. It 
    ├── Doc Chat Panel (threaded; selection-anchored; diff-aware)
    └── Share/Permissions UI
 
-[Collaboration & History Service]
+[Collaboration & History Service - planned Beads 28-31]
    ├── CRDT room (Yjs) + Presence
    ├── Append-only update log + periodic snapshots
    ├── Diff & attribution service (deterministic)
@@ -72,7 +77,7 @@ Each agent is an automated collaborator in the monorepo. Agents produce **typed 
 
 ### 2) **Collab & History Agent**
 - **Mandate:** CRDT integration (Yjs), persistence (update log + snapshots), diff computation, restore endpoints.
-- **Outputs:** Deterministic diff lib, convergence tests, performance budgets.
+- **Outputs:** Deterministic diff lib, red/green two-client browser convergence tests, performance budgets.
 
 ### 3) **Authorship Agent**
 - **Mandate:** Maintain interval‑tree attribution per text node; map through edits; expose blame gutter + hover.
@@ -444,7 +449,7 @@ Each agent is an automated collaborator in the monorepo. Agents produce **typed 
 ## Rollout & Quality Gates
 
 - **Phase 0 Gate:** Rich text + outline + markdown + images + tables + checklists + autosave + focus mode + basic chips ✅
-- **Phase 1 Gate:** Live collab + history + deterministic diffs + restore + authorship ✅
+- **Phase 1 Gate:** History + deterministic diffs + restore + authorship are local; live online collab remains in progress and is guarded by Bead 26 red tests.
 - **Phase 2 Gate:** Mentions (users/groups/dates) + share links + RBAC + chat ✅
 - **Phase 3 Gate:** AI patch flow, guardrails, citations, filters ✅
 - **Ship Criteria:** All SLOs green on canary; a11y pass; cross‑browser matrix pass; data export/import sanity pass.

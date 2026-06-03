@@ -56,8 +56,9 @@
   --color-info-bg: #e3f3ff;
 
   /* Type scale */
-  --font-sans: var(--font-inter), 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI',
-    'Helvetica Neue', sans-serif;
+  --font-sans:
+    var(--font-inter), 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue',
+    sans-serif;
   --font-serif: 'Source Serif Pro', 'Charter', Georgia, serif;
   --font-mono: var(--font-jetbrains-mono), 'JetBrains Mono', 'SF Mono', Menlo, Consolas, monospace;
 
@@ -326,6 +327,40 @@ main[data-testid='lash-home'] > section {
   align-items: center;
   gap: var(--space-2);
   flex-shrink: 0;
+}
+
+.lash-document-controls {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+.lash-document-select {
+  appearance: none;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-paper);
+  color: var(--color-text-primary);
+  font-size: var(--text-meta);
+  height: 32px;
+  max-width: 180px;
+  min-width: 120px;
+  padding: 0 var(--space-7) 0 var(--space-2);
+  background-image:
+    linear-gradient(45deg, transparent 50%, currentColor 50%),
+    linear-gradient(135deg, currentColor 50%, transparent 50%);
+  background-position:
+    calc(100% - 14px) 13px,
+    calc(100% - 9px) 13px;
+  background-size:
+    5px 5px,
+    5px 5px;
+  background-repeat: no-repeat;
+}
+
+.lash-document-select:focus-visible {
+  outline: 2px solid var(--color-coral-400);
+  outline-offset: 2px;
 }
 
 .lash-share-button {
@@ -1005,10 +1040,29 @@ main[data-testid='lash-home'] > section {
   font-family: var(--font-sans);
   font-size: var(--text-h1);
   font-weight: 700;
-  letter-spacing: -0.025em;
+  letter-spacing: 0;
   color: var(--color-text-primary);
   margin: 0;
   line-height: 1.15;
+}
+
+.lash-doc-title-input {
+  appearance: none;
+  background: transparent;
+  border: 0;
+  box-sizing: border-box;
+  display: block;
+  padding: 0;
+  width: 100%;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.lash-doc-title-input:focus-visible {
+  outline: 2px solid var(--color-focus);
+  outline-offset: 4px;
+  border-radius: var(--radius-sm);
 }
 
 .lash-doc-meta {
@@ -1027,9 +1081,130 @@ main[data-testid='lash-home'] > section {
   background: var(--color-text-muted);
 }
 
+.lash-realtime-presence {
+  margin-top: var(--space-3);
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  color: var(--color-text-secondary);
+  font-size: var(--text-meta);
+}
+
+.lash-realtime-sync-state {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+  padding: 0 var(--space-2);
+  border-radius: var(--radius-pill);
+  border: 1px solid var(--color-border);
+  background: var(--color-rail-bg);
+  color: var(--color-text-secondary);
+  font-weight: 600;
+}
+
+.lash-realtime-sync-state[data-state='saved'] {
+  border-color: var(--color-success-bg);
+  background: var(--color-success-bg);
+  color: var(--color-success);
+}
+
+.lash-realtime-sync-state[data-state='syncing'],
+.lash-realtime-sync-state[data-state='connecting'],
+.lash-realtime-sync-state[data-state='reconnecting'] {
+  border-color: var(--color-warning-bg);
+  background: var(--color-warning-bg);
+  color: var(--color-warning);
+}
+
+.lash-realtime-sync-state[data-state='offline'] {
+  border-color: var(--color-danger-bg);
+  background: var(--color-danger-bg);
+  color: var(--color-danger);
+}
+
+.lash-sync-retry-button,
+.lash-collaboration-share-shortcut {
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 24px;
+  padding: 0 var(--space-2);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-pill);
+  background: var(--color-paper);
+  color: var(--color-text-secondary);
+  font-size: var(--text-meta);
+  font-weight: 600;
+  cursor: pointer;
+  transition:
+    background var(--transition-fast),
+    border-color var(--transition-fast),
+    color var(--transition-fast);
+}
+
+.lash-sync-retry-button:hover,
+.lash-collaboration-share-shortcut:hover {
+  background: var(--color-hover-bg);
+  border-color: var(--color-text-muted);
+  color: var(--color-text-primary);
+}
+
+.lash-realtime-peers {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+}
+
+.lash-collaboration-empty {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+}
+
+.lash-realtime-peer,
+.lash-realtime-empty,
+.lash-remote-cursor-marker {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+  border-radius: var(--radius-pill);
+  font-size: var(--text-meta);
+  line-height: 1;
+}
+
+.lash-realtime-peer {
+  padding: 0 var(--space-2);
+  border: 1px solid var(--presence-color, var(--color-border));
+  color: var(--color-text-primary);
+  background: var(--color-paper);
+  box-shadow: inset 3px 0 0 var(--presence-color, var(--color-border));
+}
+
+.lash-realtime-empty {
+  color: var(--color-text-muted);
+}
+
 .lash-editor-content-wrapper {
   padding: var(--space-3) var(--canvas-pad-x) var(--space-7);
   position: relative;
+}
+
+.lash-remote-cursor-layer {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-bottom: var(--space-3);
+}
+
+.lash-remote-cursor-marker {
+  padding: 0 var(--space-2);
+  color: var(--presence-color, var(--color-info));
+  border: 1px solid color-mix(in srgb, var(--presence-color, var(--color-info)) 30%, transparent);
+  background: color-mix(in srgb, var(--presence-color, var(--color-info)) 10%, var(--color-paper));
 }
 
 .editor-loading {
@@ -1049,6 +1224,18 @@ main[data-testid='lash-home'] > section {
 
 .lash-editor-content > * + * {
   margin-top: 0;
+}
+
+.lash-editor-content > p,
+.lash-editor-content > h1,
+.lash-editor-content > h2,
+.lash-editor-content > h3,
+.lash-editor-content > ul,
+.lash-editor-content > ol,
+.lash-editor-content > blockquote,
+.lash-editor-content > pre {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 2.2rem;
 }
 
 .lash-editor-content p {
@@ -1815,6 +2002,34 @@ li[data-type='taskItem'] > div p {
   color: var(--color-text-muted);
 }
 
+.suggestion-resolution-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.suggestion-resolution-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-hover-bg);
+  color: var(--color-text-secondary);
+  font-size: var(--text-meta);
+  font-weight: 500;
+}
+
+.suggestion-resolution-row > :first-child {
+  color: var(--color-text-primary);
+  text-transform: capitalize;
+}
+
 .history-filter {
   display: flex;
   justify-content: space-between;
@@ -2100,6 +2315,11 @@ li[data-type='taskItem'] > div p {
   font-weight: 500;
 }
 
+.chat-thread-status {
+  color: var(--color-text-secondary);
+  font-weight: 600;
+}
+
 .chat-context-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -2136,6 +2356,32 @@ li[data-type='taskItem'] > div p {
 .chat-message-list li[data-author-type='ai'] {
   background: var(--color-info-bg);
   border-left: 2px solid var(--color-info);
+}
+
+.chat-reply-row,
+.chat-thread-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.chat-reply-input {
+  flex: 1 1 140px;
+  min-width: 0;
+  height: 30px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-paper);
+  color: var(--color-text-primary);
+  font-size: var(--text-meta);
+  padding: 0 var(--space-3);
+}
+
+.chat-reply-input:focus {
+  outline: 0;
+  border-color: var(--color-coral-500);
+  box-shadow: 0 0 0 3px var(--color-coral-50);
 }
 
 /* AI panel */
@@ -2281,6 +2527,54 @@ li[data-type='taskItem'] > div p {
   gap: var(--space-1);
 }
 
+.invite-controls,
+.invite-list {
+  display: grid;
+  gap: var(--space-2);
+  margin-top: var(--space-3);
+}
+
+.invite-field {
+  display: grid;
+  gap: var(--space-1);
+  font-size: var(--text-caption);
+  color: var(--color-text-secondary);
+}
+
+.invite-field input,
+.invite-field select {
+  min-height: 30px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  padding: 0 var(--space-2);
+  background: var(--color-paper);
+  color: var(--color-text-primary);
+  font: inherit;
+}
+
+.invite-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  gap: var(--space-2);
+  align-items: center;
+  padding: var(--space-2);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-paper);
+  font-size: var(--text-caption);
+}
+
+.invite-row[data-status='revoked'],
+.invite-row[data-status='expired'] {
+  color: var(--color-text-muted);
+  background: var(--color-rail-bg);
+}
+
+.invite-row .share-action-button {
+  grid-column: 1 / -1;
+  justify-self: start;
+}
+
 .share-action-button {
   appearance: none;
   height: 28px;
@@ -2373,6 +2667,22 @@ li[data-type='taskItem'] > div p {
   background: var(--color-hover-bg);
   color: var(--color-text-muted);
   border-color: var(--color-border);
+}
+
+.lash-inline-mention {
+  display: inline-flex;
+  align-items: center;
+  max-width: 100%;
+  vertical-align: baseline;
+  border-radius: var(--radius-pill);
+  background: var(--color-info-bg);
+  color: var(--color-info);
+  font-size: 0.94em;
+  font-weight: 600;
+  line-height: 1.35;
+  padding: 1px 7px;
+  border: 1px solid rgba(0, 112, 210, 0.18);
+  white-space: nowrap;
 }
 
 /* Offline */
@@ -2706,6 +3016,11 @@ li[data-type='taskItem'] > div p {
     font-size: var(--text-meta);
   }
 
+  .lash-document-select {
+    max-width: 112px;
+    min-width: 88px;
+  }
+
   .lash-table-panel {
     margin: 0 var(--canvas-pad-x) var(--space-2);
   }
@@ -2976,11 +3291,21 @@ li[data-type='taskItem'] > div p {
   animation: lash-fade-up 280ms var(--ease-out-quart) both;
 }
 
-.lash-app[data-entrance='true'] .lash-topbar-actions > *:nth-child(1) { animation-delay: 220ms; }
-.lash-app[data-entrance='true'] .lash-topbar-actions > *:nth-child(2) { animation-delay: 250ms; }
-.lash-app[data-entrance='true'] .lash-topbar-actions > *:nth-child(3) { animation-delay: 280ms; }
-.lash-app[data-entrance='true'] .lash-topbar-actions > *:nth-child(4) { animation-delay: 310ms; }
-.lash-app[data-entrance='true'] .lash-topbar-actions > *:nth-child(5) { animation-delay: 340ms; }
+.lash-app[data-entrance='true'] .lash-topbar-actions > *:nth-child(1) {
+  animation-delay: 220ms;
+}
+.lash-app[data-entrance='true'] .lash-topbar-actions > *:nth-child(2) {
+  animation-delay: 250ms;
+}
+.lash-app[data-entrance='true'] .lash-topbar-actions > *:nth-child(3) {
+  animation-delay: 280ms;
+}
+.lash-app[data-entrance='true'] .lash-topbar-actions > *:nth-child(4) {
+  animation-delay: 310ms;
+}
+.lash-app[data-entrance='true'] .lash-topbar-actions > *:nth-child(5) {
+  animation-delay: 340ms;
+}
 
 /* -- Sidebar nav stagger ------------------------------------------------ */
 
@@ -2988,12 +3313,24 @@ li[data-type='taskItem'] > div p {
   animation: lash-fade-up 260ms var(--ease-out-quart) both;
 }
 
-.lash-app[data-entrance='true'] .lash-sidebar-nav > .lash-sidebar-item:nth-child(1) { animation-delay: 180ms; }
-.lash-app[data-entrance='true'] .lash-sidebar-nav > .lash-sidebar-item:nth-child(2) { animation-delay: 210ms; }
-.lash-app[data-entrance='true'] .lash-sidebar-nav > .lash-sidebar-item:nth-child(3) { animation-delay: 240ms; }
-.lash-app[data-entrance='true'] .lash-sidebar-nav > .lash-sidebar-item:nth-child(4) { animation-delay: 270ms; }
-.lash-app[data-entrance='true'] .lash-sidebar-nav > .lash-sidebar-item:nth-child(5) { animation-delay: 300ms; }
-.lash-app[data-entrance='true'] .lash-sidebar-nav > .lash-sidebar-item:nth-child(6) { animation-delay: 330ms; }
+.lash-app[data-entrance='true'] .lash-sidebar-nav > .lash-sidebar-item:nth-child(1) {
+  animation-delay: 180ms;
+}
+.lash-app[data-entrance='true'] .lash-sidebar-nav > .lash-sidebar-item:nth-child(2) {
+  animation-delay: 210ms;
+}
+.lash-app[data-entrance='true'] .lash-sidebar-nav > .lash-sidebar-item:nth-child(3) {
+  animation-delay: 240ms;
+}
+.lash-app[data-entrance='true'] .lash-sidebar-nav > .lash-sidebar-item:nth-child(4) {
+  animation-delay: 270ms;
+}
+.lash-app[data-entrance='true'] .lash-sidebar-nav > .lash-sidebar-item:nth-child(5) {
+  animation-delay: 300ms;
+}
+.lash-app[data-entrance='true'] .lash-sidebar-nav > .lash-sidebar-item:nth-child(6) {
+  animation-delay: 330ms;
+}
 
 /* -- Rail tab + section entrance ---------------------------------------- */
 
@@ -3001,21 +3338,41 @@ li[data-type='taskItem'] > div p {
   animation: lash-fade-up 260ms var(--ease-out-quart) both;
 }
 
-.lash-app[data-entrance='true'] .lash-rail-tabs .lash-rail-tab:nth-child(1) { animation-delay: 260ms; }
-.lash-app[data-entrance='true'] .lash-rail-tabs .lash-rail-tab:nth-child(2) { animation-delay: 285ms; }
-.lash-app[data-entrance='true'] .lash-rail-tabs .lash-rail-tab:nth-child(3) { animation-delay: 310ms; }
-.lash-app[data-entrance='true'] .lash-rail-tabs .lash-rail-tab:nth-child(4) { animation-delay: 335ms; }
-.lash-app[data-entrance='true'] .lash-rail-tabs .lash-rail-tab:nth-child(5) { animation-delay: 360ms; }
+.lash-app[data-entrance='true'] .lash-rail-tabs .lash-rail-tab:nth-child(1) {
+  animation-delay: 260ms;
+}
+.lash-app[data-entrance='true'] .lash-rail-tabs .lash-rail-tab:nth-child(2) {
+  animation-delay: 285ms;
+}
+.lash-app[data-entrance='true'] .lash-rail-tabs .lash-rail-tab:nth-child(3) {
+  animation-delay: 310ms;
+}
+.lash-app[data-entrance='true'] .lash-rail-tabs .lash-rail-tab:nth-child(4) {
+  animation-delay: 335ms;
+}
+.lash-app[data-entrance='true'] .lash-rail-tabs .lash-rail-tab:nth-child(5) {
+  animation-delay: 360ms;
+}
 
 .lash-app[data-entrance='true'] .lash-rail-section {
   animation: lash-fade-up 320ms var(--ease-out-quart) both;
 }
 
-.lash-app[data-entrance='true'] .lash-rail-section:nth-of-type(1) { animation-delay: 320ms; }
-.lash-app[data-entrance='true'] .lash-rail-section:nth-of-type(2) { animation-delay: 360ms; }
-.lash-app[data-entrance='true'] .lash-rail-section:nth-of-type(3) { animation-delay: 400ms; }
-.lash-app[data-entrance='true'] .lash-rail-section:nth-of-type(4) { animation-delay: 440ms; }
-.lash-app[data-entrance='true'] .lash-rail-section:nth-of-type(5) { animation-delay: 480ms; }
+.lash-app[data-entrance='true'] .lash-rail-section:nth-of-type(1) {
+  animation-delay: 320ms;
+}
+.lash-app[data-entrance='true'] .lash-rail-section:nth-of-type(2) {
+  animation-delay: 360ms;
+}
+.lash-app[data-entrance='true'] .lash-rail-section:nth-of-type(3) {
+  animation-delay: 400ms;
+}
+.lash-app[data-entrance='true'] .lash-rail-section:nth-of-type(4) {
+  animation-delay: 440ms;
+}
+.lash-app[data-entrance='true'] .lash-rail-section:nth-of-type(5) {
+  animation-delay: 480ms;
+}
 
 /* The active section's coral ring should glide in, not pop. */
 .lash-rail-section {
@@ -3241,10 +3598,18 @@ li[data-type='taskItem'] > div p {
   animation: lash-pop-in 320ms var(--ease-out-quart) both;
 }
 
-.lash-app[data-entrance='true'] .lash-avatar-stack .lash-avatar:nth-child(1) { animation-delay: 240ms; }
-.lash-app[data-entrance='true'] .lash-avatar-stack .lash-avatar:nth-child(2) { animation-delay: 280ms; }
-.lash-app[data-entrance='true'] .lash-avatar-stack .lash-avatar:nth-child(3) { animation-delay: 320ms; }
-.lash-app[data-entrance='true'] .lash-avatar-stack .lash-avatar:nth-child(4) { animation-delay: 360ms; }
+.lash-app[data-entrance='true'] .lash-avatar-stack .lash-avatar:nth-child(1) {
+  animation-delay: 240ms;
+}
+.lash-app[data-entrance='true'] .lash-avatar-stack .lash-avatar:nth-child(2) {
+  animation-delay: 280ms;
+}
+.lash-app[data-entrance='true'] .lash-avatar-stack .lash-avatar:nth-child(3) {
+  animation-delay: 320ms;
+}
+.lash-app[data-entrance='true'] .lash-avatar-stack .lash-avatar:nth-child(4) {
+  animation-delay: 360ms;
+}
 
 .lash-avatar {
   transition: transform var(--dur-base) var(--ease-out-quart);

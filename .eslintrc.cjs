@@ -24,6 +24,7 @@ module.exports = {
     next: {
       rootDir: ['apps/web'],
     },
+    'import/core-modules': ['cloudflare:workers'],
     'import/resolver': {
       typescript: {
         project: ['./tsconfig.json'],

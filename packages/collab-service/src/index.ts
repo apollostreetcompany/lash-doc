@@ -1,15 +1,18 @@
 /**
- * @lash/collab-service — Yjs-backed CRDT broker, presence, and offline queue.
- * Status: SCAFFOLD — implement in M2/C1.
+ * @lash/collab-service — local scaffold for the future Yjs-backed CRDT
+ * broker, presence, and offline queue.
+ * Status: LOCAL SCAFFOLD. It encodes EditorOp arrays into Uint8Array values
+ * and emits them inside the current JS process only. It does not import Yjs,
+ * open a websocket, persist updates, or synchronize separate browsers yet.
  *
  * Boundary (per proconsult-m0/B P1 #15):
- *   - Wire protocol = Yjs `Uint8Array` updates. CRDT convergence is owned
- *     entirely by Yjs and travels as raw updates over the WS transport.
+ *   - Future wire protocol = Yjs `Uint8Array` updates. CRDT convergence will
+ *     be owned by Yjs and travel as raw updates over the websocket transport.
  *   - Persisted history = `EditorOp[]` in `HistoryEntry` (canonical
  *     replay/diff/authorship unit).
- *   - The collab-service translates between the two: incoming Yjs updates
- *     are normalized into `EditorOp` for history; outgoing replay/restore
- *     ops are converted back to Yjs updates for broadcast.
+ *   - The production collab-service will translate between the two: incoming
+ *     Yjs updates are normalized into `EditorOp` for history; outgoing
+ *     replay/restore ops are converted back to Yjs updates for broadcast.
  *
  * The CollabRoom interface deliberately exposes BOTH paths so callers can
  * pick the right one for their use case.
@@ -29,18 +32,18 @@ export interface PresenceState {
 export interface CollabRoom {
   readonly docId: DocumentId;
 
-  // ---- Network primitive (Yjs updates) ----
+  // ---- Future network primitive (Yjs-shaped updates) ----
 
-  /** Apply a Yjs update to the local replica and broadcast to peers. */
+  /** Apply a binary update to the local scaffold and emit to local subscribers. */
   applyYjsUpdate(update: Uint8Array, origin?: unknown): void;
-  /** Subscribe to remote Yjs updates. Returns an unsubscribe fn. */
+  /** Subscribe to local binary updates. Returns an unsubscribe fn. */
   onYjsUpdate(handler: (update: Uint8Array, origin: unknown) => void): () => void;
 
   // ---- Semantic op pipeline (canonical EditorOp) ----
 
-  /** Normalize a Yjs update into EditorOps for history persistence. */
+  /** Decode a scaffold update into EditorOps for history persistence tests. */
   toEditorOps(update: Uint8Array): EditorOp[];
-  /** Convert EditorOps back into a Yjs update for broadcast/replay. */
+  /** Encode EditorOps back into a scaffold update for replay tests. */
   fromEditorOps(ops: EditorOp[]): Uint8Array;
 
   // ---- Presence ----

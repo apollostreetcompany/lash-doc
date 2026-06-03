@@ -8,9 +8,9 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 
 export interface OfflinePanelProps {
   editor: Editor | null;
+  documentId: string;
 }
 
-const docId = createDocumentId('demo-document');
 const actor = { type: 'user', id: 'local-user' } as const;
 
 const editorText = (editor: Editor) => editor.getText({ blockSeparator: '\n' });
@@ -41,15 +41,15 @@ const applyTextOp = (text: string, op: EditorOp) => {
   return `${text.slice(0, op.from)}${op.text}${text.slice(op.to)}`;
 };
 
-export function OfflinePanel({ editor }: OfflinePanelProps) {
+export function OfflinePanel({ editor, documentId }: OfflinePanelProps) {
   const room = useMemo(
     () =>
       createLocalCollabRoom({
-        docId,
+        docId: createDocumentId(documentId),
         actor,
         wsEndpoint: 'local://lash-web',
       }),
-    [],
+    [documentId],
   );
   const [online, setOnline] = useState(room.isOnline());
   const [queueDepth, setQueueDepth] = useState(room.getQueueDepth());

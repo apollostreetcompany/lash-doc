@@ -20,10 +20,10 @@ test.describe('checklist-nesting', () => {
     const editor = page.getByTestId('lash-editor-content');
     await editor.click();
 
-    await page.keyboard.type('Top Task');
+    await page.keyboard.insertText('Top Task');
     await page.keyboard.press(toggleChecklistShortcut);
     await page.keyboard.press('Enter');
-    await page.keyboard.type('Nested Task');
+    await page.keyboard.insertText('Nested Task');
     await page.keyboard.press('Tab');
 
     const items = editor.locator("li[data-type='taskItem']");
@@ -31,9 +31,7 @@ test.describe('checklist-nesting', () => {
 
     // After Tab, the nested item should be a descendant of another taskItem.
     const nestedItem = items.nth(1);
-    await expect(
-      nestedItem.locator("xpath=ancestor::li[@data-type='taskItem'][1]"),
-    ).toBeVisible();
+    await expect(nestedItem.locator("xpath=ancestor::li[@data-type='taskItem'][1]")).toBeVisible();
 
     // Toggle the outer (top) item; the nested item must keep its own state.
     const checkboxes = items.locator("input[type='checkbox']");
@@ -52,8 +50,8 @@ test.describe('checklist-nesting', () => {
     // After outdent, the formerly-nested item is no longer a descendant of a
     // taskItem — its closest taskItem ancestor is itself (it has none above).
     const requeryNested = updatedItems.nth(1);
-    const parentAfterOutdent = await requeryNested.evaluate(
-      (node) => node.parentElement?.parentElement?.getAttribute('data-type'),
+    const parentAfterOutdent = await requeryNested.evaluate((node) =>
+      node.parentElement?.parentElement?.getAttribute('data-type'),
     );
     expect(parentAfterOutdent).not.toBe('taskItem');
   });
