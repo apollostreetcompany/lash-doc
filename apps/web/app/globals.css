@@ -1123,15 +1123,6 @@ main[data-testid='lash-home'] > section {
   color: var(--color-danger);
 }
 
-.lash-sync-feedback {
-  display: inline-flex;
-  align-items: center;
-  min-height: 24px;
-  color: var(--color-text-muted);
-  font-size: var(--text-meta);
-  font-weight: 500;
-}
-
 .lash-sync-retry-button,
 .lash-collaboration-share-shortcut {
   appearance: none;

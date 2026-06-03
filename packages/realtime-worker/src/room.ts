@@ -1,5 +1,6 @@
 import { DurableObject } from 'cloudflare:workers';
 
+import type { RealtimeCapability, RealtimeInviteScope } from './access';
 import {
   buildHydrationUpdates,
   isRealtimeUpdatePayload,
@@ -30,6 +31,8 @@ type AwarenessState = {
 type SocketAttachment = {
   actorId: string;
   roomId: string;
+  capabilities: RealtimeCapability[];
+  scope?: RealtimeInviteScope;
   connectedAt: number;
   awareness?: AwarenessState;
 };
@@ -73,19 +76,36 @@ const readAttachment = (ws: WebSocket): SocketAttachment => {
     if (
       typeof attachment.actorId === 'string' &&
       typeof attachment.roomId === 'string' &&
+      Array.isArray(attachment.capabilities) &&
       typeof attachment.connectedAt === 'number'
     ) {
       const awareness = isAwarenessState(attachment.awareness) ? attachment.awareness : undefined;
       return {
         actorId: attachment.actorId,
         roomId: attachment.roomId,
+        capabilities: attachment.capabilities.filter(
+          (capability): capability is RealtimeCapability =>
+            capability === 'doc.read' || capability === 'doc.edit',
+        ),
+        scope:
+          attachment.scope === 'view' ||
+          attachment.scope === 'comment' ||
+          attachment.scope === 'suggest' ||
+          attachment.scope === 'edit'
+            ? attachment.scope
+            : undefined,
         connectedAt: attachment.connectedAt,
         ...(awareness ? { awareness } : {}),
       };
     }
   }
 
-  return { actorId: 'unknown-actor', roomId: 'unknown-room', connectedAt: Date.now() };
+  return {
+    actorId: 'unknown-actor',
+    roomId: 'unknown-room',
+    capabilities: [],
+    connectedAt: Date.now(),
+  };
 };
 
 const parseClientMessage = (message: string | ArrayBuffer): ClientMessage | null => {
@@ -105,6 +125,19 @@ const parseClientMessage = (message: string | ArrayBuffer): ClientMessage | null
 const isValidYjsUpdate = (update: string) => {
   return isRealtimeUpdatePayload(update);
 };
+
+const capabilitiesFromQuery = (value: string | null): RealtimeCapability[] =>
+  (value ?? '')
+    .split(',')
+    .filter(
+      (capability): capability is RealtimeCapability =>
+        capability === 'doc.read' || capability === 'doc.edit',
+    );
+
+const scopeFromQuery = (value: string | null): RealtimeInviteScope | undefined =>
+  value === 'view' || value === 'comment' || value === 'suggest' || value === 'edit'
+    ? value
+    : undefined;
 
 const isAwarenessSelection = (value: unknown): value is AwarenessSelection => {
   if (!value || typeof value !== 'object') return false;
@@ -322,6 +355,16 @@ export class LashRealtimeRoom extends DurableObject<Env> {
     }
 
     if (parsed.type === 'yjs-update') {
+      if (!attachment.capabilities.includes('doc.edit')) {
+        ws.send(
+          JSON.stringify({
+            type: 'error',
+            roomId: attachment.roomId,
+            code: 'scope_mismatch',
+          }),
+        );
+        return;
+      }
       if (typeof parsed.update !== 'string') {
         ws.send(
           JSON.stringify({
@@ -393,6 +436,9 @@ export class LashRealtimeRoom extends DurableObject<Env> {
     if (request.headers.get('Upgrade')?.toLowerCase() !== 'websocket') {
       return json({ ok: false, error: 'expected_websocket' }, { status: 426 });
     }
+    const url = new URL(request.url);
+    const capabilities = capabilitiesFromQuery(url.searchParams.get('capabilities'));
+    const scope = scopeFromQuery(url.searchParams.get('scope'));
 
     const pair = new WebSocketPair();
     const [client, server] = Object.values(pair) as [WebSocket, WebSocket];
@@ -400,6 +446,8 @@ export class LashRealtimeRoom extends DurableObject<Env> {
     server.serializeAttachment({
       actorId,
       roomId,
+      capabilities,
+      ...(scope ? { scope } : {}),
       connectedAt: Date.now(),
     } satisfies SocketAttachment);
     const hydrationUpdates = this.hydrationUpdates();

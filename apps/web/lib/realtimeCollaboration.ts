@@ -52,7 +52,11 @@ type RealtimeMessage =
   | { type: 'error'; code?: string };
 
 type SessionResponse =
-  | { ok: true; accessToken: string; grant: { actorId: string } }
+  | {
+      ok: true;
+      accessToken: string;
+      grant: { actorId: string; capabilities?: string[] };
+    }
   | { ok: false; reason?: string };
 
 const bytesToBase64 = (bytes: Uint8Array) => {
@@ -222,6 +226,7 @@ export class LashRealtimeYjsProvider {
   private status: RealtimeConnectionState;
   private localSelection: RealtimeSelection | null = null;
   private updateCounter = 0;
+  private canWrite: boolean | null = null;
   private destroyed = false;
 
   constructor({ actorId, doc, inviteToken, roomId, socketBaseUrl }: RealtimeProviderOptions) {
@@ -327,6 +332,13 @@ export class LashRealtimeYjsProvider {
       this.handleConnectFailure();
       return;
     }
+    this.canWrite = Array.isArray(session.grant.capabilities)
+      ? session.grant.capabilities.includes('doc.edit')
+      : false;
+    if (!this.canWrite) {
+      this.queuedUpdates = [];
+      this.pendingUpdateIds.clear();
+    }
 
     const socket = new WebSocket(socketUrl(this.socketBaseUrl, this.roomId, session.accessToken));
     this.socket = socket;
@@ -334,9 +346,11 @@ export class LashRealtimeYjsProvider {
     socket.addEventListener('open', () => {
       this.clearReconnectTimer();
       this.setConnectionState('connected');
-      this.sendUpdate(Y.encodeStateAsUpdate(this.doc));
-      for (const queued of this.queuedUpdates.splice(0)) {
-        this.sendUpdatePayload(queued.update, queued.updateId);
+      if (this.canWrite) {
+        this.sendUpdate(Y.encodeStateAsUpdate(this.doc));
+        for (const queued of this.queuedUpdates.splice(0)) {
+          this.sendUpdatePayload(queued.update, queued.updateId);
+        }
       }
       this.sendAwareness();
     });
@@ -388,6 +402,14 @@ export class LashRealtimeYjsProvider {
       return;
     }
 
+    if (message.type === 'error' && message.code === 'scope_mismatch') {
+      this.canWrite = false;
+      this.queuedUpdates = [];
+      this.pendingUpdateIds.clear();
+      this.emit();
+      return;
+    }
+
     if (message.type === 'awareness-state' && Array.isArray(message.peers)) {
       const nextPeers = new Map<string, RealtimePresencePeer>();
       for (const peer of message.peers) {
@@ -402,6 +424,7 @@ export class LashRealtimeYjsProvider {
 
   private sendUpdate(update: Uint8Array) {
     if (!update.length) return;
+    if (this.canWrite === false) return;
     const updateId = this.nextUpdateId();
     const socket = this.socket;
     if (!socket || socket.readyState !== WebSocket.OPEN) {
@@ -414,6 +437,7 @@ export class LashRealtimeYjsProvider {
 
   private sendUpdatePayload(update: Uint8Array, updateId: string) {
     if (!update.length) return;
+    if (this.canWrite === false) return;
     const socket = this.socket;
     if (!socket || socket.readyState !== WebSocket.OPEN) {
       this.queuedUpdates.push({ update, updateId });

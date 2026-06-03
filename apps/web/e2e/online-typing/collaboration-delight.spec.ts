@@ -3,12 +3,18 @@ import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
 import { once } from 'node:events';
 
 type LashTestWindow = Window & {
-  __lashEditor?: unknown;
+  __lashEditor?: {
+    commands: {
+      focus: (position?: 'start' | 'end') => boolean;
+    };
+    getText: (options?: { blockSeparator?: string }) => string;
+  };
   __lashRealtime?: {
     disconnectForTest: () => void;
     reconnectForTest: () => void;
     getSnapshot: () => { syncState: string };
   };
+  __lashLastInviteLink?: string;
 };
 
 const REALTIME_PORT = 8788;
@@ -102,11 +108,38 @@ const realtimeSnapshot = (page: Page) =>
     return api.getSnapshot();
   });
 
+const editorText = (page: Page) =>
+  page.evaluate(
+    () => (window as LashTestWindow).__lashEditor?.getText({ blockSeparator: '\n' }) ?? '',
+  );
+
+const typeIntoEditor = async (page: Page, text: string) => {
+  await page.evaluate(() => {
+    const editor = (window as LashTestWindow).__lashEditor;
+    if (!editor) throw new Error('Lash editor test hook is unavailable');
+    editor.commands.focus('end');
+  });
+  await page.keyboard.type(text);
+  await expect.poll(() => editorText(page)).toContain(text);
+};
+
 test.describe.configure({ mode: 'serial' });
 
 test.describe('collaboration delight', () => {
   test.beforeAll(startRealtimeWorker);
   test.afterAll(stopRealtimeWorker);
+
+  test('local-only documents do not advertise realtime collaboration', async ({ page }) => {
+    await page.goto(`/doc/bead-36-local-only-${Date.now()}`);
+    await waitForEditor(page);
+
+    await expect(page.getByTestId('realtime-presence-bar')).toHaveAttribute(
+      'data-enabled',
+      'false',
+    );
+    await expect(page.getByTestId('collaboration-empty-state')).toHaveCount(0);
+    await expect(page.getByTestId('remote-collaborator-empty')).toContainText('Solo');
+  });
 
   test('first-run collaboration state can open invite flow', async ({ browser }) => {
     const context = await browser.newContext();
@@ -121,6 +154,61 @@ test.describe('collaboration delight', () => {
     await expect(page.getByTestId('invite-email-input')).toBeVisible();
 
     await context.close();
+  });
+
+  test('view invite can hydrate realtime content without body edit access', async ({ browser }) => {
+    const docId = `bead-36-view-hydrate-${Date.now()}`;
+    const ownerContext = await browser.newContext();
+    await enableLocalRealtime(ownerContext, 'delight-view-owner');
+    const ownerPage = await ownerContext.newPage();
+
+    try {
+      await ownerPage.goto(`/doc/${docId}`);
+      await waitForEditor(ownerPage);
+      await typeIntoEditor(ownerPage, 'Read-only realtime content');
+      await expect.poll(() => realtimeSnapshot(ownerPage)).toMatchObject({ syncState: 'saved' });
+
+      await ownerPage.getByTestId('collaboration-share-shortcut').click();
+      await ownerPage.getByTestId('invite-email-input').fill('reader@example.com');
+      await ownerPage.getByTestId('invite-role-select').selectOption('view');
+      await ownerPage.getByTestId('invite-expiry-select').selectOption('7d');
+      await ownerPage.getByTestId('invite-create').click();
+      await expect(ownerPage.getByTestId('invite-copy-status')).toContainText('Copied');
+      const link = await ownerPage.evaluate(
+        () => (window as LashTestWindow).__lashLastInviteLink ?? '',
+      );
+
+      const readerContext = await browser.newContext();
+      await enableLocalRealtime(readerContext, 'delight-view-reader');
+      const readerPage = await readerContext.newPage();
+      try {
+        await readerPage.goto(link);
+        await waitForEditor(readerPage);
+        await expect(readerPage.getByTestId('invite-access-status')).toContainText(
+          'Access granted: view',
+        );
+        await expect
+          .poll(() => realtimeSnapshot(readerPage))
+          .toMatchObject({
+            syncState: 'saved',
+          });
+        await expect.poll(() => editorText(readerPage)).toContain('Read-only realtime content');
+
+        await readerPage.evaluate(() => {
+          const editor = (window as LashTestWindow).__lashEditor;
+          if (!editor) throw new Error('Lash editor test hook is unavailable');
+          editor.commands.focus('end');
+        });
+        await readerPage.keyboard.type('Reader body edit should not land');
+        await expect
+          .poll(() => editorText(readerPage))
+          .not.toContain('Reader body edit should not land');
+      } finally {
+        await readerContext.close();
+      }
+    } finally {
+      await ownerContext.close();
+    }
   });
 
   test('reconnect feedback includes a retry action', async ({ browser }) => {

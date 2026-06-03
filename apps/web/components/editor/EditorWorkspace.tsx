@@ -1421,7 +1421,8 @@ export function EditorWorkspace({ documentId = DEFAULT_DOCUMENT_ID }: EditorWork
   const remotePeers = realtimeSnapshot.peers;
   const realtimeLabel = realtimeSyncLabels[realtimeSnapshot.syncState];
   const showRealtimeRetry =
-    realtimeSnapshot.syncState === 'reconnecting' || realtimeSnapshot.syncState === 'offline';
+    realtimeSnapshot.enabled &&
+    (realtimeSnapshot.syncState === 'reconnecting' || realtimeSnapshot.syncState === 'offline');
   const realtimePresence = (
     <div
       className="lash-realtime-presence"
@@ -1432,12 +1433,15 @@ export function EditorWorkspace({ documentId = DEFAULT_DOCUMENT_ID }: EditorWork
         className="lash-realtime-sync-state"
         data-testid="realtime-sync-state"
         data-state={realtimeSnapshot.syncState}
+        aria-hidden={realtimeSnapshot.enabled ? 'true' : undefined}
       >
         {realtimeLabel}
       </span>
-      <span className="lash-sync-feedback" data-testid="sync-feedback" aria-live="polite">
-        {realtimeLabel}
-      </span>
+      {realtimeSnapshot.enabled ? (
+        <span className="sr-only" data-testid="sync-feedback" aria-live="polite">
+          {realtimeLabel}
+        </span>
+      ) : null}
       {showRealtimeRetry ? (
         <button
           type="button"
@@ -1463,7 +1467,7 @@ export function EditorWorkspace({ documentId = DEFAULT_DOCUMENT_ID }: EditorWork
             </span>
           ))}
         </div>
-      ) : (
+      ) : realtimeSnapshot.enabled ? (
         <div className="lash-collaboration-empty" data-testid="collaboration-empty-state">
           <span className="lash-realtime-empty" data-testid="remote-collaborator-empty">
             Ready
@@ -1478,6 +1482,10 @@ export function EditorWorkspace({ documentId = DEFAULT_DOCUMENT_ID }: EditorWork
             Invite
           </button>
         </div>
+      ) : (
+        <span className="lash-realtime-empty" data-testid="remote-collaborator-empty">
+          Solo
+        </span>
       )}
     </div>
   );

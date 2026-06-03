@@ -82,6 +82,8 @@ const roomRequest = (
   url.search = new URLSearchParams({
     actorId: grant.actorId,
     roomId,
+    capabilities: grant.capabilities.join(','),
+    ...(grant.scope ? { scope: grant.scope } : {}),
   }).toString();
   return new Request(url, request);
 };
@@ -146,7 +148,7 @@ export default {
     if (route.kind === 'room-socket') {
       const decision = await verifyRealtimeSessionToken(accessTokenFor(request, url), secret, {
         documentId: route.roomId,
-        capability: 'doc.edit',
+        capability: 'doc.read',
       });
       if (!decision.ok) return deny(decision.reason);
       const stub = env.LASH_REALTIME_ROOM.getByName(route.roomId);

@@ -208,6 +208,44 @@ describe('realtime actor access boundary', () => {
     });
   });
 
+  it('lets view invite grants open read-scoped sockets without granting edit updates', async () => {
+    const invite = await createInvite('view');
+    const decision = await createRealtimeGrantFromInviteToken(
+      'Readonly Reader',
+      'doc-alpha',
+      invite.token,
+      inviteSecret,
+      { now },
+    );
+
+    expect(decision).toMatchObject({
+      ok: true,
+      grant: expect.objectContaining({
+        actorId: 'readonly-reader',
+        documentId: 'doc-alpha',
+        scope: 'view',
+        capabilities: ['doc.read'],
+      }),
+    });
+    if (!decision.ok) return;
+
+    const token = await createRealtimeSessionToken(decision.grant, secret);
+    await expect(
+      verifyRealtimeSessionToken(token, secret, {
+        documentId: 'doc-alpha',
+        capability: 'doc.read',
+        now,
+      }),
+    ).resolves.toMatchObject({ ok: true });
+    await expect(
+      verifyRealtimeSessionToken(token, secret, {
+        documentId: 'doc-alpha',
+        capability: 'doc.edit',
+        now,
+      }),
+    ).resolves.toEqual({ ok: false, reason: 'scope-mismatch' });
+  });
+
   it('denies invalid, expired, revoked, and wrong-document invite exchanges', async () => {
     const invite = await createInvite('comment');
     const expired = await createInvite('edit', '2026-06-03T17:00:00.000Z');
