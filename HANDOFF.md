@@ -32,6 +32,7 @@
 - Bead 31 PR #23 is open and stacked on PR #22: `https://github.com/apollostreetcompany/lash-doc/pull/23`.
 - After Bead 31, the online typing gate has 5 passing tests: unauthorized access denial, same-doc remote visibility, concurrent convergence, reload durability, and snapshot compaction without deleting update history.
 - Bead 32 is complete on branch `codex/perf/bead-32-large-doc-typing-performance`: local documents no longer enable the collaboration runtime unless realtime is explicitly configured/opted in, outline scans are deferred for body-text transactions, offscreen editor blocks use CSS containment, and 10k/50k-word browser typing gates prove p95 input work stays under the 8 ms SLO.
+- Bead 32 PR #24 is open and stacked on PR #23: `https://github.com/apollostreetcompany/lash-doc/pull/24`.
 - Static Cloudflare Pages export still fails for arbitrary `/doc/[id]`; Bead 28 solves realtime room hosting, not the final web app dynamic-route hosting strategy.
 - Current active scoped goal is Beads 23-36: regressions first, then true responsive online typing through document identity, realtime runtime, CRDT binding, actor/access, persistence, performance, presence, invite UX, durable comments, and collaboration delight.
 - User-reported regressions are tracked in `REGRESSIONS.md`; R-001 title, R-002 @mentions, and R-003 sidebar are fixed.
