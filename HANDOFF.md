@@ -18,6 +18,7 @@
 - Bead 25 is complete on branch `codex/fix/bead-25-sidebar-regression`: collapsed desktop sidebars retain an outline access entry, outline jumps focus the intended heading, and the mobile drawer has a visible close path with focus restore, all covered by fail-first Playwright regression tests.
 - Stacked regression PRs are open: Bead 23 PR #15, Bead 24 PR #16, and Bead 25 PR #17.
 - Bead 26 is complete on branch `codex/test/bead-26-online-typing-entry-gate`: red two-client Playwright tests now define missing online typing behavior for remote visibility, convergence, and reload durability; docs/comments no longer imply the realtime backend exists.
+- Bead 26 PR #18 is open and expected-red until Beads 27-31 make the online typing gate green.
 - Current active scoped goal is Beads 23-36: regressions first, then true responsive online typing through document identity, realtime runtime, CRDT binding, actor/access, persistence, performance, presence, invite UX, durable comments, and collaboration delight.
 - User-reported regressions are tracked in `REGRESSIONS.md`; R-001 title, R-002 @mentions, and R-003 sidebar are fixed.
 - Branch protection on `main` is configured with strict required `build-and-test`, admin enforcement, and no force-push/delete.
