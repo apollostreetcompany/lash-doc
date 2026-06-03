@@ -22,6 +22,11 @@ export interface ChatThread {
   anchor: Anchor;
   messages: ChatMessage[];
   filters: { authorId?: string; ai?: boolean; nodeType?: string };
+  status?: 'open' | 'resolved';
+  /** ISO-8601 UTC */
+  resolvedAt?: string | null;
+  /** ISO-8601 UTC */
+  updatedAt?: string;
 }
 
 export interface ThreadStore {
@@ -147,6 +152,9 @@ export const createThreadStore = (_config: { adapter: 'memory' | 'postgres' }): 
         anchor: { ...anchor, token: { ...anchor.token } },
         messages: [],
         filters: {},
+        status: 'open',
+        resolvedAt: null,
+        updatedAt: new Date().toISOString(),
       };
       threads.set(thread.id, thread);
       return {

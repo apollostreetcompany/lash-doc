@@ -20,7 +20,13 @@ import {
   type ToolbarButtonSpec,
 } from '@lash/editor-core';
 import { EMPTY_HISTORY_DOC, createHistoryStore } from '@lash/history';
-import { createDocumentId, hashCanonical, type EditPatch, type HistoryEntry } from '@lash/types';
+import {
+  createDocumentId,
+  hashCanonical,
+  type DocumentId,
+  type EditPatch,
+  type HistoryEntry,
+} from '@lash/types';
 import type { Editor, EditorEvents } from '@tiptap/core';
 import { EditorContent, useEditor } from '@tiptap/react';
 import type { Route } from 'next';
@@ -35,6 +41,7 @@ import {
   useRef,
   useState,
 } from 'react';
+import type * as Y from 'yjs';
 
 import { createBrowserImageUploader } from '../../lib/createBrowserImageUploader';
 import {
@@ -95,8 +102,17 @@ const HISTORY_ACTOR = { type: 'user', id: 'local-user' } as const;
 const HISTORY_AUDIT = { ua: 'lash-web/local-history' } as const;
 const HISTORY_RECORD_DEBOUNCE_MS = 1800;
 const AI_AUDIT = { ua: 'lash-local-ai-editor' };
+const SUGGESTION_RESOLUTIONS_YMAP = 'lash:suggestion-resolutions';
 
 type OutlineTransaction = EditorEvents['transaction']['transaction'];
+type SuggestionResolutionAction = 'accepted' | 'rejected';
+type SuggestionResolutionRecord = {
+  id: string;
+  entryId: string;
+  action: SuggestionResolutionAction;
+  ts: string;
+  actorId: string;
+};
 
 const textReplaceOp = (before: string, after: string) => {
   let prefix = 0;
@@ -175,6 +191,109 @@ const textToContent = (text: string) => ({
   })),
 });
 
+const suggestionResolutionStorageKey = (docId: DocumentId) =>
+  `lash:suggestion-resolutions:${docId}`;
+const suggestionResolutionYMapPrefix = (docId: DocumentId) => `${String(docId)}:`;
+const suggestionResolutionYMapKey = (docId: DocumentId, recordId: string) =>
+  `${suggestionResolutionYMapPrefix(docId)}${recordId}`;
+
+const sameSuggestionResolutions = (
+  left: SuggestionResolutionRecord[],
+  right: SuggestionResolutionRecord[],
+) => JSON.stringify(left) === JSON.stringify(right);
+
+const normalizeSuggestionResolution = (value: unknown): SuggestionResolutionRecord | null => {
+  if (!value || typeof value !== 'object') return null;
+  const record = value as Partial<SuggestionResolutionRecord>;
+  if (
+    typeof record.id !== 'string' ||
+    typeof record.entryId !== 'string' ||
+    typeof record.ts !== 'string' ||
+    typeof record.actorId !== 'string' ||
+    (record.action !== 'accepted' && record.action !== 'rejected')
+  ) {
+    return null;
+  }
+  return {
+    id: record.id,
+    entryId: record.entryId,
+    action: record.action,
+    ts: record.ts,
+    actorId: record.actorId,
+  };
+};
+
+const parseSuggestionResolutions = (value: string | null | undefined) => {
+  if (!value) return [];
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+      .map(normalizeSuggestionResolution)
+      .filter((record): record is SuggestionResolutionRecord => Boolean(record));
+  } catch {
+    return [];
+  }
+};
+
+const parseSuggestionResolution = (value: string | null | undefined) => {
+  if (!value) return null;
+  try {
+    return normalizeSuggestionResolution(JSON.parse(value) as unknown);
+  } catch {
+    return null;
+  }
+};
+
+const readSuggestionResolutionsFromStorage = (docId: DocumentId) => {
+  if (typeof window === 'undefined') return [];
+  try {
+    return parseSuggestionResolutions(
+      window.localStorage.getItem(suggestionResolutionStorageKey(docId)),
+    );
+  } catch {
+    return [];
+  }
+};
+
+const writeSuggestionResolutionsToStorage = (
+  docId: DocumentId,
+  records: SuggestionResolutionRecord[],
+) => {
+  if (typeof window === 'undefined') return;
+  try {
+    window.localStorage.setItem(suggestionResolutionStorageKey(docId), JSON.stringify(records));
+  } catch {
+    // Best-effort local durability; online docs also persist the Yjs side channel.
+  }
+};
+
+const readSuggestionResolutionsFromYMap = (map: Y.Map<string> | null, docId: DocumentId) =>
+  map
+    ? Array.from(map.entries())
+        .filter(([key]) => key.startsWith(suggestionResolutionYMapPrefix(docId)))
+        .map(([, value]) => parseSuggestionResolution(value))
+        .filter((record): record is SuggestionResolutionRecord => Boolean(record))
+        .sort((left, right) => left.ts.localeCompare(right.ts) || left.id.localeCompare(right.id))
+    : [];
+
+const writeSuggestionResolutionsToYMap = (
+  map: Y.Map<string> | null,
+  docId: DocumentId,
+  records: SuggestionResolutionRecord[],
+) => {
+  if (!map) return;
+  records.forEach((record) => {
+    map.set(suggestionResolutionYMapKey(docId, record.id), JSON.stringify(record));
+  });
+};
+
+const acceptedIdsFromResolutions = (records: SuggestionResolutionRecord[]) =>
+  records
+    .filter((record) => record.action === 'accepted')
+    .map((record) => record.entryId)
+    .sort();
+
 const toRoute = (path: string) => path as Route;
 
 // Copy `text` to the clipboard. Prefers the async Clipboard API, but falls
@@ -235,6 +354,9 @@ export function EditorWorkspace({ documentId = DEFAULT_DOCUMENT_ID }: EditorWork
   const [historyTimeFilter, setHistoryTimeFilter] = useState<HistoryTimeFilter>(null);
   const [inviteAccess, setInviteAccess] = useState<InviteAccess | null>(null);
   const [acceptedSuggestionIds, setAcceptedSuggestionIds] = useState<string[]>([]);
+  const [suggestionResolutions, setSuggestionResolutions] = useState<SuggestionResolutionRecord[]>(
+    [],
+  );
   const [blameLines, setBlameLines] = useState<Array<{ line: number; authorId: string | null }>>(
     [],
   );
@@ -253,6 +375,7 @@ export function EditorWorkspace({ documentId = DEFAULT_DOCUMENT_ID }: EditorWork
   const historyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const applyingHistoryRef = useRef(false);
   const suggestModeRef = useRef(false);
+  const suggestionResolutionsRef = useRef<SuggestionResolutionRecord[]>([]);
   const activeTableCellRef = useRef<ActiveCell | null>(null);
   const inviteAccessDocumentRef = useRef<string | null>(null);
   // Refs to the buttons that opened the mobile drawers, so focus can
@@ -290,6 +413,69 @@ export function EditorWorkspace({ documentId = DEFAULT_DOCUMENT_ID }: EditorWork
     () => realtimeCollaboration.provider.subscribe(setRealtimeSnapshot),
     [realtimeCollaboration],
   );
+
+  const publishSuggestionResolutions = useCallback(
+    (
+      nextRecords: SuggestionResolutionRecord[],
+      options: { persist: boolean } = { persist: true },
+    ) => {
+      suggestionResolutionsRef.current = nextRecords;
+      setSuggestionResolutions((current) =>
+        sameSuggestionResolutions(current, nextRecords) ? current : nextRecords,
+      );
+      if (!options.persist) return;
+      writeSuggestionResolutionsToStorage(historyDocumentId, nextRecords);
+      const yMap = realtimeCollaboration.enabled
+        ? realtimeCollaboration.doc.getMap<string>(SUGGESTION_RESOLUTIONS_YMAP)
+        : null;
+      writeSuggestionResolutionsToYMap(yMap, historyDocumentId, nextRecords);
+    },
+    [historyDocumentId, realtimeCollaboration],
+  );
+
+  useEffect(() => {
+    const yMap = realtimeCollaboration.enabled
+      ? realtimeCollaboration.doc.getMap<string>(SUGGESTION_RESOLUTIONS_YMAP)
+      : null;
+    const storedRecords = readSuggestionResolutionsFromStorage(historyDocumentId);
+    const yRecordsExist =
+      yMap &&
+      Array.from(yMap.keys()).some((key) =>
+        key.startsWith(suggestionResolutionYMapPrefix(historyDocumentId)),
+      );
+    const initialRecords = yRecordsExist
+      ? readSuggestionResolutionsFromYMap(yMap, historyDocumentId)
+      : storedRecords;
+    publishSuggestionResolutions(initialRecords, { persist: false });
+    if (yMap && !yRecordsExist && storedRecords.length) {
+      writeSuggestionResolutionsToYMap(yMap, historyDocumentId, storedRecords);
+    }
+
+    const handleStorage = (event: StorageEvent) => {
+      if (event.key !== suggestionResolutionStorageKey(historyDocumentId) || yMap) return;
+      publishSuggestionResolutions(parseSuggestionResolutions(event.newValue), { persist: false });
+    };
+    window.addEventListener('storage', handleStorage);
+
+    const handleRemoteRecords = (event: Y.YMapEvent<string>) => {
+      if (
+        ![...event.keysChanged].some((key) =>
+          key.startsWith(suggestionResolutionYMapPrefix(historyDocumentId)),
+        )
+      ) {
+        return;
+      }
+      const nextRecords = readSuggestionResolutionsFromYMap(yMap, historyDocumentId);
+      writeSuggestionResolutionsToStorage(historyDocumentId, nextRecords);
+      publishSuggestionResolutions(nextRecords, { persist: false });
+    };
+    yMap?.observe(handleRemoteRecords);
+
+    return () => {
+      window.removeEventListener('storage', handleStorage);
+      yMap?.unobserve(handleRemoteRecords);
+    };
+  }, [historyDocumentId, publishSuggestionResolutions, realtimeCollaboration]);
 
   useEffect(() => {
     setIsMounted(true);
@@ -537,7 +723,7 @@ export function EditorWorkspace({ documentId = DEFAULT_DOCUMENT_ID }: EditorWork
       setSelectedHistoryEntryId(null);
       setHistoryAuthorFilter(null);
       setHistoryTimeFilter(null);
-      setAcceptedSuggestionIds([]);
+      setAcceptedSuggestionIds(acceptedIdsFromResolutions(suggestionResolutionsRef.current));
       setBlameLines([]);
       commitHistoryHead(null);
       historyTextRef.current = '';
@@ -550,7 +736,7 @@ export function EditorWorkspace({ documentId = DEFAULT_DOCUMENT_ID }: EditorWork
     setSelectedHistoryEntryId(null);
     setHistoryAuthorFilter(null);
     setHistoryTimeFilter(null);
-    setAcceptedSuggestionIds([]);
+    setAcceptedSuggestionIds(acceptedIdsFromResolutions(suggestionResolutionsRef.current));
     setBlameLines([]);
     commitHistoryHead(null);
     historyTextRef.current = editorText(editor);
@@ -616,6 +802,10 @@ export function EditorWorkspace({ documentId = DEFAULT_DOCUMENT_ID }: EditorWork
       editor.off('transaction', recordHistory);
     };
   }, [editor, historyDocumentId, commitHistoryHead]);
+
+  useEffect(() => {
+    setAcceptedSuggestionIds(acceptedIdsFromResolutions(suggestionResolutions));
+  }, [suggestionResolutions]);
 
   useEffect(() => {
     if (!editor) {
@@ -830,6 +1020,23 @@ export function EditorWorkspace({ documentId = DEFAULT_DOCUMENT_ID }: EditorWork
     });
   }, [historyAuthorFilter, historyTimeFilter]);
 
+  const recordSuggestionResolution = useCallback(
+    (entry: HistoryEntry, action: SuggestionResolutionAction) => {
+      const record: SuggestionResolutionRecord = {
+        id: `suggestion-resolution:${entry.id}:${action}`,
+        entryId: entry.id,
+        action,
+        ts: new Date().toISOString(),
+        actorId: HISTORY_ACTOR.id,
+      };
+      publishSuggestionResolutions([
+        ...suggestionResolutionsRef.current.filter((item) => item.entryId !== entry.id),
+        record,
+      ]);
+    },
+    [publishSuggestionResolutions],
+  );
+
   const handleAcceptSuggestion = useCallback(
     async (entry: HistoryEntry) => {
       if (!editor) return;
@@ -855,12 +1062,13 @@ export function EditorWorkspace({ documentId = DEFAULT_DOCUMENT_ID }: EditorWork
       historyTextRef.current = text;
       commitHistoryHead(result.entry.resultSha);
       const entries = await historyStoreRef.current.list(historyDocumentId);
+      recordSuggestionResolution(entry, 'accepted');
       setAcceptedSuggestionIds((ids) => (ids.includes(entry.id) ? ids : [...ids, entry.id]));
       setHistoryEntries(entries);
       setSelectedHistoryEntryId(entry.id);
       setBlameLines(blameFor(entries, text));
     },
-    [editor, historyDocumentId, commitHistoryHead],
+    [editor, historyDocumentId, commitHistoryHead, recordSuggestionResolution],
   );
 
   const handleRejectSuggestion = useCallback(
@@ -892,11 +1100,12 @@ export function EditorWorkspace({ documentId = DEFAULT_DOCUMENT_ID }: EditorWork
       historyTextRef.current = targetText;
       commitHistoryHead(result.entry.resultSha);
       const entries = await historyStoreRef.current.list(historyDocumentId);
+      recordSuggestionResolution(entry, 'rejected');
       setHistoryEntries(entries);
       setSelectedHistoryEntryId(result.entry.id);
       setBlameLines(blameFor(entries, targetText));
     },
-    [editor, historyDocumentId, commitHistoryHead],
+    [editor, historyDocumentId, commitHistoryHead, recordSuggestionResolution],
   );
 
   const handleRestoreHistoryEntry = useCallback(
@@ -1067,6 +1276,7 @@ export function EditorWorkspace({ documentId = DEFAULT_DOCUMENT_ID }: EditorWork
           docId={historyDocumentId}
           baseVersion={historyHead}
           currentText={currentText}
+          realtimeDoc={realtimeCollaboration.enabled ? realtimeCollaboration.doc : null}
         />
       ),
     },
@@ -1083,6 +1293,7 @@ export function EditorWorkspace({ documentId = DEFAULT_DOCUMENT_ID }: EditorWork
           authorFilter={historyAuthorFilter}
           timeFilter={historyTimeFilter}
           acceptedSuggestionIds={acceptedSuggestionIds}
+          suggestionResolutions={suggestionResolutions}
           onSelect={handleSelectHistoryEntry}
           onRestore={handleRestoreHistoryEntry}
           onSetAuthorFilter={setHistoryAuthorFilter}
