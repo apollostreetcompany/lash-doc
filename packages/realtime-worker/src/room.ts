@@ -13,10 +13,25 @@ import { REALTIME_RUNTIME, normalizeRoomName } from './routing';
 
 const PROTOCOL_VERSION = 1;
 
+type AwarenessSelection = {
+  from: number;
+  to: number;
+};
+
+type AwarenessState = {
+  actorId: string;
+  label: string;
+  color: string;
+  selection: AwarenessSelection | null;
+  updatedAt: number;
+  connection: 'online';
+};
+
 type SocketAttachment = {
   actorId: string;
   roomId: string;
   connectedAt: number;
+  awareness?: AwarenessState;
 };
 
 type ClientMessage = {
@@ -24,6 +39,8 @@ type ClientMessage = {
   requestId?: string;
   payload?: unknown;
   update?: unknown;
+  updateId?: unknown;
+  awareness?: unknown;
 };
 
 type UpdateRow = {
@@ -58,10 +75,12 @@ const readAttachment = (ws: WebSocket): SocketAttachment => {
       typeof attachment.roomId === 'string' &&
       typeof attachment.connectedAt === 'number'
     ) {
+      const awareness = isAwarenessState(attachment.awareness) ? attachment.awareness : undefined;
       return {
         actorId: attachment.actorId,
         roomId: attachment.roomId,
         connectedAt: attachment.connectedAt,
+        ...(awareness ? { awareness } : {}),
       };
     }
   }
@@ -86,6 +105,76 @@ const parseClientMessage = (message: string | ArrayBuffer): ClientMessage | null
 const isValidYjsUpdate = (update: string) => {
   return isRealtimeUpdatePayload(update);
 };
+
+const isAwarenessSelection = (value: unknown): value is AwarenessSelection => {
+  if (!value || typeof value !== 'object') return false;
+  const selection = value as Partial<AwarenessSelection>;
+  return (
+    typeof selection.from === 'number' &&
+    Number.isFinite(selection.from) &&
+    typeof selection.to === 'number' &&
+    Number.isFinite(selection.to)
+  );
+};
+
+const isAwarenessState = (value: unknown): value is AwarenessState => {
+  if (!value || typeof value !== 'object') return false;
+  const awareness = value as Partial<AwarenessState>;
+  return (
+    typeof awareness.actorId === 'string' &&
+    typeof awareness.label === 'string' &&
+    typeof awareness.color === 'string' &&
+    typeof awareness.updatedAt === 'number' &&
+    awareness.connection === 'online' &&
+    (awareness.selection === null || isAwarenessSelection(awareness.selection))
+  );
+};
+
+const awarenessFromMessage = (
+  raw: unknown,
+  attachment: SocketAttachment,
+): AwarenessState | null => {
+  if (!raw || typeof raw !== 'object') return null;
+  const awareness = raw as {
+    label?: unknown;
+    color?: unknown;
+    selection?: unknown;
+  };
+  const label =
+    typeof awareness.label === 'string' && awareness.label.trim()
+      ? awareness.label.trim().slice(0, 80)
+      : attachment.actorId;
+  const color =
+    typeof awareness.color === 'string' && /^#[0-9a-f]{6}$/iu.test(awareness.color)
+      ? awareness.color
+      : '#64748b';
+  const selection =
+    awareness.selection === null
+      ? null
+      : isAwarenessSelection(awareness.selection)
+        ? {
+            from: Math.max(0, Math.floor(awareness.selection.from)),
+            to: Math.max(0, Math.floor(awareness.selection.to)),
+          }
+        : null;
+  return {
+    actorId: attachment.actorId,
+    label,
+    color,
+    selection,
+    updatedAt: Date.now(),
+    connection: 'online',
+  };
+};
+
+const defaultAwareness = (attachment: SocketAttachment): AwarenessState => ({
+  actorId: attachment.actorId,
+  label: attachment.actorId,
+  color: '#64748b',
+  selection: null,
+  updatedAt: attachment.connectedAt,
+  connection: 'online',
+});
 
 const updateFromRow = (row: UpdateRow): PersistedRealtimeUpdate => ({
   sequence: row.sequence,
@@ -212,6 +301,26 @@ export class LashRealtimeRoom extends DurableObject<Env> {
       return;
     }
 
+    if (parsed.type === 'awareness-update') {
+      const awareness = awarenessFromMessage(parsed.awareness, attachment);
+      if (!awareness) {
+        ws.send(
+          JSON.stringify({
+            type: 'error',
+            roomId: attachment.roomId,
+            code: 'invalid_awareness_update',
+          }),
+        );
+        return;
+      }
+      ws.serializeAttachment({
+        ...attachment,
+        awareness,
+      } satisfies SocketAttachment);
+      this.broadcastAwareness(attachment.roomId);
+      return;
+    }
+
     if (parsed.type === 'yjs-update') {
       if (typeof parsed.update !== 'string') {
         ws.send(
@@ -234,6 +343,17 @@ export class LashRealtimeRoom extends DurableObject<Env> {
         return;
       }
       const persisted = this.appendUpdate(attachment.actorId, 'client', parsed.update);
+      if (typeof parsed.updateId === 'string') {
+        ws.send(
+          JSON.stringify({
+            type: 'sync-ack',
+            actorId: attachment.actorId,
+            roomId: attachment.roomId,
+            updateId: parsed.updateId,
+            sequence: persisted.sequence,
+          }),
+        );
+      }
       const payload = JSON.stringify({
         type: 'yjs-update',
         actorId: attachment.actorId,
@@ -261,11 +381,12 @@ export class LashRealtimeRoom extends DurableObject<Env> {
 
   async webSocketClose(
     ws: WebSocket,
-    code: number,
-    reason: string,
+    _code: number,
+    _reason: string,
     _wasClean: boolean,
   ): Promise<void> {
-    ws.close(code, reason);
+    const attachment = readAttachment(ws);
+    this.broadcastAwareness(attachment.roomId, ws);
   }
 
   private acceptSocket(request: Request, roomId: string, actorId: string): Response {
@@ -304,11 +425,30 @@ export class LashRealtimeRoom extends DurableObject<Env> {
         }),
       );
     }
+    this.broadcastAwareness(roomId);
 
     return new Response(null, {
       status: 101,
       webSocket: client,
     });
+  }
+
+  private broadcastAwareness(roomId: string, exclude?: WebSocket) {
+    const roomSockets = this.ctx
+      .getWebSockets()
+      .filter((peer) => peer !== exclude)
+      .filter((peer) => readAttachment(peer).roomId === roomId);
+    const peers = roomSockets
+      .map(readAttachment)
+      .map((attachment) => attachment.awareness ?? defaultAwareness(attachment));
+    const payload = JSON.stringify({
+      type: 'awareness-state',
+      roomId,
+      peers,
+    });
+    for (const peer of roomSockets) {
+      peer.send(payload);
+    }
   }
 
   private latestSnapshot(): PersistedRealtimeSnapshot | null {

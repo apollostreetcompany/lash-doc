@@ -63,6 +63,8 @@ Success criteria:
 38. Bead 31 implements Durable Object CRDT persistence with an append-only `yjs_updates` table, cumulative `yjs_snapshots`, socket hydration from snapshot plus tail updates, `POST /api/realtime/rooms/:id/restore` as an edit-scoped append-only restore hook, and persistence metadata in room health. Full online typing now passes unauthorized access, remote visibility, convergence, reload durability, and snapshot compaction.
 39. Bead 32 keeps local realtime explicit opt-in unless `NEXT_PUBLIC_LASH_REALTIME_URL` is configured: local documents use plain TipTap without the Collaboration extension by default, while online typing tests opt in through `lash:realtime-enabled` or `?realtime=on`.
 40. Bead 32 adds 10k/50k-word browser typing gates and removes the measured hot paths from normal local editing: outline publication is deferred for body-text transactions, offscreen document blocks use `content-visibility`, and the release gate enforces p95/max per-input event work under the typing SLO while logging residual rendering long tasks for future virtualization work.
+41. Bead 33 adds room-scoped awareness on the existing realtime socket instead of a second presence transport: clients send `awareness-update`, the Durable Object rebroadcasts same-room peer state only, and accepted Yjs updates receive `sync-ack` messages so the browser can show saved/syncing/reconnecting state.
+42. Bead 33 keeps presence identity as the signed local actor ID from Bead 30; real profile names, avatars, invite roles, and access UX remain Bead 34 work.
 
 ## State
 
@@ -118,14 +120,14 @@ Success criteria:
 - [x] Bead 30 - Actor Identity + Access Boundary with signed realtime session grants, token-gated room reads/sockets, and unauthorized room denial coverage.
 - [x] Bead 31 - Durable Persistence, Snapshots, Restore with SQLite-backed Yjs update logs, cumulative snapshots, reload hydration, and append-only restore hook.
 - [x] Bead 32 - Large-Doc Typing Performance with 10k/50k-word browser gates, explicit local realtime opt-in, deferred outline scans, and offscreen block containment.
+- [x] Bead 33 - Presence, Remote Cursors, Sync State with room-scoped awareness, collaborator chips, cursor markers, sync acknowledgements, and reconnect/saved UI.
 
 ### Now
 
-- Bead 33 - Presence, Remote Cursors, Sync State.
+- Bead 34 - Invite + Access UX.
 
 ### Next
 
-- Bead 34 - Invite + Access UX.
 - Bead 35 - Durable Comments/Suggestions.
 - Bead 36 - Collaboration Delight Layer.
 

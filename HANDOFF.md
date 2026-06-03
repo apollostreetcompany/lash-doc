@@ -33,6 +33,7 @@
 - After Bead 31, the online typing gate has 5 passing tests: unauthorized access denial, same-doc remote visibility, concurrent convergence, reload durability, and snapshot compaction without deleting update history.
 - Bead 32 is complete on branch `codex/perf/bead-32-large-doc-typing-performance`: local documents no longer enable the collaboration runtime unless realtime is explicitly configured/opted in, outline scans are deferred for body-text transactions, offscreen editor blocks use CSS containment, and 10k/50k-word browser typing gates prove p95 input work stays under the 8 ms SLO.
 - Bead 32 PR #24 is open and stacked on PR #23: `https://github.com/apollostreetcompany/lash-doc/pull/24`.
+- Bead 33 is complete on branch `codex/feat/bead-33-presence-sync-state`: the realtime room now supports same-room awareness broadcasts and sync acknowledgements; the editor shows saved/syncing/reconnecting state, collaborator chips, and remote cursor/selection markers.
 - Static Cloudflare Pages export still fails for arbitrary `/doc/[id]`; Bead 28 solves realtime room hosting, not the final web app dynamic-route hosting strategy.
 - Current active scoped goal is Beads 23-36: regressions first, then true responsive online typing through document identity, realtime runtime, CRDT binding, actor/access, persistence, performance, presence, invite UX, durable comments, and collaboration delight.
 - User-reported regressions are tracked in `REGRESSIONS.md`; R-001 title, R-002 @mentions, and R-003 sidebar are fixed.
@@ -75,6 +76,7 @@
 - Bead 30 - Actor Identity + Access Boundary.
 - Bead 31 - Durable Persistence, Snapshots, Restore.
 - Bead 32 - Large-Doc Typing Performance.
+- Bead 33 - Presence, Remote Cursors, Sync State.
 
 ## Release Evidence
 
@@ -117,6 +119,8 @@
 - Bead 31 final validation - pass: persistence/runtime unit tests passed (9 targeted, 82 full unit tests), root lint/typecheck passed, Worker typecheck passed, Worker deploy dry-run passed, `make verify-realtime-runtime` passed with persistence metadata in room health, normal web build passed, test-hook web build passed, and online typing e2e passed 5 tests including reload durability and snapshot compaction.
 - Bead 32 fail-first large-doc typing - pass as evidence: `apps/web/e2e/performance/large-doc-typing.spec.ts` initially failed the 50k-word scenario with p95 event work around 22 ms, max around 29 ms, and 29 long tasks.
 - Bead 32 final validation - pass: changed-file Prettier check, `git diff --check`, `pnpm run lint`, `pnpm run typecheck`, `pnpm run test:unit` (82 passed), normal web build, test-hook web build, and targeted Chromium e2e passed 8 tests across large-doc typing, baseline essay typing, and online typing. Final metrics: 10k-word p95 2.1 ms/max 4.3 ms/0 long tasks; 50k-word p95 4.4 ms/max 6.4 ms/29 logged long tasks; essay p95 0.9 ms/max 7.9 ms/0 long tasks.
+- Bead 33 fail-first presence/sync - pass as evidence: the new online typing tests first failed because `window.__lashRealtime` was null and no collaborator/sync-state UI existed.
+- Bead 33 final validation - pass: changed-file Prettier check, `git diff --check`, root and Worker typecheck, `pnpm run lint`, `pnpm run test:unit` (82 passed), Worker deploy dry-run, `make verify-realtime-runtime`, normal web build, test-hook web build, full online typing spec (7 passed), and combined Chromium online/performance gate (10 passed). Final performance metrics after presence: 10k-word p95 2.0 ms/max 3.9 ms/0 long tasks; 50k-word p95 4.7 ms/max 6.6 ms/29 logged long tasks; essay p95 1.0 ms/max 7.0 ms/0 long tasks.
 - Acceptance coverage audit - 86 `agents.md` Test IDs, 98 unit/e2e files, no missing IDs.
 - Skip/todo audit - no `test.todo`, `test.skip`, `describe.skip`, `TODO acceptance`, or `.only(` matches in `apps/web/e2e` or `packages/testing/unit`.
 - Riddle audit - only planning/docs references; no Lash-Riddle runtime integration code.
@@ -133,14 +137,16 @@
 - Realtime Worker production deploy requires `LASH_REALTIME_SESSION_SECRET` via `npx wrangler secret put LASH_REALTIME_SESSION_SECRET --config packages/realtime-worker/wrangler.jsonc`; local verification uses a non-production fallback secret.
 - Realtime Worker room health now reports persistence metadata. Restore is a low-level append-only Yjs update hook; user-facing history restore UI remains separate from this runtime capability.
 - Local browser sessions only connect to the default `ws://127.0.0.1:8787` realtime Worker when `NEXT_PUBLIC_LASH_REALTIME_URL` is set, `?realtime=on` is present, or `localStorage['lash:realtime-enabled']` is `true`. Online typing Playwright tests set the localStorage flag explicitly.
+- Presence is room-scoped on the existing realtime socket. User/profile naming is still local actor-label derivation until Bead 34 introduces real invite/access UX.
 
 ## Regression Backlog
 
-- Beads 33-36 - Implement the remaining scoped online typing track exactly as requested.
+- Beads 34-36 - Implement the remaining scoped online typing track exactly as requested.
 
 ## Open Items
 
 - User-reported regressions: none currently open.
 - Online typing red gate: Bead 26 online typing tests now pass after Bead 31; Bead 32 adds large-document typing performance coverage and removes the measured normal-editing per-keystroke hot paths. The 50k-word gate still logs non-input rendering long tasks, so deeper document virtualization remains a future performance hardening opportunity.
+- Presence/sync state: Bead 33 provides collaborator chips, remote cursor markers, and saved/reconnecting/recovered sync states. It does not add real profiles, roles, invite links, expiry, revocation, or access UX; those remain Bead 34.
 - Runtime/deploy: Realtime rooms now have a Cloudflare Durable Object Worker with signed actor session grants, append-only Yjs update persistence, cumulative snapshots, reload hydration, and restore-as-new-head hook. Arbitrary `/doc/[id]` web routes remain local/Next-runtime only; static Cloudflare Pages export is blocked until a web dynamic-route hosting strategy is chosen.
 - Future custom-domain/production hosting decisions and future Riddle integration are separate workstreams; realtime infra should prefer Cloudflare first, then Render only if needed.

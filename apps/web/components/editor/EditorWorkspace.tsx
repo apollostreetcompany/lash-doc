@@ -27,6 +27,7 @@ import type { Route } from 'next';
 import { useRouter } from 'next/navigation';
 import {
   type ChangeEvent,
+  type CSSProperties,
   type MouseEvent as ReactMouseEvent,
   useCallback,
   useEffect,
@@ -48,7 +49,11 @@ import {
   upsertDocument,
   type LashDocumentRecord,
 } from '../../lib/documentRegistry';
-import { createLashRealtimeCollaboration } from '../../lib/realtimeCollaboration';
+import {
+  createLashRealtimeCollaboration,
+  type RealtimeSnapshot,
+  type RealtimeSyncState,
+} from '../../lib/realtimeCollaboration';
 import { AppShell } from '../shell/AppShell';
 import { Icon } from '../shell/Icon';
 import { RightRail, type RailTab, type RailTabConfig } from '../shell/RightRail';
@@ -146,6 +151,15 @@ const sameActiveCell = (left: ActiveCell | null, right: ActiveCell | null) => {
     left.value === right.value &&
     sameStringArray(left.options, right.options)
   );
+};
+
+const realtimeSyncLabels: Record<RealtimeSyncState, string> = {
+  disabled: 'Local only',
+  connecting: 'Connecting',
+  reconnecting: 'Reconnecting',
+  syncing: 'Saving',
+  saved: 'Saved',
+  offline: 'Offline',
 };
 
 const textToContent = (text: string) => ({
@@ -254,6 +268,9 @@ export function EditorWorkspace({ documentId = DEFAULT_DOCUMENT_ID }: EditorWork
     () => createLashRealtimeCollaboration(activeDocumentId),
     [activeDocumentId],
   );
+  const [realtimeSnapshot, setRealtimeSnapshot] = useState<RealtimeSnapshot>(() =>
+    realtimeCollaboration.provider.getSnapshot(),
+  );
 
   useEffect(() => {
     return () => {
@@ -261,6 +278,11 @@ export function EditorWorkspace({ documentId = DEFAULT_DOCUMENT_ID }: EditorWork
       realtimeCollaboration.doc.destroy();
     };
   }, [realtimeCollaboration]);
+
+  useEffect(
+    () => realtimeCollaboration.provider.subscribe(setRealtimeSnapshot),
+    [realtimeCollaboration],
+  );
 
   useEffect(() => {
     setIsMounted(true);
@@ -379,6 +401,22 @@ export function EditorWorkspace({ documentId = DEFAULT_DOCUMENT_ID }: EditorWork
     },
     [extensions],
   );
+
+  useEffect(() => {
+    if (!editor || !realtimeCollaboration.enabled) return;
+    const publishSelection = () => {
+      const { from, to } = editor.state.selection;
+      realtimeCollaboration.provider.setLocalSelection({ from, to });
+    };
+    publishSelection();
+    editor.on('selectionUpdate', publishSelection);
+    editor.on('transaction', publishSelection);
+    return () => {
+      editor.off('selectionUpdate', publishSelection);
+      editor.off('transaction', publishSelection);
+      realtimeCollaboration.provider.setLocalSelection(null);
+    };
+  }, [editor, realtimeCollaboration]);
 
   useEffect(() => {
     if (!editor) {
@@ -642,6 +680,12 @@ export function EditorWorkspace({ documentId = DEFAULT_DOCUMENT_ID }: EditorWork
       });
     win.__lashSerializeMarkdown = () =>
       serializeDocToMarkdown(editor.getJSON(), { documentId: activeDocumentId }).markdown;
+    const realtimeApi = {
+      getSnapshot: () => realtimeCollaboration.provider.getSnapshot(),
+      disconnectForTest: () => realtimeCollaboration.provider.disconnectForTest(),
+      reconnectForTest: () => realtimeCollaboration.provider.reconnectForTest(),
+    };
+    win.__lashRealtime = realtimeApi;
     win.__lashInsertImageFromArrayBuffer = async (buffer: ArrayBuffer, mimeType = 'image/png') => {
       const file = new File([buffer], `import-${Date.now()}.${mimeType.split('/')[1] ?? 'png'}`, {
         type: mimeType,
@@ -657,9 +701,10 @@ export function EditorWorkspace({ documentId = DEFAULT_DOCUMENT_ID }: EditorWork
       delete win.__lashInsertTable;
       delete win.__lashSelectTableCells;
       delete win.__lashSerializeMarkdown;
+      if (win.__lashRealtime === realtimeApi) delete win.__lashRealtime;
       delete win.__lashInsertImageFromArrayBuffer;
     };
-  }, [editor, imageUploader, activeDocumentId, exposeTestHooks]);
+  }, [editor, imageUploader, activeDocumentId, exposeTestHooks, realtimeCollaboration]);
 
   const isEditorReady = Boolean(editor);
 
@@ -1089,6 +1134,62 @@ export function EditorWorkspace({ documentId = DEFAULT_DOCUMENT_ID }: EditorWork
     </div>
   );
 
+  const remotePeers = realtimeSnapshot.peers;
+  const realtimePresence = (
+    <div
+      className="lash-realtime-presence"
+      data-testid="realtime-presence-bar"
+      data-enabled={realtimeSnapshot.enabled ? 'true' : 'false'}
+    >
+      <span
+        className="lash-realtime-sync-state"
+        data-testid="realtime-sync-state"
+        data-state={realtimeSnapshot.syncState}
+      >
+        {realtimeSyncLabels[realtimeSnapshot.syncState]}
+      </span>
+      {remotePeers.length ? (
+        <div className="lash-realtime-peers" aria-label="Collaborators online">
+          {remotePeers.map((peer) => (
+            <span
+              key={peer.actorId}
+              className="lash-realtime-peer"
+              data-testid="remote-collaborator"
+              data-actor-id={peer.actorId}
+              style={{ '--presence-color': peer.color } as CSSProperties}
+              title={`${peer.label} is in this document`}
+            >
+              {peer.label}
+            </span>
+          ))}
+        </div>
+      ) : (
+        <span className="lash-realtime-empty" data-testid="remote-collaborator-empty">
+          Solo
+        </span>
+      )}
+    </div>
+  );
+
+  const remoteCursorMarkers = remotePeers.map((peer) => {
+    const cursorText = peer.selection
+      ? peer.selection.from === peer.selection.to
+        ? `cursor ${peer.selection.from}`
+        : `selection ${peer.selection.from}-${peer.selection.to}`
+      : 'online';
+    return (
+      <span
+        key={peer.actorId}
+        className="lash-remote-cursor-marker"
+        data-testid="remote-cursor-marker"
+        data-actor-id={peer.actorId}
+        style={{ '--presence-color': peer.color } as CSSProperties}
+      >
+        {peer.label}: {cursorText}
+      </span>
+    );
+  });
+
   const handleShareClick = useCallback((event: ReactMouseEvent<HTMLButtonElement>) => {
     setActiveTab('share');
     setRailOpen(true);
@@ -1257,6 +1358,7 @@ export function EditorWorkspace({ documentId = DEFAULT_DOCUMENT_ID }: EditorWork
                   </>
                 ) : null}
               </div>
+              {realtimePresence}
             </header>
 
             {isEditorReady && activeTableCell && !isFocusMode ? (
@@ -1269,6 +1371,11 @@ export function EditorWorkspace({ documentId = DEFAULT_DOCUMENT_ID }: EditorWork
             ) : null}
 
             <div className="lash-editor-content-wrapper" role="region" aria-label="Document editor">
+              {remoteCursorMarkers.length ? (
+                <div className="lash-remote-cursor-layer" aria-label="Remote cursors">
+                  {remoteCursorMarkers}
+                </div>
+              ) : null}
               {!isMounted || !isEditorReady ? (
                 <div className="editor-loading">Preparing your editor…</div>
               ) : (

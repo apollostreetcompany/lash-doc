@@ -1081,9 +1081,95 @@ main[data-testid='lash-home'] > section {
   background: var(--color-text-muted);
 }
 
+.lash-realtime-presence {
+  margin-top: var(--space-3);
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  color: var(--color-text-secondary);
+  font-size: var(--text-meta);
+}
+
+.lash-realtime-sync-state {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+  padding: 0 var(--space-2);
+  border-radius: var(--radius-pill);
+  border: 1px solid var(--color-border);
+  background: var(--color-rail-bg);
+  color: var(--color-text-secondary);
+  font-weight: 600;
+}
+
+.lash-realtime-sync-state[data-state='saved'] {
+  border-color: var(--color-success-bg);
+  background: var(--color-success-bg);
+  color: var(--color-success);
+}
+
+.lash-realtime-sync-state[data-state='syncing'],
+.lash-realtime-sync-state[data-state='connecting'],
+.lash-realtime-sync-state[data-state='reconnecting'] {
+  border-color: var(--color-warning-bg);
+  background: var(--color-warning-bg);
+  color: var(--color-warning);
+}
+
+.lash-realtime-sync-state[data-state='offline'] {
+  border-color: var(--color-danger-bg);
+  background: var(--color-danger-bg);
+  color: var(--color-danger);
+}
+
+.lash-realtime-peers {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+}
+
+.lash-realtime-peer,
+.lash-realtime-empty,
+.lash-remote-cursor-marker {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+  border-radius: var(--radius-pill);
+  font-size: var(--text-meta);
+  line-height: 1;
+}
+
+.lash-realtime-peer {
+  padding: 0 var(--space-2);
+  border: 1px solid var(--presence-color, var(--color-border));
+  color: var(--color-text-primary);
+  background: var(--color-paper);
+  box-shadow: inset 3px 0 0 var(--presence-color, var(--color-border));
+}
+
+.lash-realtime-empty {
+  color: var(--color-text-muted);
+}
+
 .lash-editor-content-wrapper {
   padding: var(--space-3) var(--canvas-pad-x) var(--space-7);
   position: relative;
+}
+
+.lash-remote-cursor-layer {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-bottom: var(--space-3);
+}
+
+.lash-remote-cursor-marker {
+  padding: 0 var(--space-2);
+  color: var(--presence-color, var(--color-info));
+  border: 1px solid color-mix(in srgb, var(--presence-color, var(--color-info)) 30%, transparent);
+  background: color-mix(in srgb, var(--presence-color, var(--color-info)) 10%, var(--color-paper));
 }
 
 .editor-loading {

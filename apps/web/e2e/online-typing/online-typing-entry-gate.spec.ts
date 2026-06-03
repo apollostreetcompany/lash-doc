@@ -10,6 +10,17 @@ type LashTestWindow = Window & {
     };
     getText: (options?: { blockSeparator?: string }) => string;
   };
+  __lashRealtime?: {
+    disconnectForTest: () => void;
+    reconnectForTest: () => void;
+    getSnapshot: () => {
+      syncState: string;
+      peers: Array<{
+        actorId: string;
+        selection: { from: number; to: number } | null;
+      }>;
+    };
+  };
 };
 
 const EMPTY_DOC = '<p></p>';
@@ -104,19 +115,34 @@ const openDocument = async (page: Page, documentId: string) => {
   await seedEmptyDoc(page);
 };
 
-const enableLocalRealtime = (context: BrowserContext) =>
-  context.addInitScript(() => {
+const enableLocalRealtime = (context: BrowserContext, actorId?: string) =>
+  context.addInitScript((nextActorId) => {
     window.localStorage.setItem('lash:realtime-enabled', 'true');
-  });
+    if (nextActorId) {
+      window.localStorage.setItem('lash:actor-id', nextActorId);
+    }
+  }, actorId);
 
-const openTwoClientsOnSameDoc = async (browser: Browser) => {
+const openTwoClientsOnSameDoc = async (
+  browser: Browser,
+  options: {
+    actorA?: string;
+    actorB?: string;
+    documentId?: string;
+  } = {},
+) => {
+  const { actorA = 'actor-alpha', actorB = 'actor-beta', documentId = 'demo-document' } = options;
   const contextA = await browser.newContext();
   const contextB = await browser.newContext();
-  await Promise.all([enableLocalRealtime(contextA), enableLocalRealtime(contextB)]);
+  await Promise.all([enableLocalRealtime(contextA, actorA), enableLocalRealtime(contextB, actorB)]);
   const pageA = await contextA.newPage();
   const pageB = await contextB.newPage();
 
-  await Promise.all([openDemoDoc(pageA), openDemoDoc(pageB)]);
+  if (documentId === 'demo-document') {
+    await Promise.all([openDemoDoc(pageA), openDemoDoc(pageB)]);
+  } else {
+    await Promise.all([openDocument(pageA, documentId), openDocument(pageB, documentId)]);
+  }
 
   return {
     pageA,
@@ -131,6 +157,9 @@ const editorText = (page: Page) =>
   page.evaluate(
     () => (window as LashTestWindow).__lashEditor?.getText({ blockSeparator: '\n' }) ?? '',
   );
+
+const realtimeSnapshot = (page: Page) =>
+  page.evaluate(() => (window as LashTestWindow).__lashRealtime?.getSnapshot() ?? null);
 
 const typeIntoEditor = async (page: Page, text: string) => {
   await page.evaluate(() => {
@@ -332,6 +361,85 @@ test.describe('online typing entry gate', () => {
       expect(health.persistence.snapshotSequence).not.toBeNull();
     } finally {
       await context.close();
+    }
+  });
+
+  test('presence and remote cursor awareness are visible across clients', async ({ browser }) => {
+    const room = await openTwoClientsOnSameDoc(browser, {
+      actorA: 'ada-author',
+      actorB: 'grace-editor',
+      documentId: `bead-33-presence-${Date.now()}`,
+    });
+
+    try {
+      await expect
+        .poll(() => realtimeSnapshot(room.pageA), {
+          message: 'client A should receive client B awareness state',
+          timeout: 3_000,
+        })
+        .toMatchObject({
+          peers: expect.arrayContaining([
+            expect.objectContaining({
+              actorId: 'grace-editor',
+            }),
+          ]),
+        });
+
+      await expect(
+        room.pageA.locator('[data-testid="remote-collaborator"][data-actor-id="grace-editor"]'),
+      ).toBeVisible();
+
+      await room.pageB.evaluate(() => {
+        const editor = (window as LashTestWindow).__lashEditor;
+        if (!editor) throw new Error('Lash editor test hook is unavailable');
+        editor.commands.focus('end');
+      });
+      await room.pageB.keyboard.type('Remote cursor probe');
+
+      await expect(
+        room.pageA.locator('[data-testid="remote-cursor-marker"][data-actor-id="grace-editor"]'),
+      ).toContainText(/Grace Editor: cursor/i);
+    } finally {
+      await room.close();
+    }
+  });
+
+  test('sync state surfaces saved, reconnecting, and recovered states', async ({ browser }) => {
+    const room = await openTwoClientsOnSameDoc(browser, {
+      actorA: 'sync-author',
+      actorB: 'sync-observer',
+      documentId: `bead-33-sync-${Date.now()}`,
+    });
+
+    try {
+      await typeIntoEditor(room.pageA, 'Sync state probe');
+
+      await expect
+        .poll(() => realtimeSnapshot(room.pageA), {
+          message: 'local updates should report saved after the room acknowledges them',
+          timeout: 3_000,
+        })
+        .toMatchObject({ syncState: 'saved' });
+      await expect(room.pageA.getByTestId('realtime-sync-state')).toContainText(/saved/i);
+
+      await room.pageA.evaluate(() => {
+        (window as LashTestWindow).__lashRealtime?.disconnectForTest();
+      });
+      await expect(room.pageA.getByTestId('realtime-sync-state')).toContainText(
+        /reconnecting|offline/i,
+      );
+
+      await room.pageA.evaluate(() => {
+        (window as LashTestWindow).__lashRealtime?.reconnectForTest();
+      });
+      await expect
+        .poll(() => realtimeSnapshot(room.pageA), {
+          message: 'manual reconnect should restore the saved sync state',
+          timeout: 3_000,
+        })
+        .toMatchObject({ syncState: 'saved' });
+    } finally {
+      await room.close();
     }
   });
 });

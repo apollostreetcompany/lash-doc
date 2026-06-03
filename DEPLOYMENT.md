@@ -37,6 +37,7 @@
 - Bead 30 gates realtime room access with signed session grants. Browsers first request `GET /api/realtime/rooms/:id/session?actorId=<actor>` and then pass the returned `accessToken` to room health/socket requests. Local development uses a non-production fallback secret; production must set `LASH_REALTIME_SESSION_SECRET` before publishing the Worker.
 - Bead 31 persists realtime document CRDT state in the per-document Durable Object using SQLite-backed storage. Each accepted Yjs update is appended before broadcast, snapshots compact hydration state periodically, new sockets hydrate from the latest snapshot plus later updates, and restore appends a new head update instead of deleting history.
 - Bead 32 makes realtime opt-in for unconfigured local browser sessions so normal large-document typing does not pay collaboration runtime overhead. Online typing Playwright coverage opts in explicitly before opening document pages.
+- Bead 33 carries presence on the existing realtime room socket: clients send room-scoped `awareness-update` messages, the Durable Object sends same-room `awareness-state` peer lists, and persisted client updates return `sync-ack` messages for saved/syncing UI.
 - The existing Cloudflare Pages public test site remains the static web host for the merged `main` build. The Bead 27 `/doc/[id]` Next routes are still local/Next-runtime routes until the web app deployment path is moved off static export or given an explicit dynamic route strategy; `pnpm run build:static` is expected to fail on this branch for that reason.
 
 ## Realtime Worker Preflight
@@ -55,9 +56,10 @@
 - Room health: `GET /api/realtime/rooms/<doc-id>/health?accessToken=<token>`; requires `doc.read`; includes `persistence.updates`, `persistence.snapshotSequence`, and `persistence.hydrationUpdates`.
 - Room socket: `GET /api/realtime/rooms/<doc-id>/socket?accessToken=<token>` with `Upgrade: websocket`; requires `doc.edit`.
 - Room restore: `POST /api/realtime/rooms/<doc-id>/restore?accessToken=<token>` with body `{ "update": "<base64-yjs-update>" }`; requires `doc.edit`; appends a new restore update and broadcasts it to connected peers.
+- Room socket protocol: `yjs-update` messages can include `updateId` and receive `sync-ack`; `awareness-update` messages carry label/color/selection and receive room-scoped `awareness-state` peer lists.
 - Local verification command: `pnpm run verify:realtime`.
 - Latest local verification: service health passed on `http://127.0.0.1:8787`, unauthenticated room health returned `403`, room `bead-28-health` reported actor `verify-runtime` and `protocolVersion: 1`, and authorized WebSocket ping returned `pong` with one active connection.
-- Latest online persistence verification: `apps/web/e2e/online-typing/online-typing-entry-gate.spec.ts` passes unauthorized denial, same-doc remote visibility, concurrent convergence, reload durability, and snapshot compaction without deleting update history.
+- Latest online realtime verification: `apps/web/e2e/online-typing/online-typing-entry-gate.spec.ts` passes unauthorized denial, same-doc remote visibility, concurrent convergence, reload durability, snapshot compaction without deleting update history, room presence/cursor visibility, and saved/reconnecting/recovered sync states.
 
 ## Cloudflare Pages Preflight
 
