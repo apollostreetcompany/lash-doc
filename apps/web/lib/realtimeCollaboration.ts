@@ -5,6 +5,7 @@ const REMOTE_UPDATE_ORIGIN = Symbol('lash-remote-yjs-update');
 type ProviderStatus = 'disabled' | 'connecting' | 'connected' | 'disconnected';
 
 interface RealtimeProviderOptions {
+  actorId: string;
   doc: Y.Doc;
   roomId: string;
   socketBaseUrl: string | null;
@@ -15,6 +16,10 @@ type RealtimeMessage =
   | { type: 'pong' }
   | { type: 'yjs-update'; update: string }
   | { type: 'error'; code?: string };
+
+type SessionResponse =
+  | { ok: true; accessToken: string; grant: { actorId: string } }
+  | { ok: false; reason?: string };
 
 const bytesToBase64 = (bytes: Uint8Array) => {
   let binary = '';
@@ -45,25 +50,69 @@ const defaultSocketBaseUrl = () => {
   return null;
 };
 
-const socketUrl = (baseUrl: string, roomId: string) =>
-  new URL(`/api/realtime/rooms/${encodeURIComponent(roomId)}/socket`, baseUrl).toString();
+const normalizeActorId = (raw: string | undefined | null) => {
+  const normalized = (raw ?? '')
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9-]+/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/^-|-$/g, '')
+    .slice(0, 96);
+  return normalized || 'local-user';
+};
+
+const localActorId = () => {
+  if (typeof window === 'undefined') return 'local-user';
+  try {
+    const existing = window.localStorage.getItem('lash:actor-id');
+    if (existing) return normalizeActorId(existing);
+    const next =
+      typeof crypto !== 'undefined' && 'randomUUID' in crypto
+        ? `actor-${crypto.randomUUID().slice(0, 8)}`
+        : `actor-${Date.now().toString(36)}`;
+    window.localStorage.setItem('lash:actor-id', next);
+    return normalizeActorId(next);
+  } catch {
+    return 'local-user';
+  }
+};
+
+const httpBaseUrl = (baseUrl: string) =>
+  baseUrl.replace(/^wss:/u, 'https:').replace(/^ws:/u, 'http:');
+
+const sessionUrl = (baseUrl: string, roomId: string, actorId: string) => {
+  const url = new URL(
+    `/api/realtime/rooms/${encodeURIComponent(roomId)}/session`,
+    httpBaseUrl(baseUrl),
+  );
+  url.searchParams.set('actorId', actorId);
+  return url.toString();
+};
+
+const socketUrl = (baseUrl: string, roomId: string, accessToken: string) => {
+  const url = new URL(`/api/realtime/rooms/${encodeURIComponent(roomId)}/socket`, baseUrl);
+  url.searchParams.set('accessToken', accessToken);
+  return url.toString();
+};
 
 export class LashRealtimeYjsProvider {
   private readonly doc: Y.Doc;
+  private readonly actorId: string;
   private readonly roomId: string;
   private readonly socketBaseUrl: string | null;
   private queuedUpdates: Uint8Array[] = [];
   private socket: WebSocket | null = null;
   private status: ProviderStatus;
 
-  constructor({ doc, roomId, socketBaseUrl }: RealtimeProviderOptions) {
+  constructor({ actorId, doc, roomId, socketBaseUrl }: RealtimeProviderOptions) {
     this.doc = doc;
+    this.actorId = actorId;
     this.roomId = roomId;
     this.socketBaseUrl = socketBaseUrl;
     this.status = socketBaseUrl ? 'connecting' : 'disabled';
     this.doc.on('update', this.handleLocalUpdate);
     if (socketBaseUrl) {
-      this.connect();
+      void this.authorizeAndConnect();
     }
   }
 
@@ -79,9 +128,24 @@ export class LashRealtimeYjsProvider {
     this.status = 'disconnected';
   }
 
-  private connect() {
+  private async authorizeAndConnect() {
     if (!this.socketBaseUrl) return;
-    const socket = new WebSocket(socketUrl(this.socketBaseUrl, this.roomId));
+    let session: SessionResponse;
+    try {
+      const response = await fetch(sessionUrl(this.socketBaseUrl, this.roomId, this.actorId), {
+        cache: 'no-store',
+      });
+      session = (await response.json()) as SessionResponse;
+    } catch {
+      this.status = 'disconnected';
+      return;
+    }
+    if (!session.ok) {
+      this.status = 'disconnected';
+      return;
+    }
+
+    const socket = new WebSocket(socketUrl(this.socketBaseUrl, this.roomId, session.accessToken));
     this.socket = socket;
 
     socket.addEventListener('open', () => {
@@ -145,6 +209,7 @@ export class LashRealtimeYjsProvider {
 export const createLashRealtimeCollaboration = (roomId: string) => {
   const doc = new Y.Doc();
   const provider = new LashRealtimeYjsProvider({
+    actorId: localActorId(),
     doc,
     roomId,
     socketBaseUrl: defaultSocketBaseUrl(),

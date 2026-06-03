@@ -42,17 +42,41 @@ const waitForHealth = async () => {
   throw new Error(`Realtime health check did not become ready: ${lastError}`);
 };
 
-const verifyRoomHealth = async () => {
+const requestSessionToken = async () => {
+  const response = await fetch(
+    `${baseUrl}/api/realtime/rooms/${roomId}/session?actorId=verify-runtime`,
+  );
+  if (!response.ok) {
+    throw new Error(`Realtime session grant failed: ${response.status} ${response.statusText}`);
+  }
+  const body = await response.json();
+  if (!body?.ok || typeof body.accessToken !== 'string') {
+    throw new Error('Realtime session grant did not return an access token');
+  }
+  return body.accessToken;
+};
+
+const verifyDeniedWithoutToken = async () => {
   const response = await fetch(`${baseUrl}/api/realtime/rooms/${roomId}/health`);
+  if (response.status !== 403) {
+    throw new Error(`Room health without token should be denied, got ${response.status}`);
+  }
+  return response.json();
+};
+
+const verifyRoomHealth = async (accessToken) => {
+  const response = await fetch(
+    `${baseUrl}/api/realtime/rooms/${roomId}/health?accessToken=${encodeURIComponent(accessToken)}`,
+  );
   if (!response.ok) {
     throw new Error(`Room health failed: ${response.status} ${response.statusText}`);
   }
   return response.json();
 };
 
-const verifyWebSocket = async () =>
+const verifyWebSocket = async (accessToken) =>
   new Promise((resolve, reject) => {
-    const url = `${baseUrl.replace('http:', 'ws:')}/api/realtime/rooms/${roomId}/socket`;
+    const url = `${baseUrl.replace('http:', 'ws:')}/api/realtime/rooms/${roomId}/socket?accessToken=${encodeURIComponent(accessToken)}`;
     const socket = new WebSocket(url);
     const timeout = setTimeout(() => {
       socket.close();
@@ -115,13 +139,16 @@ child.stderr.on('data', (chunk) => {
 
 try {
   const serviceHealth = await waitForHealth();
-  const roomHealth = await verifyRoomHealth();
-  const socketResult = await verifyWebSocket();
+  const deniedWithoutToken = await verifyDeniedWithoutToken();
+  const accessToken = await requestSessionToken();
+  const roomHealth = await verifyRoomHealth(accessToken);
+  const socketResult = await verifyWebSocket(accessToken);
   console.log(
     JSON.stringify(
       {
         ok: true,
         baseUrl,
+        deniedWithoutToken,
         serviceHealth,
         roomHealth,
         socketResult,

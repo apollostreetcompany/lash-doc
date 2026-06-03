@@ -58,6 +58,7 @@ Success criteria:
 33. Bead 27 introduces real local document identity with `/doc/[id]` routing, a local document registry, per-doc title metadata, per-doc outline/history/panel IDs, and document create/open controls. It deliberately does not add realtime sync or durable document-body persistence; static export is known to fail for arbitrary doc routes until a web dynamic-route hosting strategy is chosen.
 34. Bead 28 chooses Cloudflare Workers plus Durable Objects for realtime document rooms. The `lash-realtime` Worker exposes service/room health endpoints and a hibernatable WebSocket room socket; local verification runs through Wrangler on port `8787`, and deploy-shape verification uses `wrangler deploy --dry-run`. This does not yet bind TipTap/Yjs or durable document persistence.
 35. Bead 29 binds the editor to Yjs-backed TipTap collaboration and the Bead 28 room socket. Same-doc remote visibility and concurrent typing convergence now pass through a local Wrangler realtime Worker; reload durability remains intentionally red for Bead 31 persistence.
+36. Bead 30 introduces a signed actor grant boundary for realtime rooms. Browsers request a short-lived session token from `/api/realtime/rooms/:id/session`, room health requires `doc.read`, room sockets require `doc.edit`, and the Worker passes trusted actor context into the Durable Object. This is a local/session-token bridge only; real identity, roles, invites, and persistence remain later beads.
 
 ## State
 
@@ -110,14 +111,14 @@ Success criteria:
 - [x] Bead 27 - Real Document Identity with `/doc/[id]` routing, local document registry, title isolation, create/open controls, and per-doc outline state.
 - [x] Bead 28 - Realtime Runtime Decision + Skeleton with Cloudflare Durable Object rooms, health endpoints, local Wrangler WebSocket verification, and deploy dry-run.
 - [x] Bead 29 - CRDT Editor Binding with TipTap Collaboration, Yjs room provider, Worker update relay, and two-client convergence.
+- [x] Bead 30 - Actor Identity + Access Boundary with signed realtime session grants, token-gated room reads/sockets, and unauthorized room denial coverage.
 
 ### Now
 
-- Bead 30 - Actor Identity + Access Boundary.
+- Bead 31 - Durable Persistence, Snapshots, Restore.
 
 ### Next
 
-- Bead 31 - Durable Persistence, Snapshots, Restore.
 - Bead 32 - Large-Doc Typing Performance.
 - Bead 33 - Presence, Remote Cursors, Sync State.
 - Bead 34 - Invite + Access UX.
@@ -183,9 +184,11 @@ Success criteria:
 - `apps/web/components/shell/Sidebar.tsx`
 - `packages/collab-service/src/index.ts`
 - `packages/realtime-worker/src/index.ts`
+- `packages/realtime-worker/src/access.ts`
 - `packages/realtime-worker/src/room.ts`
 - `packages/realtime-worker/src/routing.ts`
 - `packages/realtime-worker/wrangler.jsonc`
+- `packages/testing/unit/realtime-runtime/realtime-access-boundary.test.ts`
 - `packages/testing/unit/realtime-runtime/realtime-runtime-skeleton.test.ts`
 - `scripts/verify-realtime-runtime.mjs`
 - `packages/editor-core/src/schema/mentions.ts`
@@ -196,6 +199,7 @@ Success criteria:
 - GitHub PR #19: `https://github.com/apollostreetcompany/lash-doc/pull/19` (expected red until Beads 29-31; stacked on PR #18)
 - GitHub PR #20: `https://github.com/apollostreetcompany/lash-doc/pull/20` (expected red until Beads 29-31; stacked on PR #19)
 - GitHub PR #21: `https://github.com/apollostreetcompany/lash-doc/pull/21` (reload durability expected-red until Bead 31; stacked on PR #20)
+- GitHub PR #22: pending Bead 30 stacked PR (reload durability expected-red until Bead 31)
 - GitHub PR #12: `https://github.com/apollostreetcompany/lash-doc/pull/12`
 - Post-deploy main CI run: `https://github.com/apollostreetcompany/lash-doc/actions/runs/26026635724`
 - Final Cloudflare deployment preview: `https://cad5a3ac.lash-9xx.pages.dev`

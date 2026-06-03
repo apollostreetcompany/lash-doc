@@ -130,11 +130,75 @@ const typeIntoEditor = async (page: Page, text: string) => {
   await expect.poll(() => editorText(page)).toContain(text);
 };
 
+const sessionFor = async (roomId: string, actorId: string) => {
+  const response = await fetch(
+    `http://127.0.0.1:${REALTIME_PORT}/api/realtime/rooms/${roomId}/session?actorId=${actorId}`,
+  );
+  expect(response.status).toBe(200);
+  const body = (await response.json()) as { ok: true; accessToken: string };
+  expect(body.ok).toBe(true);
+  return body.accessToken;
+};
+
+const waitForSocketRefusal = async (url: string) =>
+  new Promise<void>((resolve, reject) => {
+    let settled = false;
+    const socket = new WebSocket(url);
+    const settle = (callback: () => void) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeout);
+      callback();
+    };
+    const timeout = setTimeout(() => {
+      socket.close();
+      settle(() => reject(new Error('Unauthorized realtime socket was not refused')));
+    }, 5_000);
+    socket.addEventListener('open', () => {
+      socket.close();
+      settle(() => reject(new Error('Unauthorized realtime socket unexpectedly opened')));
+    });
+    socket.addEventListener('error', () => {
+      settle(resolve);
+    });
+    socket.addEventListener('close', () => {
+      settle(resolve);
+    });
+  });
+
 test.describe.configure({ mode: 'serial' });
 
 test.describe('online typing entry gate', () => {
   test.beforeAll(startRealtimeWorker);
   test.afterAll(stopRealtimeWorker);
+
+  test('unauthorized sessions cannot read or join a document room', async () => {
+    const roomId = 'access-boundary-alpha';
+    const noTokenHealth = await fetch(
+      `http://127.0.0.1:${REALTIME_PORT}/api/realtime/rooms/${roomId}/health`,
+    );
+    expect(noTokenHealth.status).toBe(403);
+
+    await waitForSocketRefusal(
+      `ws://127.0.0.1:${REALTIME_PORT}/api/realtime/rooms/${roomId}/socket`,
+    );
+
+    const accessToken = await sessionFor(roomId, 'actor-authorized');
+    const tamperedToken = `${accessToken.slice(0, -2)}xx`;
+    const tamperedHealth = await fetch(
+      `http://127.0.0.1:${REALTIME_PORT}/api/realtime/rooms/${roomId}/health?accessToken=${tamperedToken}`,
+    );
+    expect(tamperedHealth.status).toBe(403);
+
+    await waitForSocketRefusal(
+      `ws://127.0.0.1:${REALTIME_PORT}/api/realtime/rooms/${roomId}/socket?accessToken=${encodeURIComponent(tamperedToken)}`,
+    );
+
+    const authorizedHealth = await fetch(
+      `http://127.0.0.1:${REALTIME_PORT}/api/realtime/rooms/${roomId}/health?accessToken=${encodeURIComponent(accessToken)}`,
+    );
+    expect(authorizedHealth.status).toBe(200);
+  });
 
   test('same-doc remote visibility shows keystrokes in another browser context', async ({
     browser,

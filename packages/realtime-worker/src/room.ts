@@ -5,6 +5,7 @@ import { REALTIME_RUNTIME, normalizeRoomName } from './routing';
 const PROTOCOL_VERSION = 1;
 
 type SocketAttachment = {
+  actorId: string;
   roomId: string;
   connectedAt: number;
 };
@@ -29,12 +30,20 @@ const readAttachment = (ws: WebSocket): SocketAttachment => {
   const value = ws.deserializeAttachment() as unknown;
   if (value && typeof value === 'object') {
     const attachment = value as Partial<SocketAttachment>;
-    if (typeof attachment.roomId === 'string' && typeof attachment.connectedAt === 'number') {
-      return { roomId: attachment.roomId, connectedAt: attachment.connectedAt };
+    if (
+      typeof attachment.actorId === 'string' &&
+      typeof attachment.roomId === 'string' &&
+      typeof attachment.connectedAt === 'number'
+    ) {
+      return {
+        actorId: attachment.actorId,
+        roomId: attachment.roomId,
+        connectedAt: attachment.connectedAt,
+      };
     }
   }
 
-  return { roomId: 'unknown-room', connectedAt: Date.now() };
+  return { actorId: 'unknown-actor', roomId: 'unknown-room', connectedAt: Date.now() };
 };
 
 const parseClientMessage = (message: string | ArrayBuffer): ClientMessage | null => {
@@ -59,11 +68,16 @@ export class LashRealtimeRoom extends DurableObject<Env> {
 
   async fetch(request: Request): Promise<Response> {
     const url = new URL(request.url);
+    const actorId = normalizeRoomName(url.searchParams.get('actorId')) ?? null;
     const roomId = normalizeRoomName(url.searchParams.get('roomId')) ?? 'unknown-room';
+    if (!actorId) {
+      return json({ ok: false, error: 'forbidden', reason: 'missing-actor' }, { status: 403 });
+    }
 
     if (url.pathname === '/__lash-room/health') {
       return json({
         ok: true,
+        actorId,
         roomId,
         runtime: REALTIME_RUNTIME,
         protocolVersion: PROTOCOL_VERSION,
@@ -72,7 +86,7 @@ export class LashRealtimeRoom extends DurableObject<Env> {
     }
 
     if (url.pathname === '/__lash-room/socket') {
-      return this.acceptSocket(request, roomId);
+      return this.acceptSocket(request, roomId, actorId);
     }
 
     return json({ ok: false, error: 'not_found' }, { status: 404 });
@@ -97,6 +111,7 @@ export class LashRealtimeRoom extends DurableObject<Env> {
         JSON.stringify({
           type: 'pong',
           requestId: parsed.requestId ?? null,
+          actorId: attachment.actorId,
           roomId: attachment.roomId,
           protocolVersion: PROTOCOL_VERSION,
           connections: this.ctx.getWebSockets().length,
@@ -108,6 +123,7 @@ export class LashRealtimeRoom extends DurableObject<Env> {
     if (parsed.type === 'broadcast') {
       const payload = JSON.stringify({
         type: 'broadcast',
+        actorId: attachment.actorId,
         requestId: parsed.requestId ?? null,
         roomId: attachment.roomId,
         payload: parsed.payload ?? null,
@@ -131,6 +147,7 @@ export class LashRealtimeRoom extends DurableObject<Env> {
       }
       const payload = JSON.stringify({
         type: 'yjs-update',
+        actorId: attachment.actorId,
         roomId: attachment.roomId,
         update: parsed.update,
       });
@@ -160,7 +177,7 @@ export class LashRealtimeRoom extends DurableObject<Env> {
     ws.close(code, reason);
   }
 
-  private acceptSocket(request: Request, roomId: string): Response {
+  private acceptSocket(request: Request, roomId: string, actorId: string): Response {
     if (request.headers.get('Upgrade')?.toLowerCase() !== 'websocket') {
       return json({ ok: false, error: 'expected_websocket' }, { status: 426 });
     }
@@ -168,10 +185,15 @@ export class LashRealtimeRoom extends DurableObject<Env> {
     const pair = new WebSocketPair();
     const [client, server] = Object.values(pair) as [WebSocket, WebSocket];
     this.ctx.acceptWebSocket(server);
-    server.serializeAttachment({ roomId, connectedAt: Date.now() } satisfies SocketAttachment);
+    server.serializeAttachment({
+      actorId,
+      roomId,
+      connectedAt: Date.now(),
+    } satisfies SocketAttachment);
     server.send(
       JSON.stringify({
         type: 'room-ready',
+        actorId,
         roomId,
         runtime: REALTIME_RUNTIME,
         protocolVersion: PROTOCOL_VERSION,
