@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   REALTIME_RUNTIME,
+  isLocalRealtimeFallbackHost,
   normalizeRoomName,
   parseRealtimeRoute,
 } from '../../../realtime-worker/src/routing';
@@ -45,6 +46,17 @@ describe('realtime runtime skeleton', () => {
     expect(parseRealtimeRoute(new URL('https://lash.test/doc/doc-alpha'))).toEqual({
       kind: 'not-found',
     });
+  });
+
+  it('allows local fallback realtime grants only on loopback hosts', () => {
+    expect(isLocalRealtimeFallbackHost(new URL('http://127.0.0.1:8787/api/realtime/health'))).toBe(
+      true,
+    );
+    expect(isLocalRealtimeFallbackHost(new URL('http://localhost:8787/api/realtime/health'))).toBe(
+      true,
+    );
+    expect(isLocalRealtimeFallbackHost(new URL('https://lash-realtime.example.com'))).toBe(false);
+    expect(isLocalRealtimeFallbackHost(new URL('https://lash-9xx.pages.dev'))).toBe(false);
   });
 
   it('has deploy-shaped Wrangler configuration for the room Durable Object', () => {

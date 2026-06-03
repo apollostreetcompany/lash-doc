@@ -34,6 +34,9 @@ export const normalizeRoomName = (raw: string | undefined | null): string | null
   return /[a-z0-9]/.test(normalized) ? normalized : null;
 };
 
+export const isLocalRealtimeFallbackHost = (url: URL) =>
+  url.hostname === 'localhost' || url.hostname === '127.0.0.1' || url.hostname === '[::1]';
+
 export const parseRealtimeRoute = (url: URL): RealtimeRoute => {
   const pathname = url.pathname.replace(/\/+$/u, '') || '/';
   if (pathname === '/api/realtime/health') {

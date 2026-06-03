@@ -8,7 +8,7 @@ import {
   type RealtimeSessionGrant,
 } from './access';
 import { LashRealtimeRoom } from './room';
-import { REALTIME_RUNTIME, parseRealtimeRoute } from './routing';
+import { REALTIME_RUNTIME, isLocalRealtimeFallbackHost, parseRealtimeRoute } from './routing';
 
 export { LashRealtimeRoom };
 export { REALTIME_RUNTIME, normalizeRoomName, parseRealtimeRoute } from './routing';
@@ -109,6 +109,9 @@ export default {
     if (route.kind === 'room-session') {
       const actorId = normalizeActorId(url.searchParams.get('actorId'));
       const inviteToken = url.searchParams.get('inviteToken');
+      if (usingLocalFallback && !isLocalRealtimeFallbackHost(url)) {
+        return deny('invalid');
+      }
       let grant: RealtimeSessionGrant;
       if (inviteToken) {
         const inviteDecision = await createRealtimeGrantFromInviteToken(
