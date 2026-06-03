@@ -75,6 +75,7 @@ Success criteria:
 50. Fresh-eyes Bead 36 hardening restricts the no-secret realtime development fallback to loopback hosts only. A Worker without `LASH_REALTIME_SESSION_SECRET` now denies `/session` minting on non-local hosts instead of silently using the local development secret; local `127.0.0.1`/`localhost` verification remains supported.
 51. CI now runs on Node 22 and uses `pnpm run test:e2e:ci`, which rebuilds the web app with Lash test hooks and runs Playwright with one worker. Wrangler 4.97 requires Node 22+, and the realtime/performance browser suite needs serialized execution on shared CI runners to avoid Worker port contention and scheduling noise that masks product latency.
 52. The 50k-word large-document Event Timing p95 gate remains strict at 8 ms for local/product validation, but allows a CI-only 16 ms runner budget because GitHub-hosted CPU reported 11.3 ms while the same commit measured 4.8 ms locally. The test logs the active budget in metrics so CI cannot silently hide a widened threshold.
+53. PR #28 CI is green after Node 22, serialized E2E, and the CI-only 50k runner budget adjustments: GitHub Actions run `26913596916` passed `build-and-test` on branch `codex/feat/bead-36-collaboration-delight`.
 
 ## State
 
@@ -137,7 +138,7 @@ Success criteria:
 
 ### Now
 
-- PR #28 remote CI verification after Node 22 / serialized E2E hardening.
+- PR stack merge readiness after PR #28 green CI.
 
 ### Next
 
