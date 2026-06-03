@@ -34,6 +34,7 @@
 - Bead 32 is complete on branch `codex/perf/bead-32-large-doc-typing-performance`: local documents no longer enable the collaboration runtime unless realtime is explicitly configured/opted in, outline scans are deferred for body-text transactions, offscreen editor blocks use CSS containment, and 10k/50k-word browser typing gates prove p95 input work stays under the 8 ms SLO.
 - Bead 32 PR #24 is open and stacked on PR #23: `https://github.com/apollostreetcompany/lash-doc/pull/24`.
 - Bead 33 is complete on branch `codex/feat/bead-33-presence-sync-state`: the realtime room now supports same-room awareness broadcasts and sync acknowledgements; the editor shows saved/syncing/reconnecting state, collaborator chips, and remote cursor/selection markers.
+- Bead 33 PR #25 is open and stacked on PR #24: `https://github.com/apollostreetcompany/lash-doc/pull/25`.
 - Static Cloudflare Pages export still fails for arbitrary `/doc/[id]`; Bead 28 solves realtime room hosting, not the final web app dynamic-route hosting strategy.
 - Current active scoped goal is Beads 23-36: regressions first, then true responsive online typing through document identity, realtime runtime, CRDT binding, actor/access, persistence, performance, presence, invite UX, durable comments, and collaboration delight.
 - User-reported regressions are tracked in `REGRESSIONS.md`; R-001 title, R-002 @mentions, and R-003 sidebar are fixed.
