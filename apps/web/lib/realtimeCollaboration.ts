@@ -38,6 +38,7 @@ export type RealtimeSnapshot = {
 interface RealtimeProviderOptions {
   actorId: string;
   doc: Y.Doc;
+  inviteToken: string | null;
   roomId: string;
   socketBaseUrl: string | null;
 }
@@ -121,12 +122,39 @@ const localActorId = () => {
 const httpBaseUrl = (baseUrl: string) =>
   baseUrl.replace(/^wss:/u, 'https:').replace(/^ws:/u, 'http:');
 
-const sessionUrl = (baseUrl: string, roomId: string, actorId: string) => {
+const inviteStorageKey = (roomId: string) => `lash:invite-token:${roomId}`;
+
+const inviteTokenFromCurrentLocation = (roomId: string) => {
+  if (typeof window === 'undefined') return null;
+  try {
+    const hash = window.location.hash.startsWith('#')
+      ? window.location.hash.slice(1)
+      : window.location.hash;
+    const token = new URLSearchParams(hash).get('invite');
+    if (token) {
+      window.sessionStorage.setItem(inviteStorageKey(roomId), token);
+      return token;
+    }
+    return window.sessionStorage.getItem(inviteStorageKey(roomId));
+  } catch {
+    return null;
+  }
+};
+
+const sessionUrl = (
+  baseUrl: string,
+  roomId: string,
+  actorId: string,
+  inviteToken: string | null,
+) => {
   const url = new URL(
     `/api/realtime/rooms/${encodeURIComponent(roomId)}/session`,
     httpBaseUrl(baseUrl),
   );
   url.searchParams.set('actorId', actorId);
+  if (inviteToken) {
+    url.searchParams.set('inviteToken', inviteToken);
+  }
   return url.toString();
 };
 
@@ -180,6 +208,7 @@ export class LashRealtimeYjsProvider {
   private readonly actorId: string;
   private readonly actorLabel: string;
   private readonly actorColor: string;
+  private readonly inviteToken: string | null;
   private readonly roomId: string;
   private readonly socketBaseUrl: string | null;
   private readonly listeners = new Set<(snapshot: RealtimeSnapshot) => void>();
@@ -193,11 +222,12 @@ export class LashRealtimeYjsProvider {
   private updateCounter = 0;
   private destroyed = false;
 
-  constructor({ actorId, doc, roomId, socketBaseUrl }: RealtimeProviderOptions) {
+  constructor({ actorId, doc, inviteToken, roomId, socketBaseUrl }: RealtimeProviderOptions) {
     this.doc = doc;
     this.actorId = actorId;
     this.actorLabel = actorLabel(actorId);
     this.actorColor = actorColor(actorId);
+    this.inviteToken = inviteToken;
     this.roomId = roomId;
     this.socketBaseUrl = socketBaseUrl;
     this.status = socketBaseUrl ? 'connecting' : 'disabled';
@@ -276,9 +306,12 @@ export class LashRealtimeYjsProvider {
     this.setConnectionState(this.status === 'reconnecting' ? 'reconnecting' : 'connecting');
     let session: SessionResponse;
     try {
-      const response = await fetch(sessionUrl(this.socketBaseUrl, this.roomId, this.actorId), {
-        cache: 'no-store',
-      });
+      const response = await fetch(
+        sessionUrl(this.socketBaseUrl, this.roomId, this.actorId, this.inviteToken),
+        {
+          cache: 'no-store',
+        },
+      );
       session = (await response.json()) as SessionResponse;
     } catch {
       this.handleConnectFailure();
@@ -464,6 +497,7 @@ export const createLashRealtimeCollaboration = (roomId: string) => {
   const provider = new LashRealtimeYjsProvider({
     actorId: localActorId(),
     doc,
+    inviteToken: inviteTokenFromCurrentLocation(roomId),
     roomId,
     socketBaseUrl,
   });

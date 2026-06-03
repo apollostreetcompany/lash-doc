@@ -38,21 +38,23 @@
 - Bead 31 persists realtime document CRDT state in the per-document Durable Object using SQLite-backed storage. Each accepted Yjs update is appended before broadcast, snapshots compact hydration state periodically, new sockets hydrate from the latest snapshot plus later updates, and restore appends a new head update instead of deleting history.
 - Bead 32 makes realtime opt-in for unconfigured local browser sessions so normal large-document typing does not pay collaboration runtime overhead. Online typing Playwright coverage opts in explicitly before opening document pages.
 - Bead 33 carries presence on the existing realtime room socket: clients send room-scoped `awareness-update` messages, the Durable Object sends same-room `awareness-state` peer lists, and persisted client updates return `sync-ack` messages for saved/syncing UI.
+- Bead 34 adds invite/access UX and signed invite-token exchange. Local/static Lash invite links use `#invite=<token>` and local browser storage for collaborator rows/revocation; the browser strips the hash after validation and forwards the invite token to realtime session exchange when realtime is enabled. In non-local Worker deployments, `/session` denies requests without a valid signed invite token instead of minting a default edit grant. Durable DO-backed invite issuance, global revocation, and audit remain follow-up work.
 - The existing Cloudflare Pages public test site remains the static web host for the merged `main` build. The Bead 27 `/doc/[id]` Next routes are still local/Next-runtime routes until the web app deployment path is moved off static export or given an explicit dynamic route strategy; `pnpm run build:static` is expected to fail on this branch for that reason.
 
 ## Realtime Worker Preflight
 
 1. Generate binding/runtime types after config changes: `pnpm --filter @lash/realtime-worker types`.
 2. Typecheck the Worker: `pnpm --filter @lash/realtime-worker typecheck`.
-3. Set the production signing secret before publishing: `npx wrangler secret put LASH_REALTIME_SESSION_SECRET --config packages/realtime-worker/wrangler.jsonc`.
-4. Validate deploy shape without publishing: `make realtime-dry-run`.
-5. Verify local token issuance, denied unauthenticated access, room health, and WebSocket upgrade: `make verify-realtime-runtime`.
-6. Deploy the realtime Worker when ready: `make deploy-realtime-cloudflare`.
+3. Set the production session signing secret before publishing: `npx wrangler secret put LASH_REALTIME_SESSION_SECRET --config packages/realtime-worker/wrangler.jsonc`.
+4. Set a production invite signing secret before accepting server-issued invite links: `npx wrangler secret put LASH_REALTIME_INVITE_SECRET --config packages/realtime-worker/wrangler.jsonc`. If omitted, the Worker falls back to `LASH_REALTIME_SESSION_SECRET` for invite verification.
+5. Validate deploy shape without publishing: `make realtime-dry-run`.
+6. Verify local token issuance, denied unauthenticated access, room health, and WebSocket upgrade: `make verify-realtime-runtime`.
+7. Deploy the realtime Worker when ready: `make deploy-realtime-cloudflare`.
 
 ## Realtime Worker Health
 
 - Service health: `GET /api/realtime/health`.
-- Room session grant: `GET /api/realtime/rooms/<doc-id>/session?actorId=<actor-id>`.
+- Room session grant: `GET /api/realtime/rooms/<doc-id>/session?actorId=<actor-id>`. Local fallback mints a default edit grant only when `LASH_REALTIME_SESSION_SECRET` is absent. Production requests must include `inviteToken=<signed-share-token>`; `view` maps to `doc.read`, while `comment`, `suggest`, and `edit` map to `doc.read` + `doc.edit` with the original invite scope preserved on the short-lived grant.
 - Room health: `GET /api/realtime/rooms/<doc-id>/health?accessToken=<token>`; requires `doc.read`; includes `persistence.updates`, `persistence.snapshotSequence`, and `persistence.hydrationUpdates`.
 - Room socket: `GET /api/realtime/rooms/<doc-id>/socket?accessToken=<token>` with `Upgrade: websocket`; requires `doc.edit`.
 - Room restore: `POST /api/realtime/rooms/<doc-id>/restore?accessToken=<token>` with body `{ "update": "<base64-yjs-update>" }`; requires `doc.edit`; appends a new restore update and broadcasts it to connected peers.

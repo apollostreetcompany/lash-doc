@@ -1,5 +1,6 @@
 import {
   createDefaultRealtimeGrant,
+  createRealtimeGrantFromInviteToken,
   createRealtimeSessionToken,
   normalizeActorId,
   verifyRealtimeSessionToken,
@@ -13,7 +14,10 @@ export { LashRealtimeRoom };
 export { REALTIME_RUNTIME, normalizeRoomName, parseRealtimeRoute } from './routing';
 export {
   createDefaultRealtimeGrant,
+  createRealtimeGrantFromInviteToken,
+  realtimeCapabilitiesForScope,
   createRealtimeSessionToken,
+  verifyRealtimeInviteToken,
   verifyRealtimeSessionToken,
 } from './access';
 
@@ -42,9 +46,19 @@ const withCors = (response: Response) => {
 };
 
 const LOCAL_DEV_SESSION_SECRET = 'lash-local-realtime-development-secret';
+const LOCAL_DEV_INVITE_SECRET = 'lash-local-invite-secret';
 
-const sessionSecret = (env: Env & { LASH_REALTIME_SESSION_SECRET?: string }) =>
-  env.LASH_REALTIME_SESSION_SECRET || LOCAL_DEV_SESSION_SECRET;
+const sessionSecret = (env: Env & { LASH_REALTIME_SESSION_SECRET?: string }) => {
+  const configured = env.LASH_REALTIME_SESSION_SECRET;
+  return {
+    secret: configured || LOCAL_DEV_SESSION_SECRET,
+    usingLocalFallback: !configured,
+  };
+};
+
+const inviteSecret = (
+  env: Env & { LASH_REALTIME_INVITE_SECRET?: string; LASH_REALTIME_SESSION_SECRET?: string },
+) => env.LASH_REALTIME_INVITE_SECRET || env.LASH_REALTIME_SESSION_SECRET || LOCAL_DEV_INVITE_SECRET;
 
 const accessTokenFor = (request: Request, url: URL) => {
   const header = request.headers.get('authorization');
@@ -76,7 +90,7 @@ export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
     const route = parseRealtimeRoute(url);
-    const secret = sessionSecret(env);
+    const { secret, usingLocalFallback } = sessionSecret(env);
 
     if (request.method === 'OPTIONS') {
       return json({ ok: true });
@@ -92,12 +106,28 @@ export default {
 
     if (route.kind === 'room-session') {
       const actorId = normalizeActorId(url.searchParams.get('actorId'));
-      const grant = createDefaultRealtimeGrant(actorId, route.roomId);
+      const inviteToken = url.searchParams.get('inviteToken');
+      let grant: RealtimeSessionGrant;
+      if (inviteToken) {
+        const inviteDecision = await createRealtimeGrantFromInviteToken(
+          actorId,
+          route.roomId,
+          inviteToken,
+          inviteSecret(env),
+        );
+        if (!inviteDecision.ok) return deny(inviteDecision.reason);
+        grant = inviteDecision.grant;
+      } else if (usingLocalFallback) {
+        grant = createDefaultRealtimeGrant(actorId, route.roomId);
+      } else {
+        return deny('invalid');
+      }
       const accessToken = await createRealtimeSessionToken(grant, secret);
       return json({
         ok: true,
         accessToken,
         grant,
+        inviteRequired: !usingLocalFallback,
       });
     }
 

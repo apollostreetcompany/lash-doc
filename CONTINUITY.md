@@ -65,6 +65,10 @@ Success criteria:
 40. Bead 32 adds 10k/50k-word browser typing gates and removes the measured hot paths from normal local editing: outline publication is deferred for body-text transactions, offscreen document blocks use `content-visibility`, and the release gate enforces p95/max per-input event work under the typing SLO while logging residual rendering long tasks for future virtualization work.
 41. Bead 33 adds room-scoped awareness on the existing realtime socket instead of a second presence transport: clients send `awareness-update`, the Durable Object rebroadcasts same-room peer state only, and accepted Yjs updates receive `sync-ack` messages so the browser can show saved/syncing/reconnecting state.
 42. Bead 33 keeps presence identity as the signed local actor ID from Bead 30; real profile names, avatars, invite roles, and access UX remain Bead 34 work.
+43. Bead 34 closes the realtime session default-grant hole for production-shaped environments: when `LASH_REALTIME_SESSION_SECRET` is configured, `/api/realtime/rooms/:id/session` now requires a valid signed invite token and maps its scope to a short-lived session grant instead of minting read+edit for any actor/room.
+44. Bead 34 invite UX is intentionally a local/static bridge until durable invite management lands: invite links use `#invite=<token>`, browser localStorage stores collaborator rows and same-browser revocations, the URL hash is stripped after validation, and the realtime provider forwards the invite token when realtime is enabled. DO-backed invite issuance, global revocation, and audit remain open.
+45. Bead 34 enforces `view`/`comment`/`edit` UX boundaries in the browser and preserves the original scope on realtime grants. Fine-grained server-side distinction between comment/suggest/edit over opaque Yjs updates remains out of scope until durable comments/suggestions and policy-aware mutation validation exist.
+46. Decisions 43-45 supersede the Bead 34 future-work portion of Decision 42; profile names/avatars and server-durable invite management remain future work, but invite/access UX itself is now implemented locally.
 
 ## State
 
@@ -121,14 +125,14 @@ Success criteria:
 - [x] Bead 31 - Durable Persistence, Snapshots, Restore with SQLite-backed Yjs update logs, cumulative snapshots, reload hydration, and append-only restore hook.
 - [x] Bead 32 - Large-Doc Typing Performance with 10k/50k-word browser gates, explicit local realtime opt-in, deferred outline scans, and offscreen block containment.
 - [x] Bead 33 - Presence, Remote Cursors, Sync State with room-scoped awareness, collaborator chips, cursor markers, sync acknowledgements, and reconnect/saved UI.
+- [x] Bead 34 - Invite + Access UX with hash invite links, collaborator list, expiry/revoke UI, invited edit/comment access gates, and signed invite-token realtime session exchange.
 
 ### Now
 
-- Bead 34 - Invite + Access UX.
+- Bead 35 - Durable Comments/Suggestions.
 
 ### Next
 
-- Bead 35 - Durable Comments/Suggestions.
 - Bead 36 - Collaboration Delight Layer.
 
 ## Open Questions
@@ -180,11 +184,13 @@ Success criteria:
 - `apps/web/e2e/mentions/mention-real-editor.spec.ts`
 - `apps/web/e2e/sidebar/sidebar-regression.spec.ts`
 - `apps/web/e2e/online-typing/online-typing-entry-gate.spec.ts`
+- `apps/web/e2e/share/invite-access.spec.ts`
 - `apps/web/e2e/performance/large-doc-typing.spec.ts`
 - `apps/web/e2e/document-identity/document-identity.spec.ts`
 - `apps/web/app/doc/[id]/page.tsx`
 - `apps/web/lib/documentRegistry.ts`
 - `apps/web/lib/realtimeCollaboration.ts`
+- `apps/web/lib/inviteAccess.ts`
 - `apps/web/components/editor/EditorWorkspace.tsx`
 - `apps/web/components/editor/panels/MentionPanel.tsx`
 - `apps/web/components/editor/panels/OfflinePanel.tsx`

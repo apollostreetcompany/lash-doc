@@ -50,6 +50,11 @@ import {
   type LashDocumentRecord,
 } from '../../lib/documentRegistry';
 import {
+  inviteTokenFromLocation,
+  validateInviteAccess,
+  type InviteAccess,
+} from '../../lib/inviteAccess';
+import {
   createLashRealtimeCollaboration,
   type RealtimeSnapshot,
   type RealtimeSyncState,
@@ -228,6 +233,7 @@ export function EditorWorkspace({ documentId = DEFAULT_DOCUMENT_ID }: EditorWork
   const [selectedHistoryEntryId, setSelectedHistoryEntryId] = useState<string | null>(null);
   const [historyAuthorFilter, setHistoryAuthorFilter] = useState<string | null>(null);
   const [historyTimeFilter, setHistoryTimeFilter] = useState<HistoryTimeFilter>(null);
+  const [inviteAccess, setInviteAccess] = useState<InviteAccess | null>(null);
   const [acceptedSuggestionIds, setAcceptedSuggestionIds] = useState<string[]>([]);
   const [blameLines, setBlameLines] = useState<Array<{ line: number; authorId: string | null }>>(
     [],
@@ -248,6 +254,7 @@ export function EditorWorkspace({ documentId = DEFAULT_DOCUMENT_ID }: EditorWork
   const applyingHistoryRef = useRef(false);
   const suggestModeRef = useRef(false);
   const activeTableCellRef = useRef<ActiveCell | null>(null);
+  const inviteAccessDocumentRef = useRef<string | null>(null);
   // Refs to the buttons that opened the mobile drawers, so focus can
   // return to them on close (a11y requirement: focus must not be lost).
   const mobileSidebarTriggerRef = useRef<HTMLElement | null>(null);
@@ -401,6 +408,49 @@ export function EditorWorkspace({ documentId = DEFAULT_DOCUMENT_ID }: EditorWork
     },
     [extensions],
   );
+
+  const inviteScope = inviteAccess?.ok ? inviteAccess.scope : null;
+  const canEditDocument =
+    inviteAccess === null || (inviteAccess.ok && inviteAccess.scope === 'edit');
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    let disposed = false;
+    const inviteStorageKey = `lash:invite-token:${activeDocumentId}`;
+    const token =
+      inviteTokenFromLocation(window.location) ?? window.sessionStorage.getItem(inviteStorageKey);
+    if (!token) {
+      if (inviteAccessDocumentRef.current !== activeDocumentId) {
+        inviteAccessDocumentRef.current = null;
+        setInviteAccess(null);
+      }
+      return;
+    }
+    void validateInviteAccess(window.localStorage, activeDocumentId, token).then((result) => {
+      if (disposed) return;
+      inviteAccessDocumentRef.current = activeDocumentId;
+      setInviteAccess(result);
+      try {
+        if (result?.ok) {
+          window.sessionStorage.setItem(inviteStorageKey, token);
+        } else {
+          window.sessionStorage.removeItem(inviteStorageKey);
+        }
+      } catch {
+        // Session storage is best-effort; the URL hash still authorized this page load.
+      }
+      if (window.location.hash.includes('invite=')) {
+        window.history.replaceState(null, '', window.location.pathname + window.location.search);
+      }
+    });
+    return () => {
+      disposed = true;
+    };
+  }, [activeDocumentId]);
+
+  useEffect(() => {
+    editor?.setEditable(canEditDocument);
+  }, [editor, canEditDocument]);
 
   useEffect(() => {
     if (!editor || !realtimeCollaboration.enabled) return;
@@ -1063,7 +1113,7 @@ export function EditorWorkspace({ documentId = DEFAULT_DOCUMENT_ID }: EditorWork
       id: 'share',
       label: 'Share',
       icon: 'share',
-      content: <SharePanel editor={editor} docId={historyDocumentId} />,
+      content: <SharePanel editor={editor} docId={historyDocumentId} accessScope={inviteScope} />,
     },
     {
       id: 'activity',
@@ -1341,6 +1391,14 @@ export function EditorWorkspace({ documentId = DEFAULT_DOCUMENT_ID }: EditorWork
                 </span>
                 <span className="lash-doc-meta-dot" aria-hidden="true" />
                 <span data-testid="lash-doc-route">{documentPath(activeDocumentId)}</span>
+                <span className="lash-doc-meta-dot" aria-hidden="true" />
+                <span data-testid="invite-access-status">
+                  {inviteAccess === null
+                    ? 'Owner access'
+                    : inviteAccess.ok
+                      ? `Access granted: ${inviteAccess.scope}`
+                      : `Denied: ${inviteAccess.reason}`}
+                </span>
                 {isSuggestMode ? (
                   <>
                     <span className="lash-doc-meta-dot" aria-hidden="true" />

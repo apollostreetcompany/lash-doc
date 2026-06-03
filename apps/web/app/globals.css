@@ -2433,6 +2433,54 @@ li[data-type='taskItem'] > div p {
   gap: var(--space-1);
 }
 
+.invite-controls,
+.invite-list {
+  display: grid;
+  gap: var(--space-2);
+  margin-top: var(--space-3);
+}
+
+.invite-field {
+  display: grid;
+  gap: var(--space-1);
+  font-size: var(--text-caption);
+  color: var(--color-text-secondary);
+}
+
+.invite-field input,
+.invite-field select {
+  min-height: 30px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  padding: 0 var(--space-2);
+  background: var(--color-paper);
+  color: var(--color-text-primary);
+  font: inherit;
+}
+
+.invite-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  gap: var(--space-2);
+  align-items: center;
+  padding: var(--space-2);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-paper);
+  font-size: var(--text-caption);
+}
+
+.invite-row[data-status='revoked'],
+.invite-row[data-status='expired'] {
+  color: var(--color-text-muted);
+  background: var(--color-rail-bg);
+}
+
+.invite-row .share-action-button {
+  grid-column: 1 / -1;
+  justify-self: start;
+}
+
 .share-action-button {
   appearance: none;
   height: 28px;
