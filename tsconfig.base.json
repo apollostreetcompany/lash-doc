@@ -29,6 +29,7 @@
       "@lash/observability": ["packages/observability/src"],
       "@lash/storage": ["packages/storage/src"],
       "@lash/infra-scripts": ["packages/infra-scripts/src"],
+      "@lash/realtime-worker": ["packages/realtime-worker/src"],
       "@lash/rbac": ["packages/rbac/src"]
     }
   },

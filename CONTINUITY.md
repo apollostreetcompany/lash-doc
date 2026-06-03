@@ -55,7 +55,8 @@ Success criteria:
 30. Bead 24 makes mentions real editor content by adding an inline atom `mention` node to the editor schema and replacing typed `@query` text with user/date mention chips on suggestion selection; the side-panel chip list remains as secondary activity evidence.
 31. Bead 25 fixes the sidebar regression by keeping an explicit outline entry available while the desktop sidebar is collapsed and by exposing the mobile drawer close control for the tested close/focus-restore path; it does not change sidebar routing, permissions, or Riddle integration.
 32. Bead 26 is an intentional red entry gate for true online typing: two-client browser tests now prove remote visibility, same-doc convergence, and reload durability are absent, while docs/comments now distinguish local collaboration-shaped scaffolds from implemented realtime backend behavior.
-33. Bead 27 introduces real local document identity with `/doc/[id]` routing, a local document registry, per-doc title metadata, per-doc outline/history/panel IDs, and document create/open controls. It deliberately does not add realtime sync or durable document-body persistence; static export is now known to fail for arbitrary doc routes until Bead 28 chooses a runtime.
+33. Bead 27 introduces real local document identity with `/doc/[id]` routing, a local document registry, per-doc title metadata, per-doc outline/history/panel IDs, and document create/open controls. It deliberately does not add realtime sync or durable document-body persistence; static export is known to fail for arbitrary doc routes until a web dynamic-route hosting strategy is chosen.
+34. Bead 28 chooses Cloudflare Workers plus Durable Objects for realtime document rooms. The `lash-realtime` Worker exposes service/room health endpoints and a hibernatable WebSocket room socket; local verification runs through Wrangler on port `8787`, and deploy-shape verification uses `wrangler deploy --dry-run`. This does not yet bind TipTap/Yjs or durable document persistence.
 
 ## State
 
@@ -106,14 +107,14 @@ Success criteria:
 - [x] Bead 25 - Fix sidebar regression with fail-first desktop/mobile coverage, collapsed outline access, heading jump focus, and mobile close/focus restore.
 - [x] Bead 26 - Online Typing Entry Gate with intentional red two-client browser tests and realtime-overclaim docs cleanup.
 - [x] Bead 27 - Real Document Identity with `/doc/[id]` routing, local document registry, title isolation, create/open controls, and per-doc outline state.
+- [x] Bead 28 - Realtime Runtime Decision + Skeleton with Cloudflare Durable Object rooms, health endpoints, local Wrangler WebSocket verification, and deploy dry-run.
 
 ### Now
 
-- Bead 28 - Realtime Runtime Decision + Skeleton.
+- Bead 29 - CRDT Editor Binding.
 
 ### Next
 
-- Bead 29 - CRDT Editor Binding.
 - Bead 30 - Actor Identity + Access Boundary.
 - Bead 31 - Durable Persistence, Snapshots, Restore.
 - Bead 32 - Large-Doc Typing Performance.
@@ -125,7 +126,7 @@ Success criteria:
 ## Open Questions
 
 - UNCONFIRMED: Whether retrospective review for M1/B1 and M1/B3 is still required before later post-v1 work.
-- UNCONFIRMED: Exact realtime backend topology until Bead 28 decides between Cloudflare Durable Objects and fallback hosting.
+- UNCONFIRMED: Production web hosting strategy for arbitrary `/doc/[id]` Next routes; current static Pages export remains blocked on this branch.
 
 ## Working Set
 
@@ -163,6 +164,9 @@ Success criteria:
 - `pnpm run build:static`
 - `make deploy-cloudflare`
 - `make verify-cloudflare URL=https://lash-9xx.pages.dev/`
+- `make realtime-dry-run`
+- `make verify-realtime-runtime`
+- `make deploy-realtime-cloudflare`
 - `apps/web/e2e/performance/typing-latency.spec.ts`
 - `apps/web/e2e/title/title-edit.spec.ts`
 - `apps/web/e2e/mentions/mention-real-editor.spec.ts`
@@ -176,6 +180,12 @@ Success criteria:
 - `apps/web/components/editor/panels/OfflinePanel.tsx`
 - `apps/web/components/shell/Sidebar.tsx`
 - `packages/collab-service/src/index.ts`
+- `packages/realtime-worker/src/index.ts`
+- `packages/realtime-worker/src/room.ts`
+- `packages/realtime-worker/src/routing.ts`
+- `packages/realtime-worker/wrangler.jsonc`
+- `packages/testing/unit/realtime-runtime/realtime-runtime-skeleton.test.ts`
+- `scripts/verify-realtime-runtime.mjs`
 - `packages/editor-core/src/schema/mentions.ts`
 - GitHub PR #15: `https://github.com/apollostreetcompany/lash-doc/pull/15`
 - GitHub PR #16: `https://github.com/apollostreetcompany/lash-doc/pull/16`

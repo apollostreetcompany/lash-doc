@@ -1,7 +1,8 @@
 CLOUDFLARE_PAGES_PROJECT ?= lash
 CLOUDFLARE_BRANCH ?= main
+LASH_REALTIME_PORT ?= 8787
 
-.PHONY: validate lint typecheck test-unit test-e2e build build-static format check-port serve stop status deploy-cloudflare verify-cloudflare
+.PHONY: validate lint typecheck test-unit test-e2e build build-static format check-port serve stop status realtime-dev realtime-dry-run verify-realtime-runtime deploy-realtime-cloudflare deploy-cloudflare verify-cloudflare
 
 validate: lint typecheck test-unit test-e2e build
 
@@ -37,6 +38,19 @@ stop:
 
 status:
 	./scripts/lash-web-status.sh
+
+realtime-dev:
+	@if lsof -n -P -iTCP:$(LASH_REALTIME_PORT) -sTCP:LISTEN; then echo "Port $(LASH_REALTIME_PORT) is already in use" >&2; exit 1; fi
+	pnpm exec wrangler dev --config packages/realtime-worker/wrangler.jsonc --local --port "$(LASH_REALTIME_PORT)"
+
+realtime-dry-run:
+	pnpm --filter @lash/realtime-worker deploy:dry-run
+
+verify-realtime-runtime:
+	LASH_REALTIME_PORT="$(LASH_REALTIME_PORT)" pnpm run verify:realtime
+
+deploy-realtime-cloudflare: realtime-dry-run
+	pnpm --filter @lash/realtime-worker deploy
 
 deploy-cloudflare: build-static
 	npx wrangler pages deploy apps/web/out --project-name "$(CLOUDFLARE_PAGES_PROJECT)" --branch "$(CLOUDFLARE_BRANCH)" --commit-hash "$$(git rev-parse HEAD)" --commit-message "$$(git log -1 --pretty=%s)"

@@ -6,6 +6,8 @@
 - Web app: `apps/web` via Next.js 14.
 - Production build command: `pnpm run build`
 - Static edge build command: `pnpm run build:static`
+- Realtime Worker: `packages/realtime-worker`, Cloudflare Worker `lash-realtime`.
+- Realtime room runtime: Cloudflare Durable Objects class `LashRealtimeRoom`, binding `LASH_REALTIME_ROOM`, WebSocket transport.
 - E2E command: `pnpm run test:e2e`
 
 ## Local Service Rules
@@ -15,6 +17,7 @@
 - For local manual use, run `make serve`. It starts the production build in the background at `http://127.0.0.1:3000` after checking the port and writing `.lash-web.pid` / `.lash-web.log`.
 - Use `make status` to verify the local server and `make stop` when finished.
 - Check port `3000` before introducing or changing a local web server binding. Set `PORT=3001 make serve` if `3000` is occupied.
+- Check port `8787` before starting the realtime Worker. Use `LASH_REALTIME_PORT=8788 make verify-realtime-runtime` or `make realtime-dev` if `8787` is occupied.
 - Stop the local server before running `pnpm run build` or `pnpm run test:e2e`; `next build` rewrites `apps/web/.next` and can conflict with a running `next start`.
 
 ## Deploy Assumptions
@@ -29,7 +32,24 @@
 - Branch protection is configured on `main` with strict required `build-and-test`, admin enforcement, and no force-push/delete.
 - Latest protected `main` CI is green on deploy commit `3f19bc361c3071d9e3f7425bfd064193cd8b83a9` via run `26026635724`; check GitHub Actions for future changes.
 - Container/runtime binding assumptions are not applicable to the Cloudflare Pages test site because it serves static assets at the edge. The existing local `next start` path remains unchanged.
-- Bead 27 introduces arbitrary `/doc/[id]` routes for local/Next runtime use. The current static Cloudflare Pages export does not provide a durable arbitrary-route backend; Bead 28 must choose the Cloudflare Worker/Durable Object or fallback runtime path before these document routes are treated as production deployable. Verified result: `pnpm run build:static` currently fails because `/doc/[id]` is missing `generateStaticParams()` under `output: export`.
+- Bead 28 chooses Cloudflare Durable Objects as the realtime room runtime. The app now has a deploy-shaped `lash-realtime` Worker with `/api/realtime/health`, `/api/realtime/rooms/:id/health`, and `/api/realtime/rooms/:id/socket` endpoints. Verified result: `pnpm --filter @lash/realtime-worker deploy:dry-run` bundles successfully with Durable Object binding `LASH_REALTIME_ROOM`.
+- The existing Cloudflare Pages public test site remains the static web host for the merged `main` build. The Bead 27 `/doc/[id]` Next routes are still local/Next-runtime routes until the web app deployment path is moved off static export or given an explicit dynamic route strategy; `pnpm run build:static` is expected to fail on this branch for that reason.
+
+## Realtime Worker Preflight
+
+1. Generate binding/runtime types after config changes: `pnpm --filter @lash/realtime-worker types`.
+2. Typecheck the Worker: `pnpm --filter @lash/realtime-worker typecheck`.
+3. Validate deploy shape without publishing: `make realtime-dry-run`.
+4. Verify local room health and WebSocket upgrade: `make verify-realtime-runtime`.
+5. Deploy the realtime Worker when ready: `make deploy-realtime-cloudflare`.
+
+## Realtime Worker Health
+
+- Service health: `GET /api/realtime/health`.
+- Room health: `GET /api/realtime/rooms/<doc-id>/health`.
+- Room socket: `GET /api/realtime/rooms/<doc-id>/socket` with `Upgrade: websocket`.
+- Local verification command: `pnpm run verify:realtime`.
+- Latest local verification: service health passed on `http://127.0.0.1:8787`, room `bead-28-health` reported `protocolVersion: 1`, and WebSocket ping returned `pong` with one active connection.
 
 ## Cloudflare Pages Preflight
 

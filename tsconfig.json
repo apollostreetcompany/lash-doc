@@ -6,6 +6,7 @@
     { "path": "./packages/editor-core" },
     { "path": "./packages/ui" },
     { "path": "./packages/types" },
-    { "path": "./packages/testing" }
+    { "path": "./packages/testing" },
+    { "path": "./packages/realtime-worker" }
   ]
 }

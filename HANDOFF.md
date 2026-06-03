@@ -21,7 +21,9 @@
 - Bead 26 PR #18 is open and expected-red until Beads 28-31 make the online typing gate green.
 - Bead 27 is complete on branch `codex/feat/bead-27-real-document-identity`: `/doc/[id]` routes, local document registry, title metadata isolation, document create/open controls, per-doc outline/history/panel IDs, and routed OfflinePanel IDs are implemented and covered by fail-first Playwright tests.
 - Bead 27 PR #19 is open and stacked on PR #18: `https://github.com/apollostreetcompany/lash-doc/pull/19`.
-- Bead 27 normal Next runtime build passes, but static export fails for `/doc/[id]`; Bead 28 must choose Cloudflare Worker/Durable Object or a fallback runtime before arbitrary document routes are production deployable.
+- Bead 28 is complete on branch `codex/feat/bead-28-realtime-runtime-skeleton`: Cloudflare Workers + Durable Objects was selected for realtime rooms; `packages/realtime-worker` exposes service/room health and WebSocket socket routes with Wrangler local verification and deploy dry-run.
+- Bead 28 does not yet bind TipTap/Yjs or durable document persistence. The Bead 26 online typing gate remains expected-red until Beads 29-31.
+- Static Cloudflare Pages export still fails for arbitrary `/doc/[id]`; Bead 28 solves realtime room hosting, not the final web app dynamic-route hosting strategy.
 - Current active scoped goal is Beads 23-36: regressions first, then true responsive online typing through document identity, realtime runtime, CRDT binding, actor/access, persistence, performance, presence, invite UX, durable comments, and collaboration delight.
 - User-reported regressions are tracked in `REGRESSIONS.md`; R-001 title, R-002 @mentions, and R-003 sidebar are fixed.
 - Branch protection on `main` is configured with strict required `build-and-test`, admin enforcement, and no force-push/delete.
@@ -58,6 +60,7 @@
 - Bead 25 - Fix sidebar regression.
 - Bead 26 - Online Typing Entry Gate.
 - Bead 27 - Real Document Identity.
+- Bead 28 - Realtime Runtime Decision + Skeleton.
 
 ## Release Evidence
 
@@ -87,7 +90,9 @@
 - Bead 26 red online typing gate - expected failure as evidence: `apps/web/e2e/online-typing/online-typing-entry-gate.spec.ts` failed 3 tests because client B did not receive client A text, two clients did not converge to both edits, and reload lost document text.
 - Bead 26 non-red validation - pass: test-hook web build, lint, typecheck, unit tests (73 passed), normal web build, changed TypeScript/Playwright Prettier check, and realtime-overclaim grep audit.
 - Bead 27 fail-first document identity - pass as evidence: `apps/web/e2e/document-identity/document-identity.spec.ts` first failed 4 tests because `/doc/[id]`, `new-document-button`, `document-open-select`, and routed editor hooks were missing.
-- Bead 27 final validation - pass: test-hook web build, document identity e2e (4 passed), adjacent title/outline/offline/smoke e2e (9 passed), lint, typecheck, unit tests (73 passed), normal Next build, and changed TypeScript/Playwright Prettier check. Expected caveat: `pnpm run build:static` fails until Bead 28 provides a runtime/static fallback for arbitrary `/doc/[id]`.
+- Bead 27 final validation - pass: test-hook web build, document identity e2e (4 passed), adjacent title/outline/offline/smoke e2e (9 passed), lint, typecheck, unit tests (73 passed), normal Next build, and changed TypeScript/Playwright Prettier check. Expected caveat: `pnpm run build:static` fails until a web dynamic-route hosting strategy is chosen for arbitrary `/doc/[id]`.
+- Bead 28 fail-first realtime runtime - pass as evidence: `packages/testing/unit/realtime-runtime/realtime-runtime-skeleton.test.ts` first failed because `packages/realtime-worker/src/routing` did not exist.
+- Bead 28 runtime validation - pass: targeted runtime unit test (3 passed), `pnpm --filter @lash/realtime-worker typecheck`, `pnpm --filter @lash/realtime-worker deploy:dry-run`, and `pnpm run verify:realtime` with service health, room health, and WebSocket `pong` on `http://127.0.0.1:8787`.
 - Acceptance coverage audit - 86 `agents.md` Test IDs, 98 unit/e2e files, no missing IDs.
 - Skip/todo audit - no `test.todo`, `test.skip`, `describe.skip`, `TODO acceptance`, or `.only(` matches in `apps/web/e2e` or `packages/testing/unit`.
 - Riddle audit - only planning/docs references; no Lash-Riddle runtime integration code.
@@ -98,14 +103,17 @@
 - Use `make stop` before `pnpm run build` or `pnpm run test:e2e`.
 - Use `make serve` to restart the local production server.
 - Public test deploy target: Cloudflare Pages project `lash`, URL `https://lash-9xx.pages.dev/`.
+- Realtime Worker local verification: `make verify-realtime-runtime`.
+- Realtime Worker deploy preflight: `make realtime-dry-run`.
+- Realtime Worker deploy command: `make deploy-realtime-cloudflare`.
 
 ## Regression Backlog
 
-- Beads 28-36 - Implement the scoped online typing track exactly as requested.
+- Beads 29-36 - Implement the scoped online typing track exactly as requested.
 
 ## Open Items
 
 - User-reported regressions: none currently open.
-- Online typing red gate: Bead 26 tests are expected to fail until Beads 27-31 add real document identity, realtime runtime, CRDT binding, access boundaries, and durable persistence.
-- Runtime/deploy: Bead 27 makes arbitrary `/doc/[id]` routes local-runtime only; static Cloudflare Pages export is blocked until Bead 28 chooses the realtime/runtime host.
+- Online typing red gate: Bead 26 tests are expected to fail until Beads 29-31 add CRDT binding, access boundaries, and durable persistence.
+- Runtime/deploy: Realtime rooms now have a Cloudflare Durable Object Worker skeleton. Arbitrary `/doc/[id]` web routes remain local/Next-runtime only; static Cloudflare Pages export is blocked until a web dynamic-route hosting strategy is chosen.
 - Future custom-domain/production hosting decisions and future Riddle integration are separate workstreams; realtime infra should prefer Cloudflare first, then Render only if needed.
