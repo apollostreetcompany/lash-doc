@@ -17,6 +17,7 @@
 - Bead 24 is complete on branch `codex/fix/bead-24-mentions-regression`: user/date mention suggestions now insert inline atom mention nodes into the editor instead of plain text, with fail-first real-editor Playwright coverage.
 - Bead 25 is complete on branch `codex/fix/bead-25-sidebar-regression`: collapsed desktop sidebars retain an outline access entry, outline jumps focus the intended heading, and the mobile drawer has a visible close path with focus restore, all covered by fail-first Playwright regression tests.
 - Stacked regression PRs are open: Bead 23 PR #15, Bead 24 PR #16, and Bead 25 PR #17.
+- Bead 26 is complete on branch `codex/test/bead-26-online-typing-entry-gate`: red two-client Playwright tests now define missing online typing behavior for remote visibility, convergence, and reload durability; docs/comments no longer imply the realtime backend exists.
 - Current active scoped goal is Beads 23-36: regressions first, then true responsive online typing through document identity, realtime runtime, CRDT binding, actor/access, persistence, performance, presence, invite UX, durable comments, and collaboration delight.
 - User-reported regressions are tracked in `REGRESSIONS.md`; R-001 title, R-002 @mentions, and R-003 sidebar are fixed.
 - Branch protection on `main` is configured with strict required `build-and-test`, admin enforcement, and no force-push/delete.
@@ -51,6 +52,7 @@
 - Bead 23 - Fix title regression.
 - Bead 24 - Fix @mention regression.
 - Bead 25 - Fix sidebar regression.
+- Bead 26 - Online Typing Entry Gate.
 
 ## Release Evidence
 
@@ -77,6 +79,8 @@
 - Bead 24 final validation - pass: test-hook web build, mention e2e folder (7 passed), normal web build, lint, typecheck, unit tests (73 passed), and changed TypeScript/Playwright Prettier check.
 - Bead 25 fail-first sidebar regression - pass as evidence: `apps/web/e2e/sidebar/sidebar-regression.spec.ts` first failed because `sidebar-outline-access` and `sidebar-mobile-close` were missing.
 - Bead 25 final validation - pass: test-hook web build, sidebar e2e (2 passed), adjacent mobile/outline/focus e2e (7 passed), lint, typecheck, unit tests (73 passed), normal web build, and changed TypeScript/Playwright Prettier check.
+- Bead 26 red online typing gate - expected failure as evidence: `apps/web/e2e/online-typing/online-typing-entry-gate.spec.ts` failed 3 tests because client B did not receive client A text, two clients did not converge to both edits, and reload lost document text.
+- Bead 26 non-red validation - pass: test-hook web build, lint, typecheck, unit tests (73 passed), normal web build, changed TypeScript/Playwright Prettier check, and realtime-overclaim grep audit.
 - Acceptance coverage audit - 86 `agents.md` Test IDs, 98 unit/e2e files, no missing IDs.
 - Skip/todo audit - no `test.todo`, `test.skip`, `describe.skip`, `TODO acceptance`, or `.only(` matches in `apps/web/e2e` or `packages/testing/unit`.
 - Riddle audit - only planning/docs references; no Lash-Riddle runtime integration code.
@@ -90,10 +94,10 @@
 
 ## Regression Backlog
 
-- Bead 26 - Online Typing Entry Gate.
 - Beads 27-36 - Implement the scoped online typing track exactly as requested.
 
 ## Open Items
 
 - User-reported regressions: none currently open.
+- Online typing red gate: Bead 26 tests are expected to fail until Beads 27-31 add real document identity, realtime runtime, CRDT binding, access boundaries, and durable persistence.
 - Future custom-domain/production hosting decisions and future Riddle integration are separate workstreams; realtime infra should prefer Cloudflare first, then Render only if needed.

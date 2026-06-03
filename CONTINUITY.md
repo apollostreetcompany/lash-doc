@@ -54,6 +54,7 @@ Success criteria:
 29. Bead 23 fixes the title regression with a local document-title metadata path under `lash:title:demo-document`; this is intentionally a bridge until Bead 27 replaces hardcoded document identity with real `/doc/[id]` routing and persisted metadata.
 30. Bead 24 makes mentions real editor content by adding an inline atom `mention` node to the editor schema and replacing typed `@query` text with user/date mention chips on suggestion selection; the side-panel chip list remains as secondary activity evidence.
 31. Bead 25 fixes the sidebar regression by keeping an explicit outline entry available while the desktop sidebar is collapsed and by exposing the mobile drawer close control for the tested close/focus-restore path; it does not change sidebar routing, permissions, or Riddle integration.
+32. Bead 26 is an intentional red entry gate for true online typing: two-client browser tests now prove remote visibility, same-doc convergence, and reload durability are absent, while docs/comments now distinguish local collaboration-shaped scaffolds from implemented realtime backend behavior.
 
 ## State
 
@@ -102,14 +103,14 @@ Success criteria:
 - [x] Bead 23 - Fix title regression with fail-first Playwright coverage, editable title UI, topbar mirroring, reload persistence, and mobile non-overlap guard.
 - [x] Bead 24 - Fix @mention regression with fail-first real-editor coverage, inline user/date mention nodes, and existing RBAC/privacy mention e2e preserved.
 - [x] Bead 25 - Fix sidebar regression with fail-first desktop/mobile coverage, collapsed outline access, heading jump focus, and mobile close/focus restore.
+- [x] Bead 26 - Online Typing Entry Gate with intentional red two-client browser tests and realtime-overclaim docs cleanup.
 
 ### Now
 
-- Bead 26 - Online Typing Entry Gate.
+- Bead 27 - Real Document Identity.
 
 ### Next
 
-- Bead 27 - Real Document Identity.
 - Bead 28 - Realtime Runtime Decision + Skeleton.
 - Bead 29 - CRDT Editor Binding.
 - Bead 30 - Actor Identity + Access Boundary.
@@ -165,9 +166,11 @@ Success criteria:
 - `apps/web/e2e/title/title-edit.spec.ts`
 - `apps/web/e2e/mentions/mention-real-editor.spec.ts`
 - `apps/web/e2e/sidebar/sidebar-regression.spec.ts`
+- `apps/web/e2e/online-typing/online-typing-entry-gate.spec.ts`
 - `apps/web/components/editor/EditorWorkspace.tsx`
 - `apps/web/components/editor/panels/MentionPanel.tsx`
 - `apps/web/components/shell/Sidebar.tsx`
+- `packages/collab-service/src/index.ts`
 - `packages/editor-core/src/schema/mentions.ts`
 - GitHub PR #15: `https://github.com/apollostreetcompany/lash-doc/pull/15`
 - GitHub PR #16: `https://github.com/apollostreetcompany/lash-doc/pull/16`
