@@ -1,11 +1,6 @@
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test } from '@playwright/test';
 
-const runEditorCommand = async (page: Page, command: 'toggleBold' | 'toggleItalic') => {
-  await page.evaluate((cmd) => {
-    const editor = (window as unknown as { __lashEditor?: { chain: () => { focus: () => { [key: string]: () => { run: () => boolean } } } } }).__lashEditor;
-    editor?.chain().focus()[cmd]().run();
-  }, command);
-};
+const modKey = process.platform === 'darwin' ? 'Meta' : 'Control';
 
 test.describe('md-h2-shorthand', () => {
   test('converts markdown heading and applies bold/italic hotkeys', async ({ page }) => {
@@ -20,24 +15,29 @@ test.describe('md-h2-shorthand', () => {
 
     await expect(editor.locator('h2')).toHaveText('Outline Title');
 
-    await runEditorCommand(page, 'toggleBold');
+    await page.keyboard.press(`${modKey}+B`);
     await page.keyboard.type('Bold');
-    await runEditorCommand(page, 'toggleBold');
+    await page.keyboard.press(`${modKey}+B`);
     await page.keyboard.type(' ');
-    await runEditorCommand(page, 'toggleItalic');
+    await page.keyboard.press(`${modKey}+I`);
     await page.keyboard.type('Italic');
-    await runEditorCommand(page, 'toggleItalic');
+    await page.keyboard.press(`${modKey}+I`);
 
     const finalDoc = await page.evaluate(() => {
-      const editor = (window as unknown as {
-        __lashEditor?: { state: { doc: { toJSON: () => unknown } } };
-      }).__lashEditor;
+      const editor = (
+        window as unknown as {
+          __lashEditor?: { state: { doc: { toJSON: () => unknown } } };
+        }
+      ).__lashEditor;
       return editor?.state.doc.toJSON();
     });
 
-    const paragraphContent = (finalDoc as {
-      content: Array<{ content?: Array<{ text?: string; marks?: Array<{ type: string }> }> }>;
-    })?.content?.[1]?.content ?? [];
+    const paragraphContent =
+      (
+        finalDoc as {
+          content: Array<{ content?: Array<{ text?: string; marks?: Array<{ type: string }> }> }>;
+        }
+      )?.content?.[1]?.content ?? [];
 
     const boldMarkExists = paragraphContent.some(
       (node) => node.text?.includes('Bold') && node.marks?.some((mark) => mark.type === 'bold'),
