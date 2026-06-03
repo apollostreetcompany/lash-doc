@@ -29,7 +29,7 @@
 - Bead 30 PR #22 is open and stacked on PR #21: `https://github.com/apollostreetcompany/lash-doc/pull/22`.
 - Bead 30 does not add real identity providers, roles, invites, or durable document persistence. The Bead 26 online typing gate now has 3 passing tests and 1 expected-red reload durability test until Bead 31.
 - Bead 31 is complete on branch `codex/feat/bead-31-durable-persistence`: the realtime Durable Object persists Yjs updates in SQLite before broadcast, compacts cumulative snapshots, hydrates reloaded clients from snapshot plus tail updates, exposes an edit-scoped restore-as-new-head endpoint, and reports persistence metadata in room health.
-- Bead 31 PR #23 is pending/open and stacked on PR #22.
+- Bead 31 PR #23 is open and stacked on PR #22: `https://github.com/apollostreetcompany/lash-doc/pull/23`.
 - After Bead 31, the online typing gate has 5 passing tests: unauthorized access denial, same-doc remote visibility, concurrent convergence, reload durability, and snapshot compaction without deleting update history.
 - Static Cloudflare Pages export still fails for arbitrary `/doc/[id]`; Bead 28 solves realtime room hosting, not the final web app dynamic-route hosting strategy.
 - Current active scoped goal is Beads 23-36: regressions first, then true responsive online typing through document identity, realtime runtime, CRDT binding, actor/access, persistence, performance, presence, invite UX, durable comments, and collaboration delight.
