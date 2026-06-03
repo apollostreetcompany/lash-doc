@@ -72,6 +72,7 @@ Success criteria:
 47. Bead 35 persists document chat threads, replies, resolve/reopen status, and suggestion accept/reject resolution records. Local-only docs use document-scoped localStorage; realtime docs mirror each thread/resolution as separate Y.Map keys inside the existing Y.Doc so Bead 31 Durable Object update persistence hydrates them with the document. This does not add a separate comments API, global moderation/audit store, or server-side fine-grained comment/suggest authorization.
 48. Bead 36 adds a compact collaboration delight layer without changing realtime protocol or persistence: the presence strip now shows a Ready empty state with an invite shortcut, a live sync feedback chip, and a reconnect retry action. Local tests can override the realtime socket URL with `localStorage['lash:realtime-url']` so parallel online specs can use separate Wrangler ports.
 49. Post-subreview Bead 36 hardening changes the realtime access split: room sockets now require `doc.read` so view invitees can hydrate, accepted `yjs-update` messages require `doc.edit` inside the Durable Object before persistence/broadcast, and the browser provider avoids sending local Yjs updates for read-only session grants. Local-only documents no longer show Ready/Invite collaboration chrome, and visible sync state is not duplicated with the screen-reader live region.
+50. Fresh-eyes Bead 36 hardening restricts the no-secret realtime development fallback to loopback hosts only. A Worker without `LASH_REALTIME_SESSION_SECRET` now denies `/session` minting on non-local hosts instead of silently using the local development secret; local `127.0.0.1`/`localhost` verification remains supported.
 
 ## State
 
@@ -134,7 +135,7 @@ Success criteria:
 
 ### Now
 
-- Fresh-eyes review over Beads 23-36 after the post-subreview read-only collaboration fix.
+- PR stack CI/merge readiness after subreview and fresh-eyes fixes.
 
 ### Next
 

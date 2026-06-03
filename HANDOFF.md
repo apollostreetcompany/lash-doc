@@ -138,6 +138,7 @@
 - Bead 36 final validation - pass: changed-file Prettier check, `git diff --check`, root typecheck, `pnpm run lint`, `pnpm run test:unit` (85 passed), normal root build, test-hook web build, Bead 36 e2e (2 passed), full online-typing e2e folder (9 passed), and invite-access e2e (3 passed).
 - Bead 36 PR: `https://github.com/apollostreetcompany/lash-doc/pull/28` stacked on Bead 35 PR #27.
 - Bead 36 post-subreview fix commit `6e6ffe809de9a365800b9617b07719ae0a4f00b7` is on branch `codex/feat/bead-36-collaboration-delight`: room sockets now require `doc.read`, Yjs mutations are rejected without `doc.edit` inside the Durable Object, the browser provider respects read-only session grants, local-only docs show `Solo` instead of Ready/Invite, and duplicate visible sync text is removed.
+- Bead 36 fresh-eyes fix commit `37fd15ba462f5a7029bd92e87d158bf31d39c2f5` is on branch `codex/feat/bead-36-collaboration-delight`: the no-secret realtime development fallback is now loopback-only, so non-local Worker hosts deny `/session` minting unless `LASH_REALTIME_SESSION_SECRET` is configured.
 - Subreview artifacts for true responsive online typing:
   - Key features: `/Users/borker/.subreview/runs/lash-doc-518b8af4/2026-06-03T19-54-54-308Z/claude.md`
   - Delight: `/Users/borker/.subreview/runs/lash-doc-518b8af4/2026-06-03T20-01-31-383Z/claude.md`
@@ -146,6 +147,7 @@
 - Skip/todo audit - no `test.todo`, `test.skip`, `describe.skip`, `TODO acceptance`, or `.only(` matches in `apps/web/e2e` or `packages/testing/unit`.
 - Riddle audit - only planning/docs references; no Lash-Riddle runtime integration code.
 - Post-subreview Bead 36 fix validation - pass: fail-first local-only collaboration test failed because `collaboration-empty-state` rendered while realtime was disabled; fail-first view-invite hydration test failed because owner sync stayed `syncing` without propagated room capabilities; final validation passed `NEXT_PUBLIC_LASH_TEST_HOOKS=true pnpm --filter @lash/web build`, focused Bead 36 e2e (4 passed), realtime access unit file (7 passed), root typecheck, Worker typecheck, lint, full unit suite (86 passed), Worker dry-run, `make verify-realtime-runtime`, full online-typing e2e folder (11 passed), invite-access e2e (3 passed), touched-file Prettier check, `git diff --check`, and normal `pnpm run build`.
+- Fresh-eyes Bead 36 fallback fix validation - pass: fail-first runtime skeleton unit test failed because `isLocalRealtimeFallbackHost` did not exist; final validation passed the targeted runtime skeleton unit file (4 passed), root typecheck, Worker typecheck, lint, full unit suite (87 passed), Worker deploy dry-run, `make verify-realtime-runtime`, hook-enabled web build, isolated collaboration delight e2e (4 passed), serialized full online-typing e2e folder (11 passed), touched-file Prettier write, `git diff --check`, and normal `pnpm run build`. A parallel online-typing folder run had one Wrangler startup timeout in the collaboration-delight `beforeAll`; the same spec passed isolated and the full folder passed serialized.
 
 ## Operational Notes
 
@@ -164,10 +166,11 @@
 - Durable comments/suggestions are stored as document-scoped localStorage in local-only mode and as per-record Y.Map entries in the existing realtime Y.Doc when realtime is enabled. The Durable Object persists those metadata updates through the same append-only Yjs update log/snapshot path as document content.
 - Collaboration delight now lives in the presence strip: Ready/share empty state, live sync feedback, and retry reconnect action. Local Playwright specs can isolate realtime Workers with `localStorage['lash:realtime-url']`.
 - View invitees can now open the realtime socket and hydrate document state because socket join requires `doc.read`; only `yjs-update` mutation messages require `doc.edit` and are rejected by the Durable Object with `scope_mismatch` before persistence or broadcast.
+- The no-secret realtime fallback is loopback-only; production-shaped hosts must configure `LASH_REALTIME_SESSION_SECRET` and, for invite-backed sessions, a valid invite token.
 
 ## Regression Backlog
 
-- Fresh-eyes pass over Beads 23-36 after the post-subreview Bead 36 fix, then PR stack merge readiness.
+- PR stack merge readiness after subreview and fresh-eyes fixes.
 
 ## Open Items
 
