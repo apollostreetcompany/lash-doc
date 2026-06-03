@@ -16,6 +16,7 @@
 - Bead 23 is complete on branch `codex/fix/bead-23-title-regression`: title editing, topbar mirroring, reload persistence, and mobile metadata non-overlap are covered by fail-first Playwright regression tests.
 - Bead 24 is complete on branch `codex/fix/bead-24-mentions-regression`: user/date mention suggestions now insert inline atom mention nodes into the editor instead of plain text, with fail-first real-editor Playwright coverage.
 - Bead 25 is complete on branch `codex/fix/bead-25-sidebar-regression`: collapsed desktop sidebars retain an outline access entry, outline jumps focus the intended heading, and the mobile drawer has a visible close path with focus restore, all covered by fail-first Playwright regression tests.
+- Stacked regression PRs are open: Bead 23 PR #15, Bead 24 PR #16, and Bead 25 PR #17.
 - Current active scoped goal is Beads 23-36: regressions first, then true responsive online typing through document identity, realtime runtime, CRDT binding, actor/access, persistence, performance, presence, invite UX, durable comments, and collaboration delight.
 - User-reported regressions are tracked in `REGRESSIONS.md`; R-001 title, R-002 @mentions, and R-003 sidebar are fixed.
 - Branch protection on `main` is configured with strict required `build-and-test`, admin enforcement, and no force-push/delete.
