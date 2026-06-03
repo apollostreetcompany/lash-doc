@@ -34,6 +34,7 @@
 - Container/runtime binding assumptions are not applicable to the Cloudflare Pages test site because it serves static assets at the edge. The existing local `next start` path remains unchanged.
 - Bead 28 chooses Cloudflare Durable Objects as the realtime room runtime. The app now has a deploy-shaped `lash-realtime` Worker with `/api/realtime/health`, `/api/realtime/rooms/:id/health`, and `/api/realtime/rooms/:id/socket` endpoints. Verified result: `pnpm --filter @lash/realtime-worker deploy:dry-run` bundles successfully with Durable Object binding `LASH_REALTIME_ROOM`.
 - Bead 30 gates realtime room access with signed session grants. Browsers first request `GET /api/realtime/rooms/:id/session?actorId=<actor>` and then pass the returned `accessToken` to room health/socket requests. Local development uses a non-production fallback secret; production must set `LASH_REALTIME_SESSION_SECRET` before publishing the Worker.
+- Bead 31 persists realtime document CRDT state in the per-document Durable Object using SQLite-backed storage. Each accepted Yjs update is appended before broadcast, snapshots compact hydration state periodically, new sockets hydrate from the latest snapshot plus later updates, and restore appends a new head update instead of deleting history.
 - The existing Cloudflare Pages public test site remains the static web host for the merged `main` build. The Bead 27 `/doc/[id]` Next routes are still local/Next-runtime routes until the web app deployment path is moved off static export or given an explicit dynamic route strategy; `pnpm run build:static` is expected to fail on this branch for that reason.
 
 ## Realtime Worker Preflight
@@ -49,10 +50,12 @@
 
 - Service health: `GET /api/realtime/health`.
 - Room session grant: `GET /api/realtime/rooms/<doc-id>/session?actorId=<actor-id>`.
-- Room health: `GET /api/realtime/rooms/<doc-id>/health?accessToken=<token>`; requires `doc.read`.
+- Room health: `GET /api/realtime/rooms/<doc-id>/health?accessToken=<token>`; requires `doc.read`; includes `persistence.updates`, `persistence.snapshotSequence`, and `persistence.hydrationUpdates`.
 - Room socket: `GET /api/realtime/rooms/<doc-id>/socket?accessToken=<token>` with `Upgrade: websocket`; requires `doc.edit`.
+- Room restore: `POST /api/realtime/rooms/<doc-id>/restore?accessToken=<token>` with body `{ "update": "<base64-yjs-update>" }`; requires `doc.edit`; appends a new restore update and broadcasts it to connected peers.
 - Local verification command: `pnpm run verify:realtime`.
 - Latest local verification: service health passed on `http://127.0.0.1:8787`, unauthenticated room health returned `403`, room `bead-28-health` reported actor `verify-runtime` and `protocolVersion: 1`, and authorized WebSocket ping returned `pong` with one active connection.
+- Latest online persistence verification: `apps/web/e2e/online-typing/online-typing-entry-gate.spec.ts` passes unauthorized denial, same-doc remote visibility, concurrent convergence, reload durability, and snapshot compaction without deleting update history.
 
 ## Cloudflare Pages Preflight
 

@@ -10,5 +10,8 @@
     "deploy": "wrangler deploy --config wrangler.jsonc",
     "deploy:dry-run": "wrangler deploy --config wrangler.jsonc --dry-run",
     "types": "wrangler types --config wrangler.jsonc src/worker-configuration.d.ts && node ../../scripts/strip-trailing-whitespace.mjs src/worker-configuration.d.ts"
+  },
+  "dependencies": {
+    "yjs": "^13.6.31"
   }
 }

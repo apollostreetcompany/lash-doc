@@ -59,6 +59,8 @@ Success criteria:
 34. Bead 28 chooses Cloudflare Workers plus Durable Objects for realtime document rooms. The `lash-realtime` Worker exposes service/room health endpoints and a hibernatable WebSocket room socket; local verification runs through Wrangler on port `8787`, and deploy-shape verification uses `wrangler deploy --dry-run`. This does not yet bind TipTap/Yjs or durable document persistence.
 35. Bead 29 binds the editor to Yjs-backed TipTap collaboration and the Bead 28 room socket. Same-doc remote visibility and concurrent typing convergence now pass through a local Wrangler realtime Worker; reload durability remains intentionally red for Bead 31 persistence.
 36. Bead 30 introduces a signed actor grant boundary for realtime rooms. Browsers request a short-lived session token from `/api/realtime/rooms/:id/session`, room health requires `doc.read`, room sockets require `doc.edit`, and the Worker passes trusted actor context into the Durable Object. This is a local/session-token bridge only; real identity, roles, invites, and persistence remain later beads.
+37. Bead 31 should persist document CRDT state inside the per-document Cloudflare Durable Object using SQLite-backed storage: append every accepted Yjs update before broadcast, compact periodically into a snapshot, hydrate new sockets from the latest snapshot plus later updates, and implement restore by appending a new head update rather than deleting historical rows.
+38. Bead 31 implements Durable Object CRDT persistence with an append-only `yjs_updates` table, cumulative `yjs_snapshots`, socket hydration from snapshot plus tail updates, `POST /api/realtime/rooms/:id/restore` as an edit-scoped append-only restore hook, and persistence metadata in room health. Full online typing now passes unauthorized access, remote visibility, convergence, reload durability, and snapshot compaction.
 
 ## State
 
@@ -112,14 +114,14 @@ Success criteria:
 - [x] Bead 28 - Realtime Runtime Decision + Skeleton with Cloudflare Durable Object rooms, health endpoints, local Wrangler WebSocket verification, and deploy dry-run.
 - [x] Bead 29 - CRDT Editor Binding with TipTap Collaboration, Yjs room provider, Worker update relay, and two-client convergence.
 - [x] Bead 30 - Actor Identity + Access Boundary with signed realtime session grants, token-gated room reads/sockets, and unauthorized room denial coverage.
+- [x] Bead 31 - Durable Persistence, Snapshots, Restore with SQLite-backed Yjs update logs, cumulative snapshots, reload hydration, and append-only restore hook.
 
 ### Now
 
-- Bead 31 - Durable Persistence, Snapshots, Restore.
+- Bead 32 - Large-Doc Typing Performance.
 
 ### Next
 
-- Bead 32 - Large-Doc Typing Performance.
 - Bead 33 - Presence, Remote Cursors, Sync State.
 - Bead 34 - Invite + Access UX.
 - Bead 35 - Durable Comments/Suggestions.
@@ -185,10 +187,12 @@ Success criteria:
 - `packages/collab-service/src/index.ts`
 - `packages/realtime-worker/src/index.ts`
 - `packages/realtime-worker/src/access.ts`
+- `packages/realtime-worker/src/persistence.ts`
 - `packages/realtime-worker/src/room.ts`
 - `packages/realtime-worker/src/routing.ts`
 - `packages/realtime-worker/wrangler.jsonc`
 - `packages/testing/unit/realtime-runtime/realtime-access-boundary.test.ts`
+- `packages/testing/unit/realtime-runtime/realtime-persistence.test.ts`
 - `packages/testing/unit/realtime-runtime/realtime-runtime-skeleton.test.ts`
 - `scripts/verify-realtime-runtime.mjs`
 - `packages/editor-core/src/schema/mentions.ts`
@@ -200,6 +204,7 @@ Success criteria:
 - GitHub PR #20: `https://github.com/apollostreetcompany/lash-doc/pull/20` (expected red until Beads 29-31; stacked on PR #19)
 - GitHub PR #21: `https://github.com/apollostreetcompany/lash-doc/pull/21` (reload durability expected-red until Bead 31; stacked on PR #20)
 - GitHub PR #22: `https://github.com/apollostreetcompany/lash-doc/pull/22` (reload durability expected-red until Bead 31; stacked on PR #21)
+- GitHub PR #23: pending Bead 31 stacked PR (stacked on PR #22)
 - GitHub PR #12: `https://github.com/apollostreetcompany/lash-doc/pull/12`
 - Post-deploy main CI run: `https://github.com/apollostreetcompany/lash-doc/actions/runs/26026635724`
 - Final Cloudflare deployment preview: `https://cad5a3ac.lash-9xx.pages.dev`

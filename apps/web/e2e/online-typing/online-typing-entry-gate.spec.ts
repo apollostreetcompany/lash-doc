@@ -15,6 +15,7 @@ type LashTestWindow = Window & {
 const EMPTY_DOC = '<p></p>';
 const REALTIME_PORT = 8787;
 const REALTIME_HEALTH_URL = `http://127.0.0.1:${REALTIME_PORT}/api/realtime/health`;
+const SNAPSHOT_UPDATE_THRESHOLD = 20;
 
 let realtimeWorker: ChildProcess | null = null;
 
@@ -98,6 +99,11 @@ const openDemoDoc = async (page: Page) => {
   await seedEmptyDoc(page);
 };
 
+const openDocument = async (page: Page, documentId: string) => {
+  await page.goto(`/doc/${documentId}`);
+  await seedEmptyDoc(page);
+};
+
 const openTwoClientsOnSameDoc = async (browser: Browser) => {
   const contextA = await browser.newContext();
   const contextB = await browser.newContext();
@@ -165,6 +171,21 @@ const waitForSocketRefusal = async (url: string) =>
       settle(resolve);
     });
   });
+
+const roomHealth = async (roomId: string, accessToken: string) => {
+  const response = await fetch(
+    `http://127.0.0.1:${REALTIME_PORT}/api/realtime/rooms/${roomId}/health?accessToken=${encodeURIComponent(accessToken)}`,
+  );
+  expect(response.status).toBe(200);
+  return (await response.json()) as {
+    ok: true;
+    persistence: {
+      updates: number;
+      snapshotSequence: number | null;
+      hydrationUpdates: number;
+    };
+  };
+};
 
 test.describe.configure({ mode: 'serial' });
 
@@ -266,6 +287,41 @@ test.describe('online typing entry gate', () => {
           timeout: 3_000,
         })
         .toContain(durableText);
+    } finally {
+      await context.close();
+    }
+  });
+
+  test('durable room compacts snapshots without deleting update history', async ({ browser }) => {
+    const roomId = `bead-31-snapshot-${Date.now()}`;
+    const context = await browser.newContext();
+    const page = await context.newPage();
+
+    try {
+      await openDocument(page, roomId);
+      await typeIntoEditor(page, 'Snapshot compaction writes enough real editor updates.');
+      const accessToken = await sessionFor(roomId, 'actor-snapshot-reader');
+
+      await expect
+        .poll(
+          async () => {
+            const health = await roomHealth(roomId, accessToken);
+            return health.persistence;
+          },
+          {
+            message: 'room should preserve update rows while compacting a hydration snapshot',
+            timeout: 5_000,
+          },
+        )
+        .toMatchObject({
+          updates: expect.any(Number),
+          snapshotSequence: expect.any(Number),
+          hydrationUpdates: expect.any(Number),
+        });
+
+      const health = await roomHealth(roomId, accessToken);
+      expect(health.persistence.updates).toBeGreaterThanOrEqual(SNAPSHOT_UPDATE_THRESHOLD);
+      expect(health.persistence.snapshotSequence).not.toBeNull();
     } finally {
       await context.close();
     }

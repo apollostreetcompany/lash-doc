@@ -28,6 +28,9 @@
 - Bead 30 is complete on branch `codex/feat/bead-30-actor-access-boundary`: realtime rooms now require signed session grants, room health requires `doc.read`, sockets require `doc.edit`, and the browser provider requests a local actor session before opening the WebSocket.
 - Bead 30 PR #22 is open and stacked on PR #21: `https://github.com/apollostreetcompany/lash-doc/pull/22`.
 - Bead 30 does not add real identity providers, roles, invites, or durable document persistence. The Bead 26 online typing gate now has 3 passing tests and 1 expected-red reload durability test until Bead 31.
+- Bead 31 is complete on branch `codex/feat/bead-31-durable-persistence`: the realtime Durable Object persists Yjs updates in SQLite before broadcast, compacts cumulative snapshots, hydrates reloaded clients from snapshot plus tail updates, exposes an edit-scoped restore-as-new-head endpoint, and reports persistence metadata in room health.
+- Bead 31 PR #23 is pending/open and stacked on PR #22.
+- After Bead 31, the online typing gate has 5 passing tests: unauthorized access denial, same-doc remote visibility, concurrent convergence, reload durability, and snapshot compaction without deleting update history.
 - Static Cloudflare Pages export still fails for arbitrary `/doc/[id]`; Bead 28 solves realtime room hosting, not the final web app dynamic-route hosting strategy.
 - Current active scoped goal is Beads 23-36: regressions first, then true responsive online typing through document identity, realtime runtime, CRDT binding, actor/access, persistence, performance, presence, invite UX, durable comments, and collaboration delight.
 - User-reported regressions are tracked in `REGRESSIONS.md`; R-001 title, R-002 @mentions, and R-003 sidebar are fixed.
@@ -68,6 +71,7 @@
 - Bead 28 - Realtime Runtime Decision + Skeleton.
 - Bead 29 - CRDT Editor Binding.
 - Bead 30 - Actor Identity + Access Boundary.
+- Bead 31 - Durable Persistence, Snapshots, Restore.
 
 ## Release Evidence
 
@@ -105,6 +109,9 @@
 - Bead 30 fail-first access boundary - pass as evidence: `packages/testing/unit/realtime-runtime/realtime-access-boundary.test.ts` first failed because `packages/realtime-worker/src/access` did not exist.
 - Bead 30 architecture review - attempted via RepoPrompt context builder/oracle chat `actor-access-boundary-19C645`, but the send failed with an unsupported `gpt-5.3-codex` model configuration; primary-agent implementation stayed scoped to signed local session grants and server-side Worker checks.
 - Bead 30 final validation - pass/expected-red split: access-boundary unit tests and runtime skeleton tests passed (6 passed), root lint/typecheck/unit passed (79 unit tests), Worker typecheck passed, Worker deploy dry-run passed, `make verify-realtime-runtime` proved unauthenticated denial plus authorized actor room health/socket ping, normal web build passed, test-hook web build passed, and online typing e2e passes unauthorized access, remote visibility, and concurrent convergence (3 passed) while reload durability remains expected-red for Bead 31.
+- Bead 31 fail-first durable persistence - pass as evidence: `packages/testing/unit/realtime-runtime/realtime-persistence.test.ts` first failed because `packages/realtime-worker/src/persistence` did not exist, and the reload-only online typing test failed because reloaded editor text was empty.
+- Bead 31 architecture review - attempted via RepoPrompt Oracle chat `untitled-chat-193A46`, but the send failed with the same unsupported `gpt-5.3-codex` model configuration; implementation followed Cloudflare Durable Object docs and stayed scoped to per-room SQLite storage, Yjs snapshots, and append-only restore hooks.
+- Bead 31 final validation - pass: persistence/runtime unit tests passed (9 targeted, 82 full unit tests), root lint/typecheck passed, Worker typecheck passed, Worker deploy dry-run passed, `make verify-realtime-runtime` passed with persistence metadata in room health, normal web build passed, test-hook web build passed, and online typing e2e passed 5 tests including reload durability and snapshot compaction.
 - Acceptance coverage audit - 86 `agents.md` Test IDs, 98 unit/e2e files, no missing IDs.
 - Skip/todo audit - no `test.todo`, `test.skip`, `describe.skip`, `TODO acceptance`, or `.only(` matches in `apps/web/e2e` or `packages/testing/unit`.
 - Riddle audit - only planning/docs references; no Lash-Riddle runtime integration code.
@@ -119,14 +126,15 @@
 - Realtime Worker deploy preflight: `make realtime-dry-run`.
 - Realtime Worker deploy command: `make deploy-realtime-cloudflare`.
 - Realtime Worker production deploy requires `LASH_REALTIME_SESSION_SECRET` via `npx wrangler secret put LASH_REALTIME_SESSION_SECRET --config packages/realtime-worker/wrangler.jsonc`; local verification uses a non-production fallback secret.
+- Realtime Worker room health now reports persistence metadata. Restore is a low-level append-only Yjs update hook; user-facing history restore UI remains separate from this runtime capability.
 
 ## Regression Backlog
 
-- Beads 31-36 - Implement the remaining scoped online typing track exactly as requested.
+- Beads 32-36 - Implement the remaining scoped online typing track exactly as requested.
 
 ## Open Items
 
 - User-reported regressions: none currently open.
-- Online typing red gate: Bead 26 unauthorized access, remote visibility, and convergence tests now pass after Bead 30; reload durability remains expected-red until Bead 31 adds durable persistence.
-- Runtime/deploy: Realtime rooms now have a Cloudflare Durable Object Worker with signed actor session grants. Arbitrary `/doc/[id]` web routes remain local/Next-runtime only; static Cloudflare Pages export is blocked until a web dynamic-route hosting strategy is chosen.
+- Online typing red gate: Bead 26 online typing tests now pass after Bead 31; Bead 32 will add large-document typing performance coverage and remove remaining per-keystroke hot paths.
+- Runtime/deploy: Realtime rooms now have a Cloudflare Durable Object Worker with signed actor session grants, append-only Yjs update persistence, cumulative snapshots, reload hydration, and restore-as-new-head hook. Arbitrary `/doc/[id]` web routes remain local/Next-runtime only; static Cloudflare Pages export is blocked until a web dynamic-route hosting strategy is chosen.
 - Future custom-domain/production hosting decisions and future Riddle integration are separate workstreams; realtime infra should prefer Cloudflare first, then Render only if needed.

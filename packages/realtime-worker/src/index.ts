@@ -22,7 +22,7 @@ const json = (body: unknown, init: ResponseInit = {}) =>
     ...init,
     headers: {
       'access-control-allow-headers': 'authorization, content-type',
-      'access-control-allow-methods': 'GET, OPTIONS',
+      'access-control-allow-methods': 'GET, POST, OPTIONS',
       'access-control-allow-origin': '*',
       'cache-control': 'no-store',
       ...init.headers,
@@ -32,7 +32,7 @@ const json = (body: unknown, init: ResponseInit = {}) =>
 const withCors = (response: Response) => {
   const headers = new Headers(response.headers);
   headers.set('access-control-allow-headers', 'authorization, content-type');
-  headers.set('access-control-allow-methods', 'GET, OPTIONS');
+  headers.set('access-control-allow-methods', 'GET, POST, OPTIONS');
   headers.set('access-control-allow-origin', '*');
   return new Response(response.body, {
     status: response.status,
@@ -121,6 +121,20 @@ export default {
       if (!decision.ok) return deny(decision.reason);
       const stub = env.LASH_REALTIME_ROOM.getByName(route.roomId);
       return stub.fetch(roomRequest(request, route.roomId, '/__lash-room/socket', decision.grant));
+    }
+
+    if (route.kind === 'room-restore') {
+      const decision = await verifyRealtimeSessionToken(accessTokenFor(request, url), secret, {
+        documentId: route.roomId,
+        capability: 'doc.edit',
+      });
+      if (!decision.ok) return deny(decision.reason);
+      const stub = env.LASH_REALTIME_ROOM.getByName(route.roomId);
+      return withCors(
+        await stub.fetch(
+          roomRequest(request, route.roomId, '/__lash-room/restore', decision.grant),
+        ),
+      );
     }
 
     return json({ ok: false, error: 'not_found' }, { status: 404 });

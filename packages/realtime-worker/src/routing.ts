@@ -8,6 +8,7 @@ export type RealtimeRoute =
   | { kind: 'service-health' }
   | { kind: 'room-session'; roomId: string }
   | { kind: 'room-health'; roomId: string }
+  | { kind: 'room-restore'; roomId: string }
   | { kind: 'room-socket'; roomId: string }
   | { kind: 'not-found' };
 
@@ -39,7 +40,9 @@ export const parseRealtimeRoute = (url: URL): RealtimeRoute => {
     return { kind: 'service-health' };
   }
 
-  const match = /^\/api\/realtime\/rooms\/([^/]+)(?:\/(session|health|socket))?$/u.exec(pathname);
+  const match = /^\/api\/realtime\/rooms\/([^/]+)(?:\/(session|health|restore|socket))?$/u.exec(
+    pathname,
+  );
   if (!match) {
     return { kind: 'not-found' };
   }
@@ -50,5 +53,6 @@ export const parseRealtimeRoute = (url: URL): RealtimeRoute => {
   }
 
   if (match[2] === 'session') return { kind: 'room-session', roomId };
+  if (match[2] === 'restore') return { kind: 'room-restore', roomId };
   return match[2] === 'socket' ? { kind: 'room-socket', roomId } : { kind: 'room-health', roomId };
 };
