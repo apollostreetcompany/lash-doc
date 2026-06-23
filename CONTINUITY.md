@@ -78,7 +78,7 @@ Success criteria:
 53. PR #28 CI is green after Node 22, serialized E2E, and the CI-only 50k runner budget adjustments: GitHub Actions run `26913596916` passed `build-and-test` on branch `codex/feat/bead-36-collaboration-delight`.
 54. Beads 23-36 landed as one integrated deployable-main merge through PR #28, because intermediate stacked PRs #18-#27 intentionally represented red partial states. PR #28 was retargeted to `main`, squash-merged as `1b85b26682505d5a8e10e6051c4f4464b612898c`, protected `main` CI run `26914289177` passed `build-and-test`, and superseded PRs #15-#27 were closed.
 55. Bead 37 packages the feature-audit metadata and insight-router hardening: `FEATURE_AUDIT/STORIES.csv` is the canonical 201-story tracker, `.understand-anything/knowledge-graph.json` is the current architecture graph, and `@lash/insight-router` provides fail-loud routing placeholders for Persephone, Hermes, and Garden writing places.
-56. Bead 37 validation fixed four branch-surfaced UX/test issues before PR: route-title hydration now runs before interaction on document switches, the outline expand-all control meets mobile touch-target minimums, solo documents keep collaborator chrome honest without placeholder peers, and the natural-date mention e2e uses a fixed browser clock.
+56. Bead 37 validation fixed four branch-surfaced UX/test issues before PR: route-title hydration now runs before interaction on document switches, the outline expand-all control meets mobile touch-target minimums, solo documents keep collaborator chrome honest without placeholder peers, and the natural-date mention e2e uses a fixed browser clock and timezone.
 
 ## State
 

@@ -1,5 +1,7 @@
 import { expect, test, type Page } from '@playwright/test';
 
+test.use({ timezoneId: 'Asia/Tokyo' });
+
 const ready = async (page: Page) =>
   page.waitForFunction(() =>
     Boolean((window as unknown as { __lashEditor?: unknown }).__lashEditor),
