@@ -10,8 +10,9 @@ import { expect, test, type Page } from '@playwright/test';
 
 const builtCssText = async (page: Page): Promise<string> => {
   const stylesheetUrls = await page.evaluate(() =>
-    Array.from(document.querySelectorAll<HTMLLinkElement>('link[rel="stylesheet"][href*="static/css"]'))
-      .map((link) => link.href),
+    Array.from(
+      document.querySelectorAll<HTMLLinkElement>('link[rel="stylesheet"][href*="static/css"]'),
+    ).map((link) => link.href),
   );
 
   expect(stylesheetUrls.length, 'expected at least one built CSS file').toBeGreaterThan(0);
@@ -38,11 +39,19 @@ test.describe('hover-on-touch affordances', () => {
     await page.goto('/');
     await expect(page.getByTestId('lash-home')).toBeVisible();
 
-    // The avatar stack itself is display:none at <=767px (we hide it in mobile
-    // chrome), but the second-avatar margin still resolves through the cascade
-    // and is observable via getComputedStyle. We only need to assert the rule
-    // applied, not that the element is laid out.
-    const secondAvatar = page.locator('.lash-avatar-stack .lash-avatar + .lash-avatar').first();
+    // Solo documents no longer render placeholder collaborators, so attach a
+    // CSS fixture to verify the mobile cascade without changing product state.
+    await page.evaluate(() => {
+      const stack = document.createElement('div');
+      stack.className = 'lash-avatar-stack';
+      stack.setAttribute('data-testid', 'avatar-stack-css-fixture');
+      stack.innerHTML = '<span class="lash-avatar">A</span><span class="lash-avatar">B</span>';
+      document.body.appendChild(stack);
+    });
+
+    const secondAvatar = page.locator(
+      '[data-testid="avatar-stack-css-fixture"] .lash-avatar + .lash-avatar',
+    );
     await expect(secondAvatar).toBeAttached();
 
     const marginLeft = await secondAvatar.evaluate(

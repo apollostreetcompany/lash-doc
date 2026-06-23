@@ -12,9 +12,11 @@ export interface OutlinePanelProps {
   items: OutlineItem[];
   onToggle: (item: OutlineItem) => void;
   onFocus: (item: OutlineItem) => void;
+  onExpandAll?: () => void;
 }
 
-export function OutlinePanel({ items, onToggle, onFocus }: OutlinePanelProps) {
+export function OutlinePanel({ items, onToggle, onFocus, onExpandAll }: OutlinePanelProps) {
+  const hasCollapsed = items.some((item) => item.collapsed);
   return (
     <aside
       data-testid="lash-outline-panel"
@@ -26,6 +28,19 @@ export function OutlinePanel({ items, onToggle, onFocus }: OutlinePanelProps) {
         <h2 className="outline-title" id="lash-outline-title">
           Outline
         </h2>
+        {onExpandAll ? (
+          <button
+            type="button"
+            className="outline-expand-all-button"
+            data-testid="outline-expand-all"
+            onClick={onExpandAll}
+            disabled={!hasCollapsed}
+            aria-label="Expand all headings"
+            title={hasCollapsed ? 'Expand all headings' : 'All headings expanded'}
+          >
+            Expand all
+          </button>
+        ) : null}
       </div>
       <ol className="outline-list" aria-labelledby="lash-outline-title">
         {items.map((item) => {

@@ -37,6 +37,7 @@ import {
   type MouseEvent as ReactMouseEvent,
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -47,6 +48,7 @@ import { createBrowserImageUploader } from '../../lib/createBrowserImageUploader
 import {
   DEFAULT_DOC_TITLE,
   DEFAULT_DOCUMENT_ID,
+  DOCUMENT_REGISTRY_STORAGE_KEY,
   createNewDocumentId,
   documentPath,
   listDocuments,
@@ -393,6 +395,24 @@ export function EditorWorkspace({ documentId = DEFAULT_DOCUMENT_ID }: EditorWork
     setDocuments(listDocuments(window.localStorage));
   }, []);
 
+  // Cross-tab sync: when another tab creates a document or renames one, the
+  // registry / per-doc title keys change in localStorage. Refresh the switcher
+  // so it stays current without a manual reload.
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const handleRegistryStorage = (event: StorageEvent) => {
+      if (
+        event.key === null ||
+        event.key === DOCUMENT_REGISTRY_STORAGE_KEY ||
+        event.key.startsWith('lash:title:')
+      ) {
+        refreshDocuments();
+      }
+    };
+    window.addEventListener('storage', handleRegistryStorage);
+    return () => window.removeEventListener('storage', handleRegistryStorage);
+  }, [refreshDocuments]);
+
   const imageUploader = useMemo<LashImageUploader>(() => createBrowserImageUploader(), []);
   const realtimeCollaboration = useMemo(
     () => createLashRealtimeCollaboration(activeDocumentId),
@@ -481,7 +501,7 @@ export function EditorWorkspace({ documentId = DEFAULT_DOCUMENT_ID }: EditorWork
     setIsMounted(true);
   }, []);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (typeof window === 'undefined') return;
     const storedTitle = readDocumentTitle(window.localStorage, activeDocumentId);
     setDocTitle(storedTitle);
@@ -968,6 +988,11 @@ export function EditorWorkspace({ documentId = DEFAULT_DOCUMENT_ID }: EditorWork
     [editor],
   );
 
+  const handleExpandAll = useCallback(() => {
+    if (!editor) return;
+    lashCommands.expandAllHeadings(editor);
+  }, [editor]);
+
   const handleFocusHeading = useCallback(
     (item: OutlineItem) => {
       if (!editor) return;
@@ -1019,6 +1044,22 @@ export function EditorWorkspace({ documentId = DEFAULT_DOCUMENT_ID }: EditorWork
       (window as any).__lashLastCopyResult = ok ? 'ok' : 'failed';
     });
   }, [historyAuthorFilter, historyTimeFilter]);
+
+  // Hydrate history filters from a shared filter link (?historyAuthor=&historyTime=)
+  // so opening a copied link lands on the same filtered diff view. Runs once.
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const params = new URL(window.location.href).searchParams;
+    const author = params.get('historyAuthor');
+    const time = params.get('historyTime');
+    if (author) setHistoryAuthorFilter(author);
+    if (time === 'last-7-days') setHistoryTimeFilter('last-7-days');
+    if (author || time) {
+      setActiveTab('history');
+      setRailOpen(true);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const recordSuggestionResolution = useCallback(
     (entry: HistoryEntry, action: SuggestionResolutionAction) => {
@@ -1419,6 +1460,7 @@ export function EditorWorkspace({ documentId = DEFAULT_DOCUMENT_ID }: EditorWork
   }, [realtimeCollaboration]);
 
   const remotePeers = realtimeSnapshot.peers;
+  const topBarPeers = remotePeers.map((peer) => ({ actorId: peer.actorId, label: peer.label }));
   const realtimeLabel = realtimeSyncLabels[realtimeSnapshot.syncState];
   const showRealtimeRetry =
     realtimeSnapshot.enabled &&
@@ -1551,6 +1593,7 @@ export function EditorWorkspace({ documentId = DEFAULT_DOCUMENT_ID }: EditorWork
   const topBar = (
     <TopBar
       editor={editor}
+      peers={topBarPeers}
       docTitle={docTitle.trim() || DEFAULT_DOC_TITLE}
       focusMode={isFocusMode}
       suggestMode={isSuggestMode}
@@ -1570,6 +1613,7 @@ export function EditorWorkspace({ documentId = DEFAULT_DOCUMENT_ID }: EditorWork
       outlineItems={outlineItems}
       onToggleHeading={handleToggleHeading}
       onFocusHeading={handleFocusHeading}
+      onExpandAll={handleExpandAll}
       hideOutline={isFocusMode}
       onCloseMobile={mobileSidebarOpen ? closeMobileSidebar : undefined}
     />
@@ -1639,8 +1683,6 @@ export function EditorWorkspace({ documentId = DEFAULT_DOCUMENT_ID }: EditorWork
                 aria-label="Document metadata"
                 data-testid="lash-doc-meta"
               >
-                <span>Edited by Apollo</span>
-                <span className="lash-doc-meta-dot" aria-hidden="true" />
                 <span>
                   {historyEntries.length} version{historyEntries.length === 1 ? '' : 's'}
                 </span>

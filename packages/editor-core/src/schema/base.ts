@@ -142,6 +142,10 @@ export const buildBaseExtensions = (options?: LashSchemaOptions): Extensions => 
   return [
     StarterKitExtension.configure({
       heading: false,
+      // dir="auto" lets the browser resolve each paragraph's base direction
+      // per the Unicode Bidirectional Algorithm, so Arabic/Hebrew content
+      // renders right-to-left without a global locale layer (F-C22-09).
+      paragraph: { HTMLAttributes: { dir: 'auto' } },
       bulletList: { keepMarks: true, keepAttributes: true },
       orderedList: { keepMarks: true, keepAttributes: true },
       strike: false,
@@ -161,7 +165,9 @@ export const buildBaseExtensions = (options?: LashSchemaOptions): Extensions => 
           }),
         ]
       : []),
-    LashHeading.configure({ levels: [1, 2, 3] }),
+    // dir="auto" gives headings the same per-block bidi resolution as
+    // paragraphs so RTL titles display correctly (F-C22-09).
+    LashHeading.configure({ levels: [1, 2, 3], HTMLAttributes: { dir: 'auto' } }),
     OutlineManager.configure({
       documentId: outlineOptions.documentId ?? 'default',
       persistence: outlineOptions.persistence,

@@ -76,7 +76,13 @@ const convertInlineNode = (
       );
     case 'emphasis':
       return node.children.flatMap((child) =>
-        convertInlineNode(child, [...marks, { type: 'italic' }], warnings, definitions, allowImages),
+        convertInlineNode(
+          child,
+          [...marks, { type: 'italic' }],
+          warnings,
+          definitions,
+          allowImages,
+        ),
       );
     case 'inlineCode':
       return [
@@ -110,8 +116,8 @@ const convertInlineNode = (
         warnings.add('Images inside headings were converted to alt text.');
         const fallbackText =
           node.type === 'image'
-            ? node.alt ?? ''
-            : definitions.get(node.identifier)?.title ?? '';
+            ? (node.alt ?? '')
+            : (node.alt ?? definitions.get(node.identifier)?.title ?? '');
         return [
           {
             type: 'text',
@@ -301,7 +307,10 @@ const convertBlock = (
       return convertParagraphNode(node as Paragraph, warnings, definitions);
     case 'list': {
       const list = node as List;
-      const isTask = list.children.some((child) => child.type === 'listItem' && child.checked !== null && child.checked !== undefined);
+      const isTask = list.children.some(
+        (child) =>
+          child.type === 'listItem' && child.checked !== null && child.checked !== undefined,
+      );
       const items = list.children.map((child) =>
         convertListItem(child as ListItem, isTask, warnings, definitions),
       );
@@ -325,7 +334,9 @@ const convertBlock = (
       ];
     case 'blockquote':
       warnings.add('Blockquotes are flattened into paragraphs.');
-      return (node.children as Content[]).flatMap((child) => convertBlock(child, warnings, definitions));
+      return (node.children as Content[]).flatMap((child) =>
+        convertBlock(child, warnings, definitions),
+      );
     case 'thematicBreak':
       warnings.add('Horizontal rules are not supported and were removed.');
       return [];
@@ -369,7 +380,9 @@ export const parseMarkdownToDoc = (
 
   const doc: JSONContent = {
     type: 'doc',
-    content: content.length ? content : [{ type: 'paragraph', content: [{ type: 'text', text: '' }] }],
+    content: content.length
+      ? content
+      : [{ type: 'paragraph', content: [{ type: 'text', text: '' }] }],
   };
 
   return { doc, warnings: Array.from(warnings) };
@@ -488,6 +501,9 @@ const convertDocNodeToMdast = (
     case 'taskList':
       return [convertListToMdast(node, warnings, definitions)];
     case 'image':
+      if (!node.attrs?.src) {
+        return [];
+      }
       return [
         {
           type: 'paragraph',
@@ -522,6 +538,9 @@ const convertInlineForExport = (
 ): PhrasingContent[] => {
   return content.flatMap((child) => {
     if (child.type === 'image') {
+      if (!child.attrs?.src) {
+        return [];
+      }
       return [convertImageToMdast(child, definitions)];
     }
     return [applyMarks(child, warnings, definitions)];
@@ -545,7 +564,7 @@ const convertListToMdast = (
 
     (item.content ?? []).forEach((childNode) => {
       listItem.children.push(
-        ...((convertDocNodeToMdast(childNode, warnings, definitions) as unknown) as BlockContent[]),
+        ...(convertDocNodeToMdast(childNode, warnings, definitions) as unknown as BlockContent[]),
       );
     });
 
@@ -572,11 +591,25 @@ const convertTableToMdast = (
 ): Table => {
   const rows: TableRow[] = (node.content ?? []).map((row) => {
     const cells: TableCell[] = (row.content ?? []).map((cell) => {
-      const cellContent = convertInlineForExport(
-        (cell.content?.[0]?.content as JSONContent[] | undefined) ?? [],
-        warnings,
-        definitions,
-      );
+      const blocks = (cell.content as JSONContent[] | undefined) ?? [];
+      if (blocks.length > 1) {
+        warnings.add(
+          'Table cells with multiple blocks were flattened into a single line because Markdown tables cannot represent multi-block cells.',
+        );
+      }
+      const cellContent = blocks.flatMap((block, blockIndex) => {
+        const inline = convertInlineForExport(
+          (block.content as JSONContent[] | undefined) ?? [],
+          warnings,
+          definitions,
+        );
+        // mdast tableCell children must remain inline (PhrasingContent), so
+        // separate concatenated blocks with a hard break instead of nesting
+        // block nodes; this keeps later blocks from running into the prior one.
+        return blockIndex > 0 && inline.length
+          ? [{ type: 'break' } as PhrasingContent, ...inline]
+          : inline;
+      });
       return {
         type: 'tableCell',
         children: cellContent.length ? cellContent : [{ type: 'text', value: '' }],

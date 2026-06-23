@@ -19,19 +19,23 @@ import { Avatar, AvatarStack, type AvatarTint } from './Avatar';
 import { Icon } from './Icon';
 import { AutosaveIndicator } from '../editor/panels/AutosaveIndicator';
 
-interface Collaborator {
-  name: string;
-  tint: AvatarTint;
+export interface TopBarPeer {
+  actorId: string;
+  label: string;
 }
 
-const PRESENT_COLLABORATORS: Collaborator[] = [
-  { name: 'Apollo', tint: 'coral' },
-  { name: 'Ada Lovelace', tint: 'blue' },
-  { name: 'Grace Hopper', tint: 'green' },
-];
+// Deterministic tint per collaborator so a given person keeps a stable colour.
+const PEER_TINTS: AvatarTint[] = ['coral', 'blue', 'green', 'violet', 'amber'];
+const tintForActor = (actorId: string): AvatarTint => {
+  let hash = 0;
+  for (let i = 0; i < actorId.length; i += 1) hash = (hash * 31 + actorId.charCodeAt(i)) >>> 0;
+  return PEER_TINTS[hash % PEER_TINTS.length];
+};
 
 export interface TopBarProps {
   editor: Editor | null;
+  /** Live remote collaborators from realtime presence (empty when solo). */
+  peers: TopBarPeer[];
   docTitle: string;
   focusMode: boolean;
   suggestMode: boolean;
@@ -47,6 +51,7 @@ export interface TopBarProps {
 
 export function TopBar({
   editor,
+  peers,
   docTitle,
   focusMode,
   suggestMode,
@@ -114,16 +119,18 @@ export function TopBar({
           <span className="sr-only">{suggestMode ? 'Suggesting' : 'Suggest'}</span>
         </button>
 
-        <AvatarStack>
-          {PRESENT_COLLABORATORS.map((collaborator) => (
-            <Avatar
-              key={collaborator.name}
-              name={collaborator.name}
-              tint={collaborator.tint}
-              title={`${collaborator.name} · viewing now`}
-            />
-          ))}
-        </AvatarStack>
+        {peers.length ? (
+          <AvatarStack>
+            {peers.map((peer) => (
+              <Avatar
+                key={peer.actorId}
+                name={peer.label}
+                tint={tintForActor(peer.actorId)}
+                title={`${peer.label} · in this document`}
+              />
+            ))}
+          </AvatarStack>
+        ) : null}
 
         <button
           type="button"

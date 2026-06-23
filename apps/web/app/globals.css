@@ -1799,6 +1799,23 @@ li[data-type='taskItem'] > div p {
   color: var(--color-text-on-dark-muted);
 }
 
+.outline-expand-all-button {
+  min-height: 32px;
+  border: 1px solid rgb(255 255 255 / 0.14);
+  border-radius: var(--radius-sm);
+  background: rgb(255 255 255 / 0.08);
+  color: var(--color-text-on-dark);
+  padding: 0 var(--space-2);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.outline-expand-all-button:disabled {
+  cursor: default;
+  opacity: 0.48;
+}
+
 .outline-list {
   list-style: none;
   padding: 0;
@@ -2951,6 +2968,12 @@ li[data-type='taskItem'] > div p {
   .lash-sidebar-item {
     justify-content: flex-start;
     padding: var(--space-2) var(--space-3);
+  }
+
+  .outline-expand-all-button {
+    min-width: 44px;
+    min-height: 44px;
+    padding: 0 var(--space-3);
   }
 
   .lash-rail {

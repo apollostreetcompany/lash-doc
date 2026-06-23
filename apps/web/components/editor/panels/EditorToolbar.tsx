@@ -41,6 +41,14 @@ const COMMAND_ICONS: Partial<Record<string, IconName>> = {
   'insert-table': 'table',
 };
 
+/**
+ * Command ids that perform a one-shot action rather than toggle a persistent
+ * state. These buttons never report an active state, so they must NOT carry
+ * `aria-pressed` — a screen reader would otherwise announce them as an
+ * (always unpressed) toggle, which is semantically inaccurate.
+ */
+const ACTION_COMMAND_IDS = new Set<string>(['insert-table']);
+
 function shortcutHint(hotkey?: string) {
   if (!hotkey) return undefined;
   const isMac =
@@ -52,13 +60,7 @@ function shortcutHint(hotkey?: string) {
     .replace(/\+/g, isMac ? '' : '+');
 }
 
-export function EditorToolbar({
-  editor,
-  groups,
-  hidden,
-  onClick,
-  trailing,
-}: EditorToolbarProps) {
+export function EditorToolbar({ editor, groups, hidden, onClick, trailing }: EditorToolbarProps) {
   const ready = Boolean(editor);
 
   return (
@@ -72,7 +74,8 @@ export function EditorToolbar({
         {groups.map(({ label, items }) => (
           <div key={label} role="group" aria-label={label} data-toolbar-group>
             {items.map((item) => {
-              const active = editor ? isToolbarButtonActive(editor, item.id) : false;
+              const isToggle = !ACTION_COMMAND_IDS.has(item.id);
+              const active = isToggle && editor ? isToolbarButtonActive(editor, item.id) : false;
               const iconName = COMMAND_ICONS[item.id];
               const hint = shortcutHint(item.hotkey);
               const tooltip = hint ? `${item.label} (${hint})` : item.label;
@@ -87,7 +90,10 @@ export function EditorToolbar({
                   data-tooltip={tooltip}
                   title={tooltip}
                   aria-label={item.label}
-                  aria-pressed={active ? 'true' : 'false'}
+                  // Only toggle buttons expose a pressed state. Action buttons
+                  // (e.g. insert-table) omit aria-pressed entirely so they are
+                  // not announced as toggles.
+                  aria-pressed={isToggle ? (active ? 'true' : 'false') : undefined}
                   disabled={!ready}
                   onClick={() => onClick(item)}
                 >
@@ -99,7 +105,9 @@ export function EditorToolbar({
         ))}
       </div>
 
-      {trailing ? <div style={{ marginLeft: 'auto', display: 'flex', gap: 8 }}>{trailing}</div> : null}
+      {trailing ? (
+        <div style={{ marginLeft: 'auto', display: 'flex', gap: 8 }}>{trailing}</div>
+      ) : null}
     </div>
   );
 }

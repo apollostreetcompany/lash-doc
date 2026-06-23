@@ -290,7 +290,9 @@ export function HistoryPanel({
             {diffAnnouncement(diff.spans)}
           </p>
           <div className="history-diff-actions">
-            {selectedEntry.intent === 'suggest' && !selectedSuggestionAccepted ? (
+            {selectedEntry.intent === 'suggest' &&
+            !selectedSuggestionAccepted &&
+            selectedSuggestionResolution?.action !== 'rejected' ? (
               <>
                 <button
                   type="button"

@@ -77,6 +77,8 @@ Success criteria:
 52. The 50k-word large-document Event Timing p95 gate remains strict at 8 ms for local/product validation, but allows a CI-only 16 ms runner budget because GitHub-hosted CPU reported 11.3 ms while the same commit measured 4.8 ms locally. The test logs the active budget in metrics so CI cannot silently hide a widened threshold.
 53. PR #28 CI is green after Node 22, serialized E2E, and the CI-only 50k runner budget adjustments: GitHub Actions run `26913596916` passed `build-and-test` on branch `codex/feat/bead-36-collaboration-delight`.
 54. Beads 23-36 landed as one integrated deployable-main merge through PR #28, because intermediate stacked PRs #18-#27 intentionally represented red partial states. PR #28 was retargeted to `main`, squash-merged as `1b85b26682505d5a8e10e6051c4f4464b612898c`, protected `main` CI run `26914289177` passed `build-and-test`, and superseded PRs #15-#27 were closed.
+55. Bead 37 packages the feature-audit metadata and insight-router hardening: `FEATURE_AUDIT/STORIES.csv` is the canonical 201-story tracker, `.understand-anything/knowledge-graph.json` is the current architecture graph, and `@lash/insight-router` provides fail-loud routing placeholders for Persephone, Hermes, and Garden writing places.
+56. Bead 37 validation fixed four branch-surfaced UX/test issues before PR: route-title hydration now runs before interaction on document switches, the outline expand-all control meets mobile touch-target minimums, solo documents keep collaborator chrome honest without placeholder peers, and the natural-date mention e2e uses a fixed browser clock.
 
 ## State
 
@@ -139,14 +141,16 @@ Success criteria:
 - [x] PR #28 merged the integrated Beads 23-36 stack into `main` as `1b85b26682505d5a8e10e6051c4f4464b612898c`.
 - [x] Final Beads 23-36 protected `main` CI passed: run `26914289177`, workflow `CI`, job `build-and-test`.
 - [x] Superseded stacked PRs #15-#27 were closed after the integrated merge.
+- [x] Bead 37 - Feature audit metadata, understand graph, and insight-router hardening prepared for PR.
 
 ### Now
 
-- No active bead; Beads 23-36 are merged and CI-green on `main`.
+- Bead 37 PR branch `codex/chore/feature-audit-metadata` is fully validated locally and ready for PR/CI merge.
 
 ### Next
 
 - Production web hosting strategy for dynamic `/doc/[id]` routes and any future Riddle integration remain separate workstreams.
+- Decide whether to turn the 19 deferred feature-audit scaffold items into a new bead stack.
 
 ## Open Questions
 
@@ -229,3 +233,11 @@ Success criteria:
 - GitHub PR #12: `https://github.com/apollostreetcompany/lash-doc/pull/12`
 - Post-deploy main CI run: `https://github.com/apollostreetcompany/lash-doc/actions/runs/26026635724`
 - Final Cloudflare deployment preview: `https://cad5a3ac.lash-9xx.pages.dev`
+- `FEATURE_AUDIT/STORIES.csv`
+- `FEATURE_AUDIT/ERRORS.md`
+- `FEATURE_AUDIT/REVIEW.md`
+- `.understand-anything/knowledge-graph.json`
+- `.understand-anything/meta.json`
+- `.understand-anything/fingerprints.json`
+- `packages/insight-router/src/index.ts`
+- `packages/testing/unit/insight-router/router.test.ts`

@@ -1,6 +1,5 @@
 /**
  * @lash/history — append-only edit log, deterministic diff engine, restore API.
- * Status: SCAFFOLD — implement in M2/C2 (history log), M2/C3 (diff), M2/C4 (restore).
  *
  * Determinism: history MUST NOT inject its own hash function. parentSha,
  * resultSha, EditPatch.baseVersion, and DiffJSON.from/to are all computed via
@@ -65,7 +64,8 @@ export interface HistoryStore {
   /** Transactionally append; rejects when expectedParentSha != current head. */
   append(input: AppendInput): Promise<AppendResult>;
   list(docId: DocumentId, filter?: HistoryFilter): Promise<HistoryEntry[]>;
-  /** Load doc state at a specific resultSha (uses snapshot if available). */
+  /** Load doc state at a specific resultSha. Reconstructed from the nearest
+   *  preceding snapshot by replaying ops forward when not snapshotted directly. */
   loadAt(docId: DocumentId, sha: string): Promise<unknown>;
   /** Restore creates a NEW head entry whose ops reproduce the target state.
    *  Never destructive — older history is preserved. */
@@ -78,7 +78,10 @@ export interface HistoryStore {
 }
 
 export interface CreateHistoryStoreConfig {
-  /** Snapshot every N entries; bigger = slower restore, smaller = more storage. */
+  /** Persist a full-state snapshot every N entries; bigger = slower restore,
+   *  smaller = more storage. States that fall between snapshots are
+   *  reconstructed on demand by replaying ops from the nearest preceding
+   *  snapshot. Defaults to 1 (snapshot every entry). Must be >= 1. */
   snapshotInterval?: number;
   /** Test seam for deterministic entry timestamps. */
   now?: () => string;
@@ -150,8 +153,18 @@ const entryIdFor = (docId: DocumentId, seq: number, resultSha: string): string =
 const docKey = (docId: DocumentId): string => String(docId);
 
 export const createHistoryStore = (config: CreateHistoryStoreConfig = {}): HistoryStore => {
+  const snapshotInterval = config.snapshotInterval ?? 1;
+  if (!Number.isInteger(snapshotInterval) || snapshotInterval < 1) {
+    throw new Error(
+      `history.createHistoryStore: snapshotInterval must be an integer >= 1, got ${snapshotInterval}`,
+    );
+  }
+
   const entriesByDoc = new Map<string, HistoryEntry[]>();
-  const stateByDoc = new Map<string, Map<string, unknown>>();
+  /** Sparse map of sha -> full doc state. Only the base (empty) state and
+   *  entries landing on a snapshotInterval boundary are stored here; every
+   *  other version is reconstructed on demand from the nearest snapshot. */
+  const snapshotsByDoc = new Map<string, Map<string, unknown>>();
   const headByDoc = new Map<string, string>();
   let emptyShaPromise: Promise<string> | null = null;
 
@@ -160,14 +173,51 @@ export const createHistoryStore = (config: CreateHistoryStoreConfig = {}): Histo
     return emptyShaPromise;
   };
 
-  const ensureDocStates = async (key: string): Promise<Map<string, unknown>> => {
-    let states = stateByDoc.get(key);
-    if (!states) {
-      states = new Map<string, unknown>();
-      states.set(await getEmptySha(), cloneJson(EMPTY_HISTORY_DOC));
-      stateByDoc.set(key, states);
+  const ensureDocSnapshots = async (key: string): Promise<Map<string, unknown>> => {
+    let snapshots = snapshotsByDoc.get(key);
+    if (!snapshots) {
+      snapshots = new Map<string, unknown>();
+      snapshots.set(await getEmptySha(), cloneJson(EMPTY_HISTORY_DOC));
+      snapshotsByDoc.set(key, snapshots);
     }
-    return states;
+    return snapshots;
+  };
+
+  /** Reconstruct the doc state at `sha` by locating the nearest preceding
+   *  snapshot in the entry chain and replaying ops forward. Returns
+   *  `undefined` when `sha` is not a known version for the doc. */
+  const materializeAt = (key: string, sha: string, snapshots: Map<string, unknown>): unknown => {
+    const direct = snapshots.get(sha);
+    if (direct !== undefined) {
+      return cloneJson(direct);
+    }
+
+    const entries = [...(entriesByDoc.get(key) ?? [])].sort((a, b) => a.seq - b.seq);
+    const targetIndex = entries.findIndex((entry) => entry.resultSha === sha);
+    if (targetIndex === -1) {
+      return undefined;
+    }
+
+    // Walk backwards from the target to find the nearest snapshotted base.
+    let baseDoc: unknown;
+    let replayStart = 0;
+    for (let i = targetIndex; i >= 0; i -= 1) {
+      const candidate = snapshots.get(entries[i].parentSha);
+      if (candidate !== undefined) {
+        baseDoc = cloneJson(candidate);
+        replayStart = i;
+        break;
+      }
+    }
+    if (baseDoc === undefined) {
+      return undefined;
+    }
+
+    let state: unknown = baseDoc;
+    for (let i = replayStart; i <= targetIndex; i += 1) {
+      state = replayOps(state, entries[i].ops);
+    }
+    return state;
   };
 
   const append: HistoryStore['append'] = async (input) => {
@@ -179,13 +229,13 @@ export const createHistoryStore = (config: CreateHistoryStoreConfig = {}): Histo
     }
 
     const key = docKey(input.docId);
-    const states = await ensureDocStates(key);
+    const snapshots = await ensureDocSnapshots(key);
     const currentHead = headByDoc.get(key) ?? (await getEmptySha());
     if (input.expectedParentSha !== currentHead) {
       return { ok: false, reason: 'parent-mismatch', currentHead };
     }
 
-    const baseDoc = states.get(currentHead);
+    const baseDoc = materializeAt(key, currentHead, snapshots);
     if (baseDoc === undefined) {
       return {
         ok: false,
@@ -222,7 +272,11 @@ export const createHistoryStore = (config: CreateHistoryStoreConfig = {}): Histo
 
     entries.push(entry);
     entriesByDoc.set(key, entries);
-    states.set(resultSha, cloneJson(resultDoc));
+    // Persist a full snapshot only on a snapshotInterval boundary; intermediate
+    // states are recomputed lazily in materializeAt/loadAt by replaying ops.
+    if (seq % snapshotInterval === 0) {
+      snapshots.set(resultSha, cloneJson(resultDoc));
+    }
     headByDoc.set(key, resultSha);
     return { ok: true, entry };
   };
@@ -241,18 +295,20 @@ export const createHistoryStore = (config: CreateHistoryStoreConfig = {}): Histo
       });
     },
     async loadAt(docId, sha) {
-      const states = await ensureDocStates(docKey(docId));
-      if (!states.has(sha)) {
+      const key = docKey(docId);
+      const snapshots = await ensureDocSnapshots(key);
+      const state = materializeAt(key, sha, snapshots);
+      if (state === undefined) {
         throw new Error(`history.loadAt: unknown version ${sha}`);
       }
-      return cloneJson(states.get(sha));
+      return state;
     },
     async restore(docId, targetSha, actor, audit) {
       const key = docKey(docId);
-      const states = await ensureDocStates(key);
+      const snapshots = await ensureDocSnapshots(key);
       const currentHead = headByDoc.get(key) ?? (await getEmptySha());
-      const currentDoc = states.get(currentHead);
-      const targetDoc = states.get(targetSha);
+      const currentDoc = materializeAt(key, currentHead, snapshots);
+      const targetDoc = materializeAt(key, targetSha, snapshots);
       if (targetDoc === undefined || currentDoc === undefined) {
         return {
           ok: false,

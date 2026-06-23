@@ -1,0 +1,2289 @@
+{
+  "scriptCompleted": true,
+  "files": [
+    {
+      "path": ".github/pull_request_template.md",
+      "language": "markdown",
+      "sizeLines": 30,
+      "fileCategory": "docs"
+    },
+    {
+      "path": ".github/workflows/ci.yml",
+      "language": "yaml",
+      "sizeLines": 142,
+      "fileCategory": "infra"
+    },
+    {
+      "path": ".kiro/steering/dev-server-rules.md",
+      "language": "markdown",
+      "sizeLines": 24,
+      "fileCategory": "docs"
+    },
+    {
+      "path": ".prettierignore",
+      "language": "unknown",
+      "sizeLines": 1,
+      "fileCategory": "code"
+    },
+    {
+      "path": ".understand-anything/.understandignore",
+      "language": "unknown",
+      "sizeLines": 64,
+      "fileCategory": "code"
+    },
+    {
+      "path": "ACCEPTANCE_GATES.md",
+      "language": "markdown",
+      "sizeLines": 197,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "agents.md",
+      "language": "markdown",
+      "sizeLines": 541,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "apps/web/app/doc/[id]/page.tsx",
+      "language": "typescript",
+      "sizeLines": 28,
+      "fileCategory": "code"
+    },
+    {
+      "path": "apps/web/app/globals.css",
+      "language": "css",
+      "sizeLines": 4057,
+      "fileCategory": "markup"
+    },
+    {
+      "path": "apps/web/app/layout.tsx",
+      "language": "typescript",
+      "sizeLines": 40,
+      "fileCategory": "code"
+    },
+    {
+      "path": "apps/web/app/page.tsx",
+      "language": "typescript",
+      "sizeLines": 20,
+      "fileCategory": "code"
+    },
+    {
+      "path": "apps/web/components/editor/EditorWorkspace.tsx",
+      "language": "typescript",
+      "sizeLines": 1783,
+      "fileCategory": "code"
+    },
+    {
+      "path": "apps/web/components/editor/panels/AIPanel.tsx",
+      "language": "typescript",
+      "sizeLines": 443,
+      "fileCategory": "code"
+    },
+    {
+      "path": "apps/web/components/editor/panels/AutosaveIndicator.tsx",
+      "language": "typescript",
+      "sizeLines": 81,
+      "fileCategory": "code"
+    },
+    {
+      "path": "apps/web/components/editor/panels/ChatPanel.tsx",
+      "language": "typescript",
+      "sizeLines": 534,
+      "fileCategory": "code"
+    },
+    {
+      "path": "apps/web/components/editor/panels/EditorToolbar.tsx",
+      "language": "typescript",
+      "sizeLines": 117,
+      "fileCategory": "code"
+    },
+    {
+      "path": "apps/web/components/editor/panels/FocusModeToggle.tsx",
+      "language": "typescript",
+      "sizeLines": 27,
+      "fileCategory": "code"
+    },
+    {
+      "path": "apps/web/components/editor/panels/HistoryPanel.tsx",
+      "language": "typescript",
+      "sizeLines": 331,
+      "fileCategory": "code"
+    },
+    {
+      "path": "apps/web/components/editor/panels/MarkdownIO.tsx",
+      "language": "typescript",
+      "sizeLines": 59,
+      "fileCategory": "code"
+    },
+    {
+      "path": "apps/web/components/editor/panels/MentionPanel.tsx",
+      "language": "typescript",
+      "sizeLines": 229,
+      "fileCategory": "code"
+    },
+    {
+      "path": "apps/web/components/editor/panels/OfflinePanel.tsx",
+      "language": "typescript",
+      "sizeLines": 158,
+      "fileCategory": "code"
+    },
+    {
+      "path": "apps/web/components/editor/panels/OutlinePanel.tsx",
+      "language": "typescript",
+      "sizeLines": 86,
+      "fileCategory": "code"
+    },
+    {
+      "path": "apps/web/components/editor/panels/SharePanel.tsx",
+      "language": "typescript",
+      "sizeLines": 299,
+      "fileCategory": "code"
+    },
+    {
+      "path": "apps/web/components/editor/panels/TableCellPanel.tsx",
+      "language": "typescript",
+      "sizeLines": 95,
+      "fileCategory": "code"
+    },
+    {
+      "path": "apps/web/components/shell/AppShell.tsx",
+      "language": "typescript",
+      "sizeLines": 110,
+      "fileCategory": "code"
+    },
+    {
+      "path": "apps/web/components/shell/Avatar.tsx",
+      "language": "typescript",
+      "sizeLines": 44,
+      "fileCategory": "code"
+    },
+    {
+      "path": "apps/web/components/shell/Icon.tsx",
+      "language": "typescript",
+      "sizeLines": 379,
+      "fileCategory": "code"
+    },
+    {
+      "path": "apps/web/components/shell/RightRail.tsx",
+      "language": "typescript",
+      "sizeLines": 150,
+      "fileCategory": "code"
+    },
+    {
+      "path": "apps/web/components/shell/Sidebar.tsx",
+      "language": "typescript",
+      "sizeLines": 182,
+      "fileCategory": "code"
+    },
+    {
+      "path": "apps/web/components/shell/TopBar.tsx",
+      "language": "typescript",
+      "sizeLines": 150,
+      "fileCategory": "code"
+    },
+    {
+      "path": "apps/web/e2e/a11y/hover-on-touch.spec.ts",
+      "language": "typescript",
+      "sizeLines": 72,
+      "fileCategory": "code"
+    },
+    {
+      "path": "apps/web/e2e/a11y/print-stylesheet.spec.ts",
+      "language": "typescript",
+      "sizeLines": 39,
+      "fileCategory": "code"
+    },
+    {
+      "path": "apps/web/e2e/a11y/reduced-motion.spec.ts",
+      "language": "typescript",
+      "sizeLines": 62,
+      "fileCategory": "code"
+    },
+    {
+      "path": "apps/web/e2e/a11y/sr-diff-announce.spec.ts",
+      "language": "typescript",
+      "sizeLines": 29,
+      "fileCategory": "code"
+    },
+    {
+      "path": "apps/web/e2e/a11y/sr-headings.spec.ts",
+      "language": "typescript",
+      "sizeLines": 65,
+      "fileCategory": "code"
+    },
+    {
+      "path": "apps/web/e2e/a11y/sr-thread-nav.spec.ts",
+      "language": "typescript",
+      "sizeLines": 42,
+      "fileCategory": "code"
+    },
+    {
+      "path": "apps/web/e2e/a11y/touch-targets.spec.ts",
+      "language": "typescript",
+      "sizeLines": 56,
+      "fileCategory": "code"
+    },
+    {
+      "path": "apps/web/e2e/a11y/viewport-meta.spec.ts",
+      "language": "typescript",
+      "sizeLines": 31,
+      "fileCategory": "code"
+    },
+    {
+      "path": "apps/web/e2e/ai/ai-chat-citation.spec.ts",
+      "language": "typescript",
+      "sizeLines": 30,
+      "fileCategory": "code"
+    },
+    {
+      "path": "apps/web/e2e/ai/ai-citation-jump.spec.ts",
+      "language": "typescript",
+      "sizeLines": 32,
+      "fileCategory": "code"
+    },
+    {
+      "path": "apps/web/e2e/ai/ai-labeling.spec.ts",
+      "language": "typescript",
+      "sizeLines": 35,
+      "fileCategory": "code"
+    },
+    {
+      "path": "apps/web/e2e/ai/ai-patch-apply.spec.ts",
+      "language": "typescript",
+      "sizeLines": 33,
+      "fileCategory": "code"
+    },
+    {
+      "path": "apps/web/e2e/ai/ai-rationale.spec.ts",
+      "language": "typescript",
+      "sizeLines": 25,
+      "fileCategory": "code"
+    },
+    {
+      "path": "apps/web/e2e/ai/ai-scope-global-confirm.spec.ts",
+      "language": "typescript",
+      "sizeLines": 31,
+      "fileCategory": "code"
+    },
+    {
+      "path": "apps/web/e2e/authorship/blame-filter.spec.ts",
+      "language": "typescript",
+      "sizeLines": 17,
+      "fileCategory": "code"
+    },
+    {
+      "path": "apps/web/e2e/authorship/blame-gutter.spec.ts",
+      "language": "typescript",
+      "sizeLines": 15,
+      "fileCategory": "code"
+    },
+    {
+      "path": "apps/web/e2e/authorship/blame-hover.spec.ts",
+      "language": "typescript",
+      "sizeLines": 16,
+      "fileCategory": "code"
+    },
+    {
+      "path": "apps/web/e2e/autosave/autosave-indicator.spec.ts",
+      "language": "typescript",
+      "sizeLines": 68,
+      "fileCategory": "code"
+    },
+    {
+      "path": "apps/web/e2e/checklists/checklist-nesting.spec.ts",
+      "language": "typescript",
+      "sizeLines": 58,
+      "fileCategory": "code"
+    },
+    {
+      "path": "apps/web/e2e/checklists/checklist-toggle.spec.ts",
+      "language": "typescript",
+      "sizeLines": 49,
+      "fileCategory": "code"
+    },
+    {
+      "path": "apps/web/e2e/chips/chip-autoconvert.spec.ts",
+      "language": "typescript",
+      "sizeLines": 64,
+      "fileCategory": "code"
+    },
+    {
+      "path": "apps/web/e2e/chips/chip-hover.spec.ts",
+      "language": "typescript",
+      "sizeLines": 48,
+      "fileCategory": "code"
+    },
+    {
+      "path": "apps/web/e2e/chips/chip-revert.spec.ts",
+      "language": "typescript",
+      "sizeLines": 96,
+      "fileCategory": "code"
+    },
+    {
+      "path": "apps/web/e2e/cross-browser/cb-chrome.spec.ts",
+      "language": "typescript",
+      "sizeLines": 9,
+      "fileCategory": "code"
+    },
+    {
+      "path": "apps/web/e2e/cross-browser/cb-edge.spec.ts",
+      "language": "typescript",
+      "sizeLines": 12,
+      "fileCategory": "code"
+    },
+    {
+      "path": "apps/web/e2e/cross-browser/cb-firefox.spec.ts",
+      "language": "typescript",
+      "sizeLines": 9,
+      "fileCategory": "code"
+    },
+    {
+      "path": "apps/web/e2e/cross-browser/cb-ipad.spec.ts",
+      "language": "typescript",
+      "sizeLines": 14,
+      "fileCategory": "code"
+    },
+    {
+      "path": "apps/web/e2e/cross-browser/cb-mobile-chrome.spec.ts",
+      "language": "typescript",
+      "sizeLines": 16,
+      "fileCategory": "code"
+    },
+    {
+      "path": "apps/web/e2e/cross-browser/cb-mobile-safari.spec.ts",
+      "language": "typescript",
+      "sizeLines": 16,
+      "fileCategory": "code"
+    },
+    {
+      "path": "apps/web/e2e/cross-browser/cb-safari.spec.ts",
+      "language": "typescript",
+      "sizeLines": 12,
+      "fileCategory": "code"
+    },
+    {
+      "path": "apps/web/e2e/cross-browser/helpers.ts",
+      "language": "typescript",
+      "sizeLines": 49,
+      "fileCategory": "code"
+    },
+    {
+      "path": "apps/web/e2e/diff/diff-filter-author.spec.ts",
+      "language": "typescript",
+      "sizeLines": 21,
+      "fileCategory": "code"
+    },
+    {
+      "path": "apps/web/e2e/diff/diff-filter-time.spec.ts",
+      "language": "typescript",
+      "sizeLines": 17,
+      "fileCategory": "code"
+    },
+    {
+      "path": "apps/web/e2e/diff/diff-share-link.spec.ts",
+      "language": "typescript",
+      "sizeLines": 28,
+      "fileCategory": "code"
+    },
+    {
+      "path": "apps/web/e2e/doc-chat/chat-anchor-map.spec.ts",
+      "language": "typescript",
+      "sizeLines": 37,
+      "fileCategory": "code"
+    },
+    {
+      "path": "apps/web/e2e/doc-chat/chat-current-context.spec.ts",
+      "language": "typescript",
+      "sizeLines": 35,
+      "fileCategory": "code"
+    },
+    {
+      "path": "apps/web/e2e/doc-chat/chat-durable.spec.ts",
+      "language": "typescript",
+      "sizeLines": 216,
+      "fileCategory": "code"
+    },
+    {
+      "path": "apps/web/e2e/doc-chat/chat-filter-ai.spec.ts",
+      "language": "typescript",
+      "sizeLines": 33,
+      "fileCategory": "code"
+    },
+    {
+      "path": "apps/web/e2e/doc-chat/chat-filter-author.spec.ts",
+      "language": "typescript",
+      "sizeLines": 33,
+      "fileCategory": "code"
+    },
+    {
+      "path": "apps/web/e2e/doc-chat/chat-history-context.spec.ts",
+      "language": "typescript",
+      "sizeLines": 29,
+      "fileCategory": "code"
+    },
+    {
+      "path": "apps/web/e2e/doc-chat/chat-orphan.spec.ts",
+      "language": "typescript",
+      "sizeLines": 35,
+      "fileCategory": "code"
+    },
+    {
+      "path": "apps/web/e2e/document-identity/document-identity.spec.ts",
+      "language": "typescript",
+      "sizeLines": 138,
+      "fileCategory": "code"
+    },
+    {
+      "path": "apps/web/e2e/focus-mode/focus-mode-a11y.spec.ts",
+      "language": "typescript",
+      "sizeLines": 21,
+      "fileCategory": "code"
+    },
+    {
+      "path": "apps/web/e2e/focus-mode/focus-mode-ui.spec.ts",
+      "language": "typescript",
+      "sizeLines": 90,
+      "fileCategory": "code"
+    },
+    {
+      "path": "apps/web/e2e/history/history-diff.spec.ts",
+      "language": "typescript",
+      "sizeLines": 20,
+      "fileCategory": "code"
+    },
+    {
+      "path": "apps/web/e2e/history/history-open.spec.ts",
+      "language": "typescript",
+      "sizeLines": 19,
+      "fileCategory": "code"
+    },
+    {
+      "path": "apps/web/e2e/history/history-restore.spec.ts",
+      "language": "typescript",
+      "sizeLines": 26,
+      "fileCategory": "code"
+    },
+    {
+      "path": "apps/web/e2e/markdown/fixtures/basic.md",
+      "language": "markdown",
+      "sizeLines": 15,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "apps/web/e2e/markdown/fixtures/table.md",
+      "language": "markdown",
+      "sizeLines": 7,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "apps/web/e2e/markdown/md-bold-italic-hotkeys.spec.ts",
+      "language": "typescript",
+      "sizeLines": 49,
+      "fileCategory": "code"
+    },
+    {
+      "path": "apps/web/e2e/markdown/md-h2-shorthand.spec.ts",
+      "language": "typescript",
+      "sizeLines": 52,
+      "fileCategory": "code"
+    },
+    {
+      "path": "apps/web/e2e/markdown/md-roundtrip-basic.spec.ts",
+      "language": "typescript",
+      "sizeLines": 34,
+      "fileCategory": "code"
+    },
+    {
+      "path": "apps/web/e2e/markdown/md-table-import.spec.ts",
+      "language": "typescript",
+      "sizeLines": 33,
+      "fileCategory": "code"
+    },
+    {
+      "path": "apps/web/e2e/media/image-clipboard.spec.ts",
+      "language": "typescript",
+      "sizeLines": 56,
+      "fileCategory": "code"
+    },
+    {
+      "path": "apps/web/e2e/media/image-dnd.spec.ts",
+      "language": "typescript",
+      "sizeLines": 76,
+      "fileCategory": "code"
+    },
+    {
+      "path": "apps/web/e2e/media/image-resize.spec.ts",
+      "language": "typescript",
+      "sizeLines": 68,
+      "fileCategory": "code"
+    },
+    {
+      "path": "apps/web/e2e/media/image-retry.spec.ts",
+      "language": "typescript",
+      "sizeLines": 62,
+      "fileCategory": "code"
+    },
+    {
+      "path": "apps/web/e2e/mentions/mention-anonymized.spec.ts",
+      "language": "typescript",
+      "sizeLines": 16,
+      "fileCategory": "code"
+    },
+    {
+      "path": "apps/web/e2e/mentions/mention-insert.spec.ts",
+      "language": "typescript",
+      "sizeLines": 19,
+      "fileCategory": "code"
+    },
+    {
+      "path": "apps/web/e2e/mentions/mention-privacy.spec.ts",
+      "language": "typescript",
+      "sizeLines": 17,
+      "fileCategory": "code"
+    },
+    {
+      "path": "apps/web/e2e/mentions/mention-rbac-hide.spec.ts",
+      "language": "typescript",
+      "sizeLines": 17,
+      "fileCategory": "code"
+    },
+    {
+      "path": "apps/web/e2e/mentions/mention-real-editor.spec.ts",
+      "language": "typescript",
+      "sizeLines": 91,
+      "fileCategory": "code"
+    },
+    {
+      "path": "apps/web/e2e/mentions/mention-suggest.spec.ts",
+      "language": "typescript",
+      "sizeLines": 28,
+      "fileCategory": "code"
+    },
+    {
+      "path": "apps/web/e2e/mobile/drawer-scroll-lock.spec.ts",
+      "language": "typescript",
+      "sizeLines": 91,
+      "fileCategory": "code"
+    },
+    {
+      "path": "apps/web/e2e/offline/offline-merge.spec.ts",
+      "language": "typescript",
+      "sizeLines": 41,
+      "fileCategory": "code"
+    },
+    {
+      "path": "apps/web/e2e/offline/offline-queue.spec.ts",
+      "language": "typescript",
+      "sizeLines": 23,
+      "fileCategory": "code"
+    },
+    {
+      "path": "apps/web/e2e/offline/presence-resume.spec.ts",
+      "language": "typescript",
+      "sizeLines": 21,
+      "fileCategory": "code"
+    },
+    {
+      "path": "apps/web/e2e/online-typing/collaboration-delight.spec.ts",
+      "language": "typescript",
+      "sizeLines": 236,
+      "fileCategory": "code"
+    },
+    {
+      "path": "apps/web/e2e/online-typing/online-typing-entry-gate.spec.ts",
+      "language": "typescript",
+      "sizeLines": 445,
+      "fileCategory": "code"
+    },
+    {
+      "path": "apps/web/e2e/outline/outline-caret-move.spec.ts",
+      "language": "typescript",
+      "sizeLines": 101,
+      "fileCategory": "code"
+    },
+    {
+      "path": "apps/web/e2e/outline/outline-collapse-basic.spec.ts",
+      "language": "typescript",
+      "sizeLines": 63,
+      "fileCategory": "code"
+    },
+    {
+      "path": "apps/web/e2e/outline/outline-persist.spec.ts",
+      "language": "typescript",
+      "sizeLines": 61,
+      "fileCategory": "code"
+    },
+    {
+      "path": "apps/web/e2e/performance/large-doc-typing.spec.ts",
+      "language": "typescript",
+      "sizeLines": 181,
+      "fileCategory": "code"
+    },
+    {
+      "path": "apps/web/e2e/performance/typing-latency.spec.ts",
+      "language": "typescript",
+      "sizeLines": 135,
+      "fileCategory": "code"
+    },
+    {
+      "path": "apps/web/e2e/privacy/chat-redact.spec.ts",
+      "language": "typescript",
+      "sizeLines": 8,
+      "fileCategory": "code"
+    },
+    {
+      "path": "apps/web/e2e/privacy/history-redact.spec.ts",
+      "language": "typescript",
+      "sizeLines": 8,
+      "fileCategory": "code"
+    },
+    {
+      "path": "apps/web/e2e/share/invite-access.spec.ts",
+      "language": "typescript",
+      "sizeLines": 148,
+      "fileCategory": "code"
+    },
+    {
+      "path": "apps/web/e2e/share/share-audit.spec.ts",
+      "language": "typescript",
+      "sizeLines": 10,
+      "fileCategory": "code"
+    },
+    {
+      "path": "apps/web/e2e/share/share-comment-scope.spec.ts",
+      "language": "typescript",
+      "sizeLines": 12,
+      "fileCategory": "code"
+    },
+    {
+      "path": "apps/web/e2e/share/share-edit-scope.spec.ts",
+      "language": "typescript",
+      "sizeLines": 11,
+      "fileCategory": "code"
+    },
+    {
+      "path": "apps/web/e2e/share/share-expiry.spec.ts",
+      "language": "typescript",
+      "sizeLines": 9,
+      "fileCategory": "code"
+    },
+    {
+      "path": "apps/web/e2e/share/share-suggest-scope.spec.ts",
+      "language": "typescript",
+      "sizeLines": 11,
+      "fileCategory": "code"
+    },
+    {
+      "path": "apps/web/e2e/sidebar/sidebar-regression.spec.ts",
+      "language": "typescript",
+      "sizeLines": 103,
+      "fileCategory": "code"
+    },
+    {
+      "path": "apps/web/e2e/smoke/home.spec.ts",
+      "language": "typescript",
+      "sizeLines": 10,
+      "fileCategory": "code"
+    },
+    {
+      "path": "apps/web/e2e/suggest-mode/suggest-accept.spec.ts",
+      "language": "typescript",
+      "sizeLines": 18,
+      "fileCategory": "code"
+    },
+    {
+      "path": "apps/web/e2e/suggest-mode/suggest-durable.spec.ts",
+      "language": "typescript",
+      "sizeLines": 73,
+      "fileCategory": "code"
+    },
+    {
+      "path": "apps/web/e2e/suggest-mode/suggest-reject.spec.ts",
+      "language": "typescript",
+      "sizeLines": 25,
+      "fileCategory": "code"
+    },
+    {
+      "path": "apps/web/e2e/suggest-mode/suggest-visuals.spec.ts",
+      "language": "typescript",
+      "sizeLines": 22,
+      "fileCategory": "code"
+    },
+    {
+      "path": "apps/web/e2e/tables/table-copy-out.spec.ts",
+      "language": "typescript",
+      "sizeLines": 53,
+      "fileCategory": "code"
+    },
+    {
+      "path": "apps/web/e2e/tables/table-enter-newline.spec.ts",
+      "language": "typescript",
+      "sizeLines": 30,
+      "fileCategory": "code"
+    },
+    {
+      "path": "apps/web/e2e/tables/table-paste-in.spec.ts",
+      "language": "typescript",
+      "sizeLines": 60,
+      "fileCategory": "code"
+    },
+    {
+      "path": "apps/web/e2e/tables/table-perf-100x20.spec.ts",
+      "language": "typescript",
+      "sizeLines": 105,
+      "fileCategory": "code"
+    },
+    {
+      "path": "apps/web/e2e/tables/table-select-open-close.spec.ts",
+      "language": "typescript",
+      "sizeLines": 47,
+      "fileCategory": "code"
+    },
+    {
+      "path": "apps/web/e2e/tables/table-status-cycle-kb.spec.ts",
+      "language": "typescript",
+      "sizeLines": 59,
+      "fileCategory": "code"
+    },
+    {
+      "path": "apps/web/e2e/tables/table-tab-nav.spec.ts",
+      "language": "typescript",
+      "sizeLines": 43,
+      "fileCategory": "code"
+    },
+    {
+      "path": "apps/web/e2e/title/title-edit.spec.ts",
+      "language": "typescript",
+      "sizeLines": 55,
+      "fileCategory": "code"
+    },
+    {
+      "path": "apps/web/lib/autosave.ts",
+      "language": "typescript",
+      "sizeLines": 346,
+      "fileCategory": "code"
+    },
+    {
+      "path": "apps/web/lib/createBrowserImageUploader.ts",
+      "language": "typescript",
+      "sizeLines": 68,
+      "fileCategory": "code"
+    },
+    {
+      "path": "apps/web/lib/documentRegistry.ts",
+      "language": "typescript",
+      "sizeLines": 149,
+      "fileCategory": "code"
+    },
+    {
+      "path": "apps/web/lib/inviteAccess.ts",
+      "language": "typescript",
+      "sizeLines": 193,
+      "fileCategory": "code"
+    },
+    {
+      "path": "apps/web/lib/realtimeCollaboration.ts",
+      "language": "typescript",
+      "sizeLines": 535,
+      "fileCategory": "code"
+    },
+    {
+      "path": "apps/web/next-env.d.ts",
+      "language": "typescript",
+      "sizeLines": 5,
+      "fileCategory": "code"
+    },
+    {
+      "path": "apps/web/next.config.mjs",
+      "language": "javascript",
+      "sizeLines": 29,
+      "fileCategory": "code"
+    },
+    {
+      "path": "apps/web/package.json",
+      "language": "json",
+      "sizeLines": 24,
+      "fileCategory": "config"
+    },
+    {
+      "path": "apps/web/tsconfig.json",
+      "language": "json",
+      "sizeLines": 28,
+      "fileCategory": "config"
+    },
+    {
+      "path": "CLAUDE.md",
+      "language": "markdown",
+      "sizeLines": 123,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "CODEOWNERS",
+      "language": "unknown",
+      "sizeLines": 72,
+      "fileCategory": "code"
+    },
+    {
+      "path": "CONTINUITY.md",
+      "language": "markdown",
+      "sizeLines": 231,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "DEPLOYMENT.md",
+      "language": "markdown",
+      "sizeLines": 96,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "docs/reviews/bead-34-invite-access-architecture-review.md",
+      "language": "markdown",
+      "sizeLines": 152,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "FEATURE_AUDIT/apply-audit.mjs",
+      "language": "javascript",
+      "sizeLines": 85,
+      "fileCategory": "code"
+    },
+    {
+      "path": "FEATURE_AUDIT/apply-fixes.mjs",
+      "language": "javascript",
+      "sizeLines": 59,
+      "fileCategory": "code"
+    },
+    {
+      "path": "FEATURE_AUDIT/build-csv.mjs",
+      "language": "javascript",
+      "sizeLines": 86,
+      "fileCategory": "code"
+    },
+    {
+      "path": "FEATURE_AUDIT/DEFERRED.md",
+      "language": "markdown",
+      "sizeLines": 32,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "FEATURE_AUDIT/ERRORS.md",
+      "language": "markdown",
+      "sizeLines": 319,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "FEATURE_AUDIT/PLAN.md",
+      "language": "markdown",
+      "sizeLines": 84,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "FEATURE_AUDIT/PROGRESS.md",
+      "language": "markdown",
+      "sizeLines": 19,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "FEATURE_AUDIT/REVIEW.md",
+      "language": "markdown",
+      "sizeLines": 31,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "FEATURE_AUDIT/STORIES_SUMMARY.md",
+      "language": "markdown",
+      "sizeLines": 44,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "FEATURE_AUDIT/STORIES.csv",
+      "language": "csv",
+      "sizeLines": 202,
+      "fileCategory": "data"
+    },
+    {
+      "path": "HANDOFF.md",
+      "language": "markdown",
+      "sizeLines": 191,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "handoff/beads.jsonl",
+      "language": "jsonl",
+      "sizeLines": 43,
+      "fileCategory": "code"
+    },
+    {
+      "path": "handoff/beads.schema.json",
+      "language": "json",
+      "sizeLines": 40,
+      "fileCategory": "config"
+    },
+    {
+      "path": "handoff/release-audit-2026-05-16.md",
+      "language": "markdown",
+      "sizeLines": 55,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "Makefile",
+      "language": "makefile",
+      "sizeLines": 61,
+      "fileCategory": "infra"
+    },
+    {
+      "path": "MISTAKES.md",
+      "language": "markdown",
+      "sizeLines": 12,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "package.json",
+      "language": "json",
+      "sizeLines": 33,
+      "fileCategory": "config"
+    },
+    {
+      "path": "packages/ai/package.json",
+      "language": "json",
+      "sizeLines": 10,
+      "fileCategory": "config"
+    },
+    {
+      "path": "packages/ai/src/index.ts",
+      "language": "typescript",
+      "sizeLines": 220,
+      "fileCategory": "code"
+    },
+    {
+      "path": "packages/ai/tsconfig.json",
+      "language": "json",
+      "sizeLines": 11,
+      "fileCategory": "config"
+    },
+    {
+      "path": "packages/authorship/package.json",
+      "language": "json",
+      "sizeLines": 10,
+      "fileCategory": "config"
+    },
+    {
+      "path": "packages/authorship/src/index.ts",
+      "language": "typescript",
+      "sizeLines": 166,
+      "fileCategory": "code"
+    },
+    {
+      "path": "packages/authorship/tsconfig.json",
+      "language": "json",
+      "sizeLines": 11,
+      "fileCategory": "config"
+    },
+    {
+      "path": "packages/collab-service/package.json",
+      "language": "json",
+      "sizeLines": 10,
+      "fileCategory": "config"
+    },
+    {
+      "path": "packages/collab-service/src/index.ts",
+      "language": "typescript",
+      "sizeLines": 176,
+      "fileCategory": "code"
+    },
+    {
+      "path": "packages/collab-service/tsconfig.json",
+      "language": "json",
+      "sizeLines": 11,
+      "fileCategory": "config"
+    },
+    {
+      "path": "packages/doc-chat/package.json",
+      "language": "json",
+      "sizeLines": 10,
+      "fileCategory": "config"
+    },
+    {
+      "path": "packages/doc-chat/src/index.ts",
+      "language": "typescript",
+      "sizeLines": 201,
+      "fileCategory": "code"
+    },
+    {
+      "path": "packages/doc-chat/tsconfig.json",
+      "language": "json",
+      "sizeLines": 11,
+      "fileCategory": "config"
+    },
+    {
+      "path": "packages/editor-core/package.json",
+      "language": "json",
+      "sizeLines": 43,
+      "fileCategory": "config"
+    },
+    {
+      "path": "packages/editor-core/src/commands.ts",
+      "language": "typescript",
+      "sizeLines": 132,
+      "fileCategory": "code"
+    },
+    {
+      "path": "packages/editor-core/src/extensions/chip.ts",
+      "language": "typescript",
+      "sizeLines": 460,
+      "fileCategory": "code"
+    },
+    {
+      "path": "packages/editor-core/src/extensions/heading.ts",
+      "language": "typescript",
+      "sizeLines": 22,
+      "fileCategory": "code"
+    },
+    {
+      "path": "packages/editor-core/src/extensions/image.ts",
+      "language": "typescript",
+      "sizeLines": 769,
+      "fileCategory": "code"
+    },
+    {
+      "path": "packages/editor-core/src/extensions/table/index.ts",
+      "language": "typescript",
+      "sizeLines": 710,
+      "fileCategory": "code"
+    },
+    {
+      "path": "packages/editor-core/src/index.ts",
+      "language": "typescript",
+      "sizeLines": 48,
+      "fileCategory": "code"
+    },
+    {
+      "path": "packages/editor-core/src/markdown/index.ts",
+      "language": "typescript",
+      "sizeLines": 654,
+      "fileCategory": "code"
+    },
+    {
+      "path": "packages/editor-core/src/persistence/outline-persistence.ts",
+      "language": "typescript",
+      "sizeLines": 48,
+      "fileCategory": "code"
+    },
+    {
+      "path": "packages/editor-core/src/plugins/heading-id.ts",
+      "language": "typescript",
+      "sizeLines": 38,
+      "fileCategory": "code"
+    },
+    {
+      "path": "packages/editor-core/src/plugins/outline.ts",
+      "language": "typescript",
+      "sizeLines": 367,
+      "fileCategory": "code"
+    },
+    {
+      "path": "packages/editor-core/src/schema/ai.ts",
+      "language": "typescript",
+      "sizeLines": 22,
+      "fileCategory": "code"
+    },
+    {
+      "path": "packages/editor-core/src/schema/base.ts",
+      "language": "typescript",
+      "sizeLines": 206,
+      "fileCategory": "code"
+    },
+    {
+      "path": "packages/editor-core/src/schema/chips.ts",
+      "language": "typescript",
+      "sizeLines": 27,
+      "fileCategory": "code"
+    },
+    {
+      "path": "packages/editor-core/src/schema/index.ts",
+      "language": "typescript",
+      "sizeLines": 40,
+      "fileCategory": "code"
+    },
+    {
+      "path": "packages/editor-core/src/schema/mentions.ts",
+      "language": "typescript",
+      "sizeLines": 78,
+      "fileCategory": "code"
+    },
+    {
+      "path": "packages/editor-core/src/schema/suggest.ts",
+      "language": "typescript",
+      "sizeLines": 20,
+      "fileCategory": "code"
+    },
+    {
+      "path": "packages/editor-core/src/table/commands.ts",
+      "language": "typescript",
+      "sizeLines": 131,
+      "fileCategory": "code"
+    },
+    {
+      "path": "packages/editor-core/src/table/helpers.ts",
+      "language": "typescript",
+      "sizeLines": 64,
+      "fileCategory": "code"
+    },
+    {
+      "path": "packages/editor-core/src/table/interop.ts",
+      "language": "typescript",
+      "sizeLines": 170,
+      "fileCategory": "code"
+    },
+    {
+      "path": "packages/editor-core/src/table/types.ts",
+      "language": "typescript",
+      "sizeLines": 30,
+      "fileCategory": "code"
+    },
+    {
+      "path": "packages/editor-core/src/table/utils.ts",
+      "language": "typescript",
+      "sizeLines": 123,
+      "fileCategory": "code"
+    },
+    {
+      "path": "packages/editor-core/src/toolbar.ts",
+      "language": "typescript",
+      "sizeLines": 68,
+      "fileCategory": "code"
+    },
+    {
+      "path": "packages/editor-core/tsconfig.json",
+      "language": "json",
+      "sizeLines": 11,
+      "fileCategory": "config"
+    },
+    {
+      "path": "packages/history/package.json",
+      "language": "json",
+      "sizeLines": 10,
+      "fileCategory": "config"
+    },
+    {
+      "path": "packages/history/src/index.ts",
+      "language": "typescript",
+      "sizeLines": 510,
+      "fileCategory": "code"
+    },
+    {
+      "path": "packages/history/tsconfig.json",
+      "language": "json",
+      "sizeLines": 11,
+      "fileCategory": "config"
+    },
+    {
+      "path": "packages/infra-scripts/package.json",
+      "language": "json",
+      "sizeLines": 10,
+      "fileCategory": "config"
+    },
+    {
+      "path": "packages/infra-scripts/src/index.ts",
+      "language": "typescript",
+      "sizeLines": 13,
+      "fileCategory": "code"
+    },
+    {
+      "path": "packages/infra-scripts/tsconfig.json",
+      "language": "json",
+      "sizeLines": 11,
+      "fileCategory": "config"
+    },
+    {
+      "path": "packages/insight-router/package.json",
+      "language": "json",
+      "sizeLines": 10,
+      "fileCategory": "config"
+    },
+    {
+      "path": "packages/insight-router/src/index.ts",
+      "language": "typescript",
+      "sizeLines": 521,
+      "fileCategory": "code"
+    },
+    {
+      "path": "packages/insight-router/tsconfig.json",
+      "language": "json",
+      "sizeLines": 11,
+      "fileCategory": "config"
+    },
+    {
+      "path": "packages/mentions/package.json",
+      "language": "json",
+      "sizeLines": 10,
+      "fileCategory": "config"
+    },
+    {
+      "path": "packages/mentions/src/index.ts",
+      "language": "typescript",
+      "sizeLines": 190,
+      "fileCategory": "code"
+    },
+    {
+      "path": "packages/mentions/tsconfig.json",
+      "language": "json",
+      "sizeLines": 11,
+      "fileCategory": "config"
+    },
+    {
+      "path": "packages/observability/package.json",
+      "language": "json",
+      "sizeLines": 10,
+      "fileCategory": "config"
+    },
+    {
+      "path": "packages/observability/src/index.ts",
+      "language": "typescript",
+      "sizeLines": 43,
+      "fileCategory": "code"
+    },
+    {
+      "path": "packages/observability/tsconfig.json",
+      "language": "json",
+      "sizeLines": 11,
+      "fileCategory": "config"
+    },
+    {
+      "path": "packages/rbac/package.json",
+      "language": "json",
+      "sizeLines": 10,
+      "fileCategory": "config"
+    },
+    {
+      "path": "packages/rbac/src/index.ts",
+      "language": "typescript",
+      "sizeLines": 148,
+      "fileCategory": "code"
+    },
+    {
+      "path": "packages/rbac/tsconfig.json",
+      "language": "json",
+      "sizeLines": 11,
+      "fileCategory": "config"
+    },
+    {
+      "path": "packages/realtime-worker/package.json",
+      "language": "json",
+      "sizeLines": 17,
+      "fileCategory": "config"
+    },
+    {
+      "path": "packages/realtime-worker/src/access.ts",
+      "language": "typescript",
+      "sizeLines": 328,
+      "fileCategory": "code"
+    },
+    {
+      "path": "packages/realtime-worker/src/index.ts",
+      "language": "typescript",
+      "sizeLines": 184,
+      "fileCategory": "code"
+    },
+    {
+      "path": "packages/realtime-worker/src/persistence.ts",
+      "language": "typescript",
+      "sizeLines": 67,
+      "fileCategory": "code"
+    },
+    {
+      "path": "packages/realtime-worker/src/room.ts",
+      "language": "typescript",
+      "sizeLines": 621,
+      "fileCategory": "code"
+    },
+    {
+      "path": "packages/realtime-worker/src/routing.ts",
+      "language": "typescript",
+      "sizeLines": 61,
+      "fileCategory": "code"
+    },
+    {
+      "path": "packages/realtime-worker/src/worker-configuration.d.ts",
+      "language": "typescript",
+      "sizeLines": 14453,
+      "fileCategory": "code"
+    },
+    {
+      "path": "packages/realtime-worker/tsconfig.json",
+      "language": "json",
+      "sizeLines": 9,
+      "fileCategory": "config"
+    },
+    {
+      "path": "packages/realtime-worker/wrangler.jsonc",
+      "language": "jsonc",
+      "sizeLines": 25,
+      "fileCategory": "config"
+    },
+    {
+      "path": "packages/share/package.json",
+      "language": "json",
+      "sizeLines": 10,
+      "fileCategory": "config"
+    },
+    {
+      "path": "packages/share/src/index.ts",
+      "language": "typescript",
+      "sizeLines": 338,
+      "fileCategory": "code"
+    },
+    {
+      "path": "packages/share/tsconfig.json",
+      "language": "json",
+      "sizeLines": 11,
+      "fileCategory": "config"
+    },
+    {
+      "path": "packages/storage/package.json",
+      "language": "json",
+      "sizeLines": 10,
+      "fileCategory": "config"
+    },
+    {
+      "path": "packages/storage/src/index.ts",
+      "language": "typescript",
+      "sizeLines": 51,
+      "fileCategory": "code"
+    },
+    {
+      "path": "packages/storage/tsconfig.json",
+      "language": "json",
+      "sizeLines": 11,
+      "fileCategory": "config"
+    },
+    {
+      "path": "packages/tables-media/package.json",
+      "language": "json",
+      "sizeLines": 10,
+      "fileCategory": "config"
+    },
+    {
+      "path": "packages/tables-media/src/index.ts",
+      "language": "typescript",
+      "sizeLines": 39,
+      "fileCategory": "code"
+    },
+    {
+      "path": "packages/tables-media/tsconfig.json",
+      "language": "json",
+      "sizeLines": 11,
+      "fileCategory": "config"
+    },
+    {
+      "path": "packages/testing/fixtures/index.ts",
+      "language": "typescript",
+      "sizeLines": 147,
+      "fileCategory": "code"
+    },
+    {
+      "path": "packages/testing/fixtures/markdown/legal-contract.md",
+      "language": "markdown",
+      "sizeLines": 95,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "packages/testing/package.json",
+      "language": "json",
+      "sizeLines": 15,
+      "fileCategory": "config"
+    },
+    {
+      "path": "packages/testing/src/index.ts",
+      "language": "typescript",
+      "sizeLines": 9,
+      "fileCategory": "code"
+    },
+    {
+      "path": "packages/testing/tsconfig.json",
+      "language": "json",
+      "sizeLines": 12,
+      "fileCategory": "config"
+    },
+    {
+      "path": "packages/testing/unit/ai/ai-fallback.test.ts",
+      "language": "typescript",
+      "sizeLines": 42,
+      "fileCategory": "code"
+    },
+    {
+      "path": "packages/testing/unit/ai/ai-invalid-reject.test.ts",
+      "language": "typescript",
+      "sizeLines": 43,
+      "fileCategory": "code"
+    },
+    {
+      "path": "packages/testing/unit/ai/ai-scope-selection.test.ts",
+      "language": "typescript",
+      "sizeLines": 55,
+      "fileCategory": "code"
+    },
+    {
+      "path": "packages/testing/unit/authorship/blame-interval-map.test.ts",
+      "language": "typescript",
+      "sizeLines": 63,
+      "fileCategory": "code"
+    },
+    {
+      "path": "packages/testing/unit/authorship/blame-property.test.ts",
+      "language": "typescript",
+      "sizeLines": 56,
+      "fileCategory": "code"
+    },
+    {
+      "path": "packages/testing/unit/autosave/autosave-latency.test.ts",
+      "language": "typescript",
+      "sizeLines": 155,
+      "fileCategory": "code"
+    },
+    {
+      "path": "packages/testing/unit/collab-service/offline-room.test.ts",
+      "language": "typescript",
+      "sizeLines": 52,
+      "fileCategory": "code"
+    },
+    {
+      "path": "packages/testing/unit/diff/diff-deterministic.test.ts",
+      "language": "typescript",
+      "sizeLines": 48,
+      "fileCategory": "code"
+    },
+    {
+      "path": "packages/testing/unit/doc-chat/thread-store.test.ts",
+      "language": "typescript",
+      "sizeLines": 75,
+      "fileCategory": "code"
+    },
+    {
+      "path": "packages/testing/unit/editor/image-extension.test.ts",
+      "language": "typescript",
+      "sizeLines": 109,
+      "fileCategory": "code"
+    },
+    {
+      "path": "packages/testing/unit/editor/markdown-roundtrip.test.ts",
+      "language": "typescript",
+      "sizeLines": 42,
+      "fileCategory": "code"
+    },
+    {
+      "path": "packages/testing/unit/editor/outline-plugin.test.ts",
+      "language": "typescript",
+      "sizeLines": 89,
+      "fileCategory": "code"
+    },
+    {
+      "path": "packages/testing/unit/editor/schema-validity.test.ts",
+      "language": "typescript",
+      "sizeLines": 74,
+      "fileCategory": "code"
+    },
+    {
+      "path": "packages/testing/unit/editor/table-behavior.test.ts",
+      "language": "typescript",
+      "sizeLines": 175,
+      "fileCategory": "code"
+    },
+    {
+      "path": "packages/testing/unit/fixtures/loader.test.ts",
+      "language": "typescript",
+      "sizeLines": 49,
+      "fileCategory": "code"
+    },
+    {
+      "path": "packages/testing/unit/history/history-store.test.ts",
+      "language": "typescript",
+      "sizeLines": 136,
+      "fileCategory": "code"
+    },
+    {
+      "path": "packages/testing/unit/ime/ime-autosave.test.ts",
+      "language": "typescript",
+      "sizeLines": 42,
+      "fileCategory": "code"
+    },
+    {
+      "path": "packages/testing/unit/ime/ime-composition.test.ts",
+      "language": "typescript",
+      "sizeLines": 49,
+      "fileCategory": "code"
+    },
+    {
+      "path": "packages/testing/unit/insight-router/router.test.ts",
+      "language": "typescript",
+      "sizeLines": 166,
+      "fileCategory": "code"
+    },
+    {
+      "path": "packages/testing/unit/mentions/mention-date-locale.test.ts",
+      "language": "typescript",
+      "sizeLines": 18,
+      "fileCategory": "code"
+    },
+    {
+      "path": "packages/testing/unit/mentions/mention-date-parse.test.ts",
+      "language": "typescript",
+      "sizeLines": 18,
+      "fileCategory": "code"
+    },
+    {
+      "path": "packages/testing/unit/qa/multi-client-converge.test.ts",
+      "language": "typescript",
+      "sizeLines": 41,
+      "fileCategory": "code"
+    },
+    {
+      "path": "packages/testing/unit/qa/selection-stability.test.ts",
+      "language": "typescript",
+      "sizeLines": 49,
+      "fileCategory": "code"
+    },
+    {
+      "path": "packages/testing/unit/realtime-runtime/realtime-access-boundary.test.ts",
+      "language": "typescript",
+      "sizeLines": 292,
+      "fileCategory": "code"
+    },
+    {
+      "path": "packages/testing/unit/realtime-runtime/realtime-persistence.test.ts",
+      "language": "typescript",
+      "sizeLines": 64,
+      "fileCategory": "code"
+    },
+    {
+      "path": "packages/testing/unit/realtime-runtime/realtime-runtime-skeleton.test.ts",
+      "language": "typescript",
+      "sizeLines": 85,
+      "fileCategory": "code"
+    },
+    {
+      "path": "packages/testing/unit/share/share-rbac.test.ts",
+      "language": "typescript",
+      "sizeLines": 119,
+      "fileCategory": "code"
+    },
+    {
+      "path": "packages/testing/unit/types/canonicalize.test.ts",
+      "language": "typescript",
+      "sizeLines": 120,
+      "fileCategory": "code"
+    },
+    {
+      "path": "packages/types/package.json",
+      "language": "json",
+      "sizeLines": 10,
+      "fileCategory": "config"
+    },
+    {
+      "path": "packages/types/src/index.ts",
+      "language": "typescript",
+      "sizeLines": 528,
+      "fileCategory": "code"
+    },
+    {
+      "path": "packages/types/tsconfig.json",
+      "language": "json",
+      "sizeLines": 11,
+      "fileCategory": "config"
+    },
+    {
+      "path": "packages/ui/package.json",
+      "language": "json",
+      "sizeLines": 16,
+      "fileCategory": "config"
+    },
+    {
+      "path": "packages/ui/src/index.ts",
+      "language": "typescript",
+      "sizeLines": 2,
+      "fileCategory": "code"
+    },
+    {
+      "path": "packages/ui/src/ToolbarButton.tsx",
+      "language": "typescript",
+      "sizeLines": 64,
+      "fileCategory": "code"
+    },
+    {
+      "path": "packages/ui/src/ToolbarGroup.tsx",
+      "language": "typescript",
+      "sizeLines": 20,
+      "fileCategory": "code"
+    },
+    {
+      "path": "packages/ui/tsconfig.json",
+      "language": "json",
+      "sizeLines": 11,
+      "fileCategory": "config"
+    },
+    {
+      "path": "plan.md",
+      "language": "markdown",
+      "sizeLines": 328,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "playwright.config.ts",
+      "language": "typescript",
+      "sizeLines": 70,
+      "fileCategory": "code"
+    },
+    {
+      "path": "pnpm-workspace.yaml",
+      "language": "yaml",
+      "sizeLines": 3,
+      "fileCategory": "config"
+    },
+    {
+      "path": "prettier.config.cjs",
+      "language": "javascript",
+      "sizeLines": 7,
+      "fileCategory": "code"
+    },
+    {
+      "path": "prompts/README.md",
+      "language": "markdown",
+      "sizeLines": 26,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "QUIP_DESIGN_NOTES.md",
+      "language": "markdown",
+      "sizeLines": 255,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "REGRESSIONS.md",
+      "language": "markdown",
+      "sizeLines": 66,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "RELEASE_NOTES.md",
+      "language": "markdown",
+      "sizeLines": 42,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "REPO_MAP.md",
+      "language": "markdown",
+      "sizeLines": 42,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "scripts/lash-web-start.sh",
+      "language": "shell",
+      "sizeLines": 88,
+      "fileCategory": "script"
+    },
+    {
+      "path": "scripts/lash-web-status.sh",
+      "language": "shell",
+      "sizeLines": 35,
+      "fileCategory": "script"
+    },
+    {
+      "path": "scripts/lash-web-stop.sh",
+      "language": "shell",
+      "sizeLines": 41,
+      "fileCategory": "script"
+    },
+    {
+      "path": "scripts/strip-trailing-whitespace.mjs",
+      "language": "javascript",
+      "sizeLines": 17,
+      "fileCategory": "code"
+    },
+    {
+      "path": "scripts/verify-realtime-runtime.mjs",
+      "language": "javascript",
+      "sizeLines": 162,
+      "fileCategory": "code"
+    },
+    {
+      "path": "scripts/visual-snap.mjs",
+      "language": "javascript",
+      "sizeLines": 255,
+      "fileCategory": "code"
+    },
+    {
+      "path": "step-00-repo-map-and-acceptance-gates.md",
+      "language": "markdown",
+      "sizeLines": 49,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "step-01-monorepo-scaffolding.md",
+      "language": "markdown",
+      "sizeLines": 46,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "step-02-editor-schema-v1-and-toolbar.md",
+      "language": "markdown",
+      "sizeLines": 49,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "step-03-outline-and-collapse-persistence.md",
+      "language": "markdown",
+      "sizeLines": 45,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "step-04-markdown-import-export.md",
+      "language": "markdown",
+      "sizeLines": 47,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "step-05-images.md",
+      "language": "markdown",
+      "sizeLines": 47,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "step-06-tables-mvp.md",
+      "language": "markdown",
+      "sizeLines": 48,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "step-07-table-perf-harness.md",
+      "language": "markdown",
+      "sizeLines": 45,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "step-08-chips-from-internal-links.md",
+      "language": "markdown",
+      "sizeLines": 44,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "step-09-mentions-users-groups-privacy.md",
+      "language": "markdown",
+      "sizeLines": 47,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "step-10-natural-date-mentions.md",
+      "language": "markdown",
+      "sizeLines": 45,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "step-11-autosave-and-focus-mode.md",
+      "language": "markdown",
+      "sizeLines": 46,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "step-12-collab-with-yjs.md",
+      "language": "markdown",
+      "sizeLines": 47,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "step-13-history-log-snapshots-restore.md",
+      "language": "markdown",
+      "sizeLines": 46,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "step-14-deterministic-diff.md",
+      "language": "markdown",
+      "sizeLines": 48,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "step-15-suggest-mode-and-filtered-diffs.md",
+      "language": "markdown",
+      "sizeLines": 47,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "step-16-authorship-blame.md",
+      "language": "markdown",
+      "sizeLines": 47,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "step-17-doc-chat-anchored-diff-aware.md",
+      "language": "markdown",
+      "sizeLines": 48,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "step-18-share-links-rbac-redaction.md",
+      "language": "markdown",
+      "sizeLines": 48,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "step-19-ai-edit-agent-patch-not-paste.md",
+      "language": "markdown",
+      "sizeLines": 47,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "step-20-ai-chat-citations.md",
+      "language": "markdown",
+      "sizeLines": 45,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "step-21-accessibility-i18n-ime-bidi-sr.md",
+      "language": "markdown",
+      "sizeLines": 48,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "step-22-observability-slos-ci-cross-browser.md",
+      "language": "markdown",
+      "sizeLines": 49,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "tsconfig.base.json",
+      "language": "json",
+      "sizeLines": 39,
+      "fileCategory": "config"
+    },
+    {
+      "path": "tsconfig.json",
+      "language": "json",
+      "sizeLines": 12,
+      "fileCategory": "config"
+    },
+    {
+      "path": "vitest.config.ts",
+      "language": "typescript",
+      "sizeLines": 28,
+      "fileCategory": "code"
+    }
+  ],
+  "totalFiles": 311,
+  "filteredByIgnore": 0,
+  "estimatedComplexity": "large",
+  "stats": {
+    "filesScanned": 311,
+    "byCategory": {
+      "docs": 49,
+      "infra": 2,
+      "code": 211,
+      "markup": 1,
+      "config": 44,
+      "data": 1,
+      "script": 3
+    },
+    "byLanguage": {
+      "markdown": 49,
+      "yaml": 2,
+      "unknown": 3,
+      "typescript": 199,
+      "css": 1,
+      "javascript": 8,
+      "json": 42,
+      "csv": 1,
+      "jsonl": 1,
+      "makefile": 1,
+      "jsonc": 1,
+      "shell": 3
+    }
+  },
+  "importMap": {
+    ".github/pull_request_template.md": [],
+    ".github/workflows/ci.yml": [],
+    ".kiro/steering/dev-server-rules.md": [],
+    ".prettierignore": [],
+    ".understand-anything/.understandignore": [],
+    "ACCEPTANCE_GATES.md": [],
+    "agents.md": [],
+    "apps/web/app/doc/[id]/page.tsx": ["apps/web/lib/documentRegistry.ts"],
+    "apps/web/app/globals.css": [],
+    "apps/web/app/layout.tsx": ["apps/web/app/globals.css"],
+    "apps/web/app/page.tsx": ["apps/web/lib/documentRegistry.ts"],
+    "apps/web/components/editor/EditorWorkspace.tsx": [
+      "apps/web/components/editor/panels/AIPanel.tsx",
+      "apps/web/components/editor/panels/ChatPanel.tsx",
+      "apps/web/components/editor/panels/EditorToolbar.tsx",
+      "apps/web/components/editor/panels/HistoryPanel.tsx",
+      "apps/web/components/editor/panels/MarkdownIO.tsx",
+      "apps/web/components/editor/panels/MentionPanel.tsx",
+      "apps/web/components/editor/panels/OfflinePanel.tsx",
+      "apps/web/components/editor/panels/SharePanel.tsx",
+      "apps/web/components/editor/panels/TableCellPanel.tsx",
+      "apps/web/components/shell/AppShell.tsx",
+      "apps/web/components/shell/Icon.tsx",
+      "apps/web/components/shell/RightRail.tsx",
+      "apps/web/components/shell/Sidebar.tsx",
+      "apps/web/components/shell/TopBar.tsx",
+      "apps/web/lib/createBrowserImageUploader.ts",
+      "apps/web/lib/documentRegistry.ts",
+      "apps/web/lib/inviteAccess.ts",
+      "apps/web/lib/realtimeCollaboration.ts"
+    ],
+    "apps/web/components/editor/panels/AIPanel.tsx": [],
+    "apps/web/components/editor/panels/AutosaveIndicator.tsx": ["apps/web/lib/autosave.ts"],
+    "apps/web/components/editor/panels/ChatPanel.tsx": [],
+    "apps/web/components/editor/panels/EditorToolbar.tsx": ["apps/web/components/shell/Icon.tsx"],
+    "apps/web/components/editor/panels/FocusModeToggle.tsx": [],
+    "apps/web/components/editor/panels/HistoryPanel.tsx": [],
+    "apps/web/components/editor/panels/MarkdownIO.tsx": ["apps/web/components/shell/Icon.tsx"],
+    "apps/web/components/editor/panels/MentionPanel.tsx": [],
+    "apps/web/components/editor/panels/OfflinePanel.tsx": [],
+    "apps/web/components/editor/panels/OutlinePanel.tsx": [],
+    "apps/web/components/editor/panels/SharePanel.tsx": ["apps/web/lib/inviteAccess.ts"],
+    "apps/web/components/editor/panels/TableCellPanel.tsx": [],
+    "apps/web/components/shell/AppShell.tsx": [],
+    "apps/web/components/shell/Avatar.tsx": [],
+    "apps/web/components/shell/Icon.tsx": [],
+    "apps/web/components/shell/RightRail.tsx": ["apps/web/components/shell/Icon.tsx"],
+    "apps/web/components/shell/Sidebar.tsx": [
+      "apps/web/components/editor/panels/OutlinePanel.tsx",
+      "apps/web/components/shell/Icon.tsx"
+    ],
+    "apps/web/components/shell/TopBar.tsx": [
+      "apps/web/components/editor/panels/AutosaveIndicator.tsx",
+      "apps/web/components/shell/Avatar.tsx",
+      "apps/web/components/shell/Icon.tsx"
+    ],
+    "apps/web/e2e/a11y/hover-on-touch.spec.ts": [],
+    "apps/web/e2e/a11y/print-stylesheet.spec.ts": [],
+    "apps/web/e2e/a11y/reduced-motion.spec.ts": [],
+    "apps/web/e2e/a11y/sr-diff-announce.spec.ts": [],
+    "apps/web/e2e/a11y/sr-headings.spec.ts": [],
+    "apps/web/e2e/a11y/sr-thread-nav.spec.ts": [],
+    "apps/web/e2e/a11y/touch-targets.spec.ts": [],
+    "apps/web/e2e/a11y/viewport-meta.spec.ts": [],
+    "apps/web/e2e/ai/ai-chat-citation.spec.ts": [],
+    "apps/web/e2e/ai/ai-citation-jump.spec.ts": [],
+    "apps/web/e2e/ai/ai-labeling.spec.ts": [],
+    "apps/web/e2e/ai/ai-patch-apply.spec.ts": [],
+    "apps/web/e2e/ai/ai-rationale.spec.ts": [],
+    "apps/web/e2e/ai/ai-scope-global-confirm.spec.ts": [],
+    "apps/web/e2e/authorship/blame-filter.spec.ts": [],
+    "apps/web/e2e/authorship/blame-gutter.spec.ts": [],
+    "apps/web/e2e/authorship/blame-hover.spec.ts": [],
+    "apps/web/e2e/autosave/autosave-indicator.spec.ts": [],
+    "apps/web/e2e/checklists/checklist-nesting.spec.ts": [],
+    "apps/web/e2e/checklists/checklist-toggle.spec.ts": [],
+    "apps/web/e2e/chips/chip-autoconvert.spec.ts": [],
+    "apps/web/e2e/chips/chip-hover.spec.ts": [],
+    "apps/web/e2e/chips/chip-revert.spec.ts": [],
+    "apps/web/e2e/cross-browser/cb-chrome.spec.ts": ["apps/web/e2e/cross-browser/helpers.ts"],
+    "apps/web/e2e/cross-browser/cb-edge.spec.ts": ["apps/web/e2e/cross-browser/helpers.ts"],
+    "apps/web/e2e/cross-browser/cb-firefox.spec.ts": ["apps/web/e2e/cross-browser/helpers.ts"],
+    "apps/web/e2e/cross-browser/cb-ipad.spec.ts": ["apps/web/e2e/cross-browser/helpers.ts"],
+    "apps/web/e2e/cross-browser/cb-mobile-chrome.spec.ts": [
+      "apps/web/e2e/cross-browser/helpers.ts"
+    ],
+    "apps/web/e2e/cross-browser/cb-mobile-safari.spec.ts": [
+      "apps/web/e2e/cross-browser/helpers.ts"
+    ],
+    "apps/web/e2e/cross-browser/cb-safari.spec.ts": ["apps/web/e2e/cross-browser/helpers.ts"],
+    "apps/web/e2e/cross-browser/helpers.ts": [],
+    "apps/web/e2e/diff/diff-filter-author.spec.ts": [],
+    "apps/web/e2e/diff/diff-filter-time.spec.ts": [],
+    "apps/web/e2e/diff/diff-share-link.spec.ts": [],
+    "apps/web/e2e/doc-chat/chat-anchor-map.spec.ts": [],
+    "apps/web/e2e/doc-chat/chat-current-context.spec.ts": [],
+    "apps/web/e2e/doc-chat/chat-durable.spec.ts": [],
+    "apps/web/e2e/doc-chat/chat-filter-ai.spec.ts": [],
+    "apps/web/e2e/doc-chat/chat-filter-author.spec.ts": [],
+    "apps/web/e2e/doc-chat/chat-history-context.spec.ts": [],
+    "apps/web/e2e/doc-chat/chat-orphan.spec.ts": [],
+    "apps/web/e2e/document-identity/document-identity.spec.ts": [],
+    "apps/web/e2e/focus-mode/focus-mode-a11y.spec.ts": [],
+    "apps/web/e2e/focus-mode/focus-mode-ui.spec.ts": [],
+    "apps/web/e2e/history/history-diff.spec.ts": [],
+    "apps/web/e2e/history/history-open.spec.ts": [],
+    "apps/web/e2e/history/history-restore.spec.ts": [],
+    "apps/web/e2e/markdown/fixtures/basic.md": [],
+    "apps/web/e2e/markdown/fixtures/table.md": [],
+    "apps/web/e2e/markdown/md-bold-italic-hotkeys.spec.ts": [],
+    "apps/web/e2e/markdown/md-h2-shorthand.spec.ts": [],
+    "apps/web/e2e/markdown/md-roundtrip-basic.spec.ts": [],
+    "apps/web/e2e/markdown/md-table-import.spec.ts": [],
+    "apps/web/e2e/media/image-clipboard.spec.ts": [],
+    "apps/web/e2e/media/image-dnd.spec.ts": [],
+    "apps/web/e2e/media/image-resize.spec.ts": [],
+    "apps/web/e2e/media/image-retry.spec.ts": [],
+    "apps/web/e2e/mentions/mention-anonymized.spec.ts": [],
+    "apps/web/e2e/mentions/mention-insert.spec.ts": [],
+    "apps/web/e2e/mentions/mention-privacy.spec.ts": [],
+    "apps/web/e2e/mentions/mention-rbac-hide.spec.ts": [],
+    "apps/web/e2e/mentions/mention-real-editor.spec.ts": [],
+    "apps/web/e2e/mentions/mention-suggest.spec.ts": [],
+    "apps/web/e2e/mobile/drawer-scroll-lock.spec.ts": [],
+    "apps/web/e2e/offline/offline-merge.spec.ts": [],
+    "apps/web/e2e/offline/offline-queue.spec.ts": [],
+    "apps/web/e2e/offline/presence-resume.spec.ts": [],
+    "apps/web/e2e/online-typing/collaboration-delight.spec.ts": [],
+    "apps/web/e2e/online-typing/online-typing-entry-gate.spec.ts": [],
+    "apps/web/e2e/outline/outline-caret-move.spec.ts": [],
+    "apps/web/e2e/outline/outline-collapse-basic.spec.ts": [],
+    "apps/web/e2e/outline/outline-persist.spec.ts": [],
+    "apps/web/e2e/performance/large-doc-typing.spec.ts": [],
+    "apps/web/e2e/performance/typing-latency.spec.ts": [],
+    "apps/web/e2e/privacy/chat-redact.spec.ts": [],
+    "apps/web/e2e/privacy/history-redact.spec.ts": [],
+    "apps/web/e2e/share/invite-access.spec.ts": [],
+    "apps/web/e2e/share/share-audit.spec.ts": [],
+    "apps/web/e2e/share/share-comment-scope.spec.ts": [],
+    "apps/web/e2e/share/share-edit-scope.spec.ts": [],
+    "apps/web/e2e/share/share-expiry.spec.ts": [],
+    "apps/web/e2e/share/share-suggest-scope.spec.ts": [],
+    "apps/web/e2e/sidebar/sidebar-regression.spec.ts": [],
+    "apps/web/e2e/smoke/home.spec.ts": [],
+    "apps/web/e2e/suggest-mode/suggest-accept.spec.ts": [],
+    "apps/web/e2e/suggest-mode/suggest-durable.spec.ts": [],
+    "apps/web/e2e/suggest-mode/suggest-reject.spec.ts": [],
+    "apps/web/e2e/suggest-mode/suggest-visuals.spec.ts": [],
+    "apps/web/e2e/tables/table-copy-out.spec.ts": [],
+    "apps/web/e2e/tables/table-enter-newline.spec.ts": [],
+    "apps/web/e2e/tables/table-paste-in.spec.ts": [],
+    "apps/web/e2e/tables/table-perf-100x20.spec.ts": [],
+    "apps/web/e2e/tables/table-select-open-close.spec.ts": [],
+    "apps/web/e2e/tables/table-status-cycle-kb.spec.ts": [],
+    "apps/web/e2e/tables/table-tab-nav.spec.ts": [],
+    "apps/web/e2e/title/title-edit.spec.ts": [],
+    "apps/web/lib/autosave.ts": [],
+    "apps/web/lib/createBrowserImageUploader.ts": [],
+    "apps/web/lib/documentRegistry.ts": [],
+    "apps/web/lib/inviteAccess.ts": [],
+    "apps/web/lib/realtimeCollaboration.ts": [],
+    "apps/web/next-env.d.ts": [],
+    "apps/web/next.config.mjs": [],
+    "apps/web/package.json": [],
+    "apps/web/tsconfig.json": [],
+    "CLAUDE.md": [],
+    "CODEOWNERS": [],
+    "CONTINUITY.md": [],
+    "DEPLOYMENT.md": [],
+    "docs/reviews/bead-34-invite-access-architecture-review.md": [],
+    "FEATURE_AUDIT/apply-audit.mjs": [],
+    "FEATURE_AUDIT/apply-fixes.mjs": [],
+    "FEATURE_AUDIT/build-csv.mjs": [],
+    "FEATURE_AUDIT/DEFERRED.md": [],
+    "FEATURE_AUDIT/ERRORS.md": [],
+    "FEATURE_AUDIT/PLAN.md": [],
+    "FEATURE_AUDIT/PROGRESS.md": [],
+    "FEATURE_AUDIT/REVIEW.md": [],
+    "FEATURE_AUDIT/STORIES_SUMMARY.md": [],
+    "FEATURE_AUDIT/STORIES.csv": [],
+    "HANDOFF.md": [],
+    "handoff/beads.jsonl": [],
+    "handoff/beads.schema.json": [],
+    "handoff/release-audit-2026-05-16.md": [],
+    "Makefile": [],
+    "MISTAKES.md": [],
+    "package.json": [],
+    "packages/ai/package.json": [],
+    "packages/ai/src/index.ts": [],
+    "packages/ai/tsconfig.json": [],
+    "packages/authorship/package.json": [],
+    "packages/authorship/src/index.ts": [],
+    "packages/authorship/tsconfig.json": [],
+    "packages/collab-service/package.json": [],
+    "packages/collab-service/src/index.ts": [],
+    "packages/collab-service/tsconfig.json": [],
+    "packages/doc-chat/package.json": [],
+    "packages/doc-chat/src/index.ts": [],
+    "packages/doc-chat/tsconfig.json": [],
+    "packages/editor-core/package.json": [],
+    "packages/editor-core/src/commands.ts": [
+      "packages/editor-core/src/extensions/table/index.ts",
+      "packages/editor-core/src/table/commands.ts"
+    ],
+    "packages/editor-core/src/extensions/chip.ts": [],
+    "packages/editor-core/src/extensions/heading.ts": [],
+    "packages/editor-core/src/extensions/image.ts": [],
+    "packages/editor-core/src/extensions/table/index.ts": [
+      "packages/editor-core/src/table/interop.ts",
+      "packages/editor-core/src/table/types.ts",
+      "packages/editor-core/src/table/utils.ts"
+    ],
+    "packages/editor-core/src/index.ts": [],
+    "packages/editor-core/src/markdown/index.ts": [],
+    "packages/editor-core/src/persistence/outline-persistence.ts": [
+      "packages/editor-core/src/plugins/outline.ts"
+    ],
+    "packages/editor-core/src/plugins/heading-id.ts": [],
+    "packages/editor-core/src/plugins/outline.ts": [
+      "packages/editor-core/src/plugins/heading-id.ts"
+    ],
+    "packages/editor-core/src/schema/ai.ts": [],
+    "packages/editor-core/src/schema/base.ts": [
+      "packages/editor-core/src/extensions/heading.ts",
+      "packages/editor-core/src/extensions/image.ts",
+      "packages/editor-core/src/extensions/table/index.ts",
+      "packages/editor-core/src/plugins/outline.ts"
+    ],
+    "packages/editor-core/src/schema/chips.ts": ["packages/editor-core/src/extensions/chip.ts"],
+    "packages/editor-core/src/schema/index.ts": [
+      "packages/editor-core/src/schema/ai.ts",
+      "packages/editor-core/src/schema/base.ts",
+      "packages/editor-core/src/schema/chips.ts",
+      "packages/editor-core/src/schema/mentions.ts",
+      "packages/editor-core/src/schema/suggest.ts"
+    ],
+    "packages/editor-core/src/schema/mentions.ts": [],
+    "packages/editor-core/src/schema/suggest.ts": [],
+    "packages/editor-core/src/table/commands.ts": [
+      "packages/editor-core/src/table/types.ts",
+      "packages/editor-core/src/table/utils.ts"
+    ],
+    "packages/editor-core/src/table/helpers.ts": [],
+    "packages/editor-core/src/table/interop.ts": [
+      "packages/editor-core/src/table/types.ts",
+      "packages/editor-core/src/table/utils.ts"
+    ],
+    "packages/editor-core/src/table/types.ts": [],
+    "packages/editor-core/src/table/utils.ts": ["packages/editor-core/src/table/types.ts"],
+    "packages/editor-core/src/toolbar.ts": ["packages/editor-core/src/commands.ts"],
+    "packages/editor-core/tsconfig.json": [],
+    "packages/history/package.json": [],
+    "packages/history/src/index.ts": [],
+    "packages/history/tsconfig.json": [],
+    "packages/infra-scripts/package.json": [],
+    "packages/infra-scripts/src/index.ts": [],
+    "packages/infra-scripts/tsconfig.json": [],
+    "packages/insight-router/package.json": [],
+    "packages/insight-router/src/index.ts": [],
+    "packages/insight-router/tsconfig.json": [],
+    "packages/mentions/package.json": [],
+    "packages/mentions/src/index.ts": [],
+    "packages/mentions/tsconfig.json": [],
+    "packages/observability/package.json": [],
+    "packages/observability/src/index.ts": [],
+    "packages/observability/tsconfig.json": [],
+    "packages/rbac/package.json": [],
+    "packages/rbac/src/index.ts": [],
+    "packages/rbac/tsconfig.json": [],
+    "packages/realtime-worker/package.json": [],
+    "packages/realtime-worker/src/access.ts": [],
+    "packages/realtime-worker/src/index.ts": [
+      "packages/realtime-worker/src/access.ts",
+      "packages/realtime-worker/src/room.ts",
+      "packages/realtime-worker/src/routing.ts"
+    ],
+    "packages/realtime-worker/src/persistence.ts": [],
+    "packages/realtime-worker/src/room.ts": [
+      "packages/realtime-worker/src/access.ts",
+      "packages/realtime-worker/src/persistence.ts",
+      "packages/realtime-worker/src/routing.ts"
+    ],
+    "packages/realtime-worker/src/routing.ts": [],
+    "packages/realtime-worker/src/worker-configuration.d.ts": [],
+    "packages/realtime-worker/tsconfig.json": [],
+    "packages/realtime-worker/wrangler.jsonc": [],
+    "packages/share/package.json": [],
+    "packages/share/src/index.ts": [],
+    "packages/share/tsconfig.json": [],
+    "packages/storage/package.json": [],
+    "packages/storage/src/index.ts": [],
+    "packages/storage/tsconfig.json": [],
+    "packages/tables-media/package.json": [],
+    "packages/tables-media/src/index.ts": [],
+    "packages/tables-media/tsconfig.json": [],
+    "packages/testing/fixtures/index.ts": [],
+    "packages/testing/fixtures/markdown/legal-contract.md": [],
+    "packages/testing/package.json": [],
+    "packages/testing/src/index.ts": [],
+    "packages/testing/tsconfig.json": [],
+    "packages/testing/unit/ai/ai-fallback.test.ts": [],
+    "packages/testing/unit/ai/ai-invalid-reject.test.ts": [],
+    "packages/testing/unit/ai/ai-scope-selection.test.ts": [],
+    "packages/testing/unit/authorship/blame-interval-map.test.ts": [],
+    "packages/testing/unit/authorship/blame-property.test.ts": [],
+    "packages/testing/unit/autosave/autosave-latency.test.ts": ["apps/web/lib/autosave.ts"],
+    "packages/testing/unit/collab-service/offline-room.test.ts": [],
+    "packages/testing/unit/diff/diff-deterministic.test.ts": [],
+    "packages/testing/unit/doc-chat/thread-store.test.ts": [],
+    "packages/testing/unit/editor/image-extension.test.ts": [],
+    "packages/testing/unit/editor/markdown-roundtrip.test.ts": [],
+    "packages/testing/unit/editor/outline-plugin.test.ts": [],
+    "packages/testing/unit/editor/schema-validity.test.ts": [],
+    "packages/testing/unit/editor/table-behavior.test.ts": [],
+    "packages/testing/unit/fixtures/loader.test.ts": ["packages/testing/fixtures/index.ts"],
+    "packages/testing/unit/history/history-store.test.ts": [],
+    "packages/testing/unit/ime/ime-autosave.test.ts": ["apps/web/lib/autosave.ts"],
+    "packages/testing/unit/ime/ime-composition.test.ts": ["apps/web/lib/autosave.ts"],
+    "packages/testing/unit/insight-router/router.test.ts": [],
+    "packages/testing/unit/mentions/mention-date-locale.test.ts": [],
+    "packages/testing/unit/mentions/mention-date-parse.test.ts": [],
+    "packages/testing/unit/qa/multi-client-converge.test.ts": [],
+    "packages/testing/unit/qa/selection-stability.test.ts": [],
+    "packages/testing/unit/realtime-runtime/realtime-access-boundary.test.ts": [
+      "packages/realtime-worker/src/access.ts",
+      "packages/realtime-worker/src/routing.ts",
+      "packages/share/src/index.ts",
+      "packages/types/src/index.ts"
+    ],
+    "packages/testing/unit/realtime-runtime/realtime-persistence.test.ts": [
+      "packages/realtime-worker/src/persistence.ts",
+      "packages/realtime-worker/src/routing.ts"
+    ],
+    "packages/testing/unit/realtime-runtime/realtime-runtime-skeleton.test.ts": [
+      "packages/realtime-worker/src/routing.ts"
+    ],
+    "packages/testing/unit/share/share-rbac.test.ts": [],
+    "packages/testing/unit/types/canonicalize.test.ts": [],
+    "packages/types/package.json": [],
+    "packages/types/src/index.ts": [],
+    "packages/types/tsconfig.json": [],
+    "packages/ui/package.json": [],
+    "packages/ui/src/index.ts": [],
+    "packages/ui/src/ToolbarButton.tsx": [],
+    "packages/ui/src/ToolbarGroup.tsx": [],
+    "packages/ui/tsconfig.json": [],
+    "plan.md": [],
+    "playwright.config.ts": [],
+    "pnpm-workspace.yaml": [],
+    "prettier.config.cjs": [],
+    "prompts/README.md": [],
+    "QUIP_DESIGN_NOTES.md": [],
+    "REGRESSIONS.md": [],
+    "RELEASE_NOTES.md": [],
+    "REPO_MAP.md": [],
+    "scripts/lash-web-start.sh": [],
+    "scripts/lash-web-status.sh": [],
+    "scripts/lash-web-stop.sh": [],
+    "scripts/strip-trailing-whitespace.mjs": [],
+    "scripts/verify-realtime-runtime.mjs": [],
+    "scripts/visual-snap.mjs": [],
+    "step-00-repo-map-and-acceptance-gates.md": [],
+    "step-01-monorepo-scaffolding.md": [],
+    "step-02-editor-schema-v1-and-toolbar.md": [],
+    "step-03-outline-and-collapse-persistence.md": [],
+    "step-04-markdown-import-export.md": [],
+    "step-05-images.md": [],
+    "step-06-tables-mvp.md": [],
+    "step-07-table-perf-harness.md": [],
+    "step-08-chips-from-internal-links.md": [],
+    "step-09-mentions-users-groups-privacy.md": [],
+    "step-10-natural-date-mentions.md": [],
+    "step-11-autosave-and-focus-mode.md": [],
+    "step-12-collab-with-yjs.md": [],
+    "step-13-history-log-snapshots-restore.md": [],
+    "step-14-deterministic-diff.md": [],
+    "step-15-suggest-mode-and-filtered-diffs.md": [],
+    "step-16-authorship-blame.md": [],
+    "step-17-doc-chat-anchored-diff-aware.md": [],
+    "step-18-share-links-rbac-redaction.md": [],
+    "step-19-ai-edit-agent-patch-not-paste.md": [],
+    "step-20-ai-chat-citations.md": [],
+    "step-21-accessibility-i18n-ime-bidi-sr.md": [],
+    "step-22-observability-slos-ci-cross-browser.md": [],
+    "tsconfig.base.json": [],
+    "tsconfig.json": [],
+    "vitest.config.ts": []
+  }
+}

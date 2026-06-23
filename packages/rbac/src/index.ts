@@ -7,6 +7,17 @@
  * M3/D3 (share + redaction) but the interface is frozen now so M3/D1
  * (mentions), M3/D4 (doc chat), and M5 (apps/api) can compile against it.
  *
+ * Integration scope (this milestone): decide() is fully implemented per the
+ * frozen contract below, but it is INTENTIONALLY wired into the mentions
+ * surface only (see packages/mentions/src/index.ts). The history and chat
+ * views do NOT route through decide() yet — history redaction is applied ad
+ * hoc via @lash/share redactDiff, and the chat-transcript indicator is a
+ * presentational badge (F-C17-03). This is a deliberate, drafted milestone
+ * boundary, not a defect: the 'redacted' refusal path and uniform
+ * enforcement across history/chat are scheduled to land when those views are
+ * migrated onto decide(). Until then, treat mentions/chips as the only
+ * call sites that enforce policy through this engine.
+ *
  * Why a separate package: proconsult-m0/B P1 #14 — RBAC was previously
  * embedded in @lash/share and @lash/mentions, but permissions are
  * cross-cutting. One policy decision point keeps invariants consistent.
