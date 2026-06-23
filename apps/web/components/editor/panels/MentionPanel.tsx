@@ -18,11 +18,24 @@ export interface MentionPanelProps {
   currentText: string;
 }
 
-const context = {
-  callerId: 'local-user',
-  locale: 'en-US',
-  timezone: 'Asia/Tokyo',
-  now: '2026-05-16T00:00:00.000Z',
+/**
+ * Resolve the mention context from the runtime environment. Locale and timezone
+ * are derived from the browser so date suggestions reflect the user's real zone;
+ * `now` is intentionally omitted so parseDateMention falls back to new Date().
+ * Falls back to safe defaults when Intl/navigator are unavailable (e.g. SSR).
+ */
+const resolveMentionContext = () => {
+  let locale = 'en-US';
+  let timezone = 'UTC';
+  try {
+    timezone = Intl.DateTimeFormat().resolvedOptions().timeZone || timezone;
+  } catch {
+    // Intl unavailable — keep the UTC fallback.
+  }
+  if (typeof navigator !== 'undefined' && navigator.language) {
+    locale = navigator.language;
+  }
+  return { callerId: 'local-user', locale, timezone };
 };
 
 const visibleMentions = (
@@ -49,6 +62,9 @@ export function MentionPanel({ editor, currentText }: MentionPanelProps) {
     [],
   );
   const [chips, setChips] = useState<Extract<MentionResolveResult, { visible: true }>[]>([]);
+  const [status, setStatus] = useState<'idle' | 'loading' | 'ready' | 'error'>('idle');
+
+  const context = useMemo(() => resolveMentionContext(), []);
 
   const providers = useMemo(() => {
     const policy = createPolicyEngine({
@@ -88,6 +104,7 @@ export function MentionPanel({ editor, currentText }: MentionPanelProps) {
     if (!match) {
       setSuggestions([]);
       setAnonymized([]);
+      setStatus('idle');
       return;
     }
 
@@ -97,23 +114,33 @@ export function MentionPanel({ editor, currentText }: MentionPanelProps) {
     if (date?.visible) {
       setSuggestions([date]);
       setAnonymized([]);
+      setStatus('ready');
       return;
     }
 
-    Promise.all([
-      providers.user.resolve(query, context),
-      providers.group.resolve(query, context),
-    ]).then((results) => {
-      if (disposed) return;
-      const flattened = results.flat();
-      setSuggestions(visibleMentions(flattened));
-      setAnonymized(hiddenMentions(flattened));
-    });
+    setStatus('loading');
+    Promise.all([providers.user.resolve(query, context), providers.group.resolve(query, context)])
+      .then((results) => {
+        if (disposed) return;
+        const flattened = results.flat();
+        setSuggestions(visibleMentions(flattened));
+        setAnonymized(hiddenMentions(flattened));
+        setStatus('ready');
+      })
+      .catch((error) => {
+        if (disposed) return;
+        // Surface the failure instead of leaving a silent empty render or an
+        // unhandled promise rejection.
+        console.error('Mention provider resolution failed', error);
+        setSuggestions([]);
+        setAnonymized([]);
+        setStatus('error');
+      });
 
     return () => {
       disposed = true;
     };
-  }, [currentText, providers]);
+  }, [currentText, context, providers]);
 
   const insertMention = (mention: Extract<MentionResolveResult, { visible: true }>) => {
     setChips((items) => [...items, mention]);
@@ -144,6 +171,21 @@ export function MentionPanel({ editor, currentText }: MentionPanelProps) {
   return (
     <section className="lash-mention-panel" data-testid="mention-panel" aria-label="Mentions">
       <div className="mention-suggestions" data-testid="mention-suggestions">
+        {status === 'loading' && (
+          <span className="mention-status" data-testid="mention-loading" role="status">
+            Searching…
+          </span>
+        )}
+        {status === 'error' && (
+          <span className="mention-status mention-error" data-testid="mention-error" role="alert">
+            Couldn’t load mentions. Please try again.
+          </span>
+        )}
+        {status === 'ready' && suggestions.length === 0 && anonymized.length === 0 && (
+          <span className="mention-status" data-testid="mention-empty">
+            No people or groups found
+          </span>
+        )}
         {suggestions.map((mention) => (
           <button
             key={`${mention.kind}:${mention.refId}`}

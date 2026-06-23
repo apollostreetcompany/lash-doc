@@ -1,5 +1,7 @@
 import { expect, test, type Page } from '@playwright/test';
 
+test.use({ timezoneId: 'Asia/Tokyo' });
+
 const ready = async (page: Page) =>
   page.waitForFunction(() =>
     Boolean((window as unknown as { __lashEditor?: unknown }).__lashEditor),
@@ -54,6 +56,7 @@ test.describe('real editor mention workflow', () => {
   test('selecting a natural-date suggestion inserts a date mention chip in the editor', async ({
     page,
   }) => {
+    await page.clock.setFixedTime(new Date('2026-06-23T00:00:00+09:00'));
     await page.goto('/');
     await ready(page);
 
@@ -67,7 +70,7 @@ test.describe('real editor mention workflow', () => {
     const inlineMention = page.getByTestId('lash-inline-mention').first();
     await expect(inlineMention).toBeVisible();
     await expect(inlineMention).toHaveAttribute('data-kind', 'date');
-    await expect(inlineMention).toHaveAttribute('data-iso', '2026-05-22T15:00:00+09:00');
+    await expect(inlineMention).toHaveAttribute('data-iso', '2026-06-26T15:00:00+09:00');
     await expect(page.getByTestId('lash-editor-content')).not.toContainText('@next Friday');
 
     await expect
@@ -80,7 +83,7 @@ test.describe('real editor mention workflow', () => {
                 type: 'mention',
                 attrs: expect.objectContaining({
                   kind: 'date',
-                  iso: '2026-05-22T15:00:00+09:00',
+                  iso: '2026-06-26T15:00:00+09:00',
                 }),
               },
             ]),

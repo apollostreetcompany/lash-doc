@@ -6,13 +6,13 @@ import TableRowExtension from '@tiptap/extension-table-row';
 import type { Node as ProseMirrorNode } from '@tiptap/pm/model';
 import { Plugin, PluginKey } from '@tiptap/pm/state';
 import type { EditorState } from '@tiptap/pm/state';
+import { CellSelection } from '@tiptap/pm/tables';
 import type { EditorView } from '@tiptap/pm/view';
 
 import {
   applyMatrixToSelection,
   buildTsvFromMatrix,
   extractSelectionMatrix,
-  hasTableSelection,
   parseClipboardTableText,
 } from '../../table/interop';
 import {
@@ -76,7 +76,8 @@ const applyBaseAttributes = (
   htmlAttributes: Record<string, unknown>,
   node: ProseMirrorNode,
 ) => {
-  const { cellType, value, options, ...rest } = node.attrs as LashTableCellAttrs & Record<string, unknown>;
+  const { cellType, value, options, ...rest } = node.attrs as LashTableCellAttrs &
+    Record<string, unknown>;
   const merged = mergeAttributes(htmlAttributes, rest);
   Object.entries(merged).forEach(([key, attrValue]) => {
     if (attrValue === undefined || attrValue === null) {
@@ -122,7 +123,7 @@ const createCellNodeView = (
 
   const dom = document.createElement('td');
   applyBaseAttributes(dom, props.HTMLAttributes, node);
-  const cellId = `lash-table-cell-${cellCounter += 1}`;
+  const cellId = `lash-table-cell-${(cellCounter += 1)}`;
   dom.id = cellId;
 
   const wrapper = document.createElement('div');
@@ -193,12 +194,16 @@ const createCellNodeView = (
     applyBaseAttributes(dom, props.HTMLAttributes, target);
     const providedOptions = Array.isArray(attrs.options)
       ? attrs.options.filter((item) => typeof item === 'string')
-      : []; 
+      : [];
     const fallbackOptions =
       cellType === 'status'
-        ? (providedOptions.length ? providedOptions : defaultStatusOptions)
+        ? providedOptions.length
+          ? providedOptions
+          : defaultStatusOptions
         : cellType === 'select'
-          ? (providedOptions.length ? providedOptions : defaultSelectOptions)
+          ? providedOptions.length
+            ? providedOptions
+            : defaultSelectOptions
           : [];
     currentOptions = [...fallbackOptions];
     if (currentOptions.length) {
@@ -219,7 +224,7 @@ const createCellNodeView = (
         ? rawValue
         : currentOptions.includes(rawValue)
           ? rawValue
-          : currentOptions[0] ?? '';
+          : (currentOptions[0] ?? '');
     dom.dataset.cellValue = displayValue;
     dom.setAttribute('data-cell-value', displayValue);
     wrapper.dataset.cellValue = displayValue;
@@ -272,7 +277,11 @@ const createCellNodeView = (
       return;
     }
     updateCellValue(view, pos, optionValue);
-    view.dispatch(view.state.tr.setMeta(TABLE_INTERACTION_PLUGIN_KEY, { type: 'close' } satisfies InteractionMeta));
+    view.dispatch(
+      view.state.tr.setMeta(TABLE_INTERACTION_PLUGIN_KEY, {
+        type: 'close',
+      } satisfies InteractionMeta),
+    );
   }
 
   const onControlClick = (event: MouseEvent) => {
@@ -392,7 +401,8 @@ const handleCellKeydown = (view: EditorView, event: KeyboardEvent): boolean => {
     return false;
   }
   const cell = cells[0];
-  const attrs = mergeCellAttrs(cell.node, cell.node.attrs) as LashTableCellAttrs & Record<string, unknown>;
+  const attrs = mergeCellAttrs(cell.node, cell.node.attrs) as LashTableCellAttrs &
+    Record<string, unknown>;
   const cellType = sanitizeCellType(attrs.cellType);
   if (cellType === 'text') {
     return false;
@@ -453,20 +463,32 @@ const handleCellKeydown = (view: EditorView, event: KeyboardEvent): boolean => {
     event.preventDefault();
     const value = options[currentIndex] ?? options[0] ?? '';
     commitCellValue(view, cell, value);
-    view.dispatch(view.state.tr.setMeta(TABLE_INTERACTION_PLUGIN_KEY, { type: 'close' } satisfies InteractionMeta));
+    view.dispatch(
+      view.state.tr.setMeta(TABLE_INTERACTION_PLUGIN_KEY, {
+        type: 'close',
+      } satisfies InteractionMeta),
+    );
     return true;
   }
 
   if (event.key === 'Tab') {
     const value = options[currentIndex] ?? options[0] ?? '';
     commitCellValue(view, cell, value);
-    view.dispatch(view.state.tr.setMeta(TABLE_INTERACTION_PLUGIN_KEY, { type: 'close' } satisfies InteractionMeta));
+    view.dispatch(
+      view.state.tr.setMeta(TABLE_INTERACTION_PLUGIN_KEY, {
+        type: 'close',
+      } satisfies InteractionMeta),
+    );
     return false;
   }
 
   if (event.key === 'Escape') {
     event.preventDefault();
-    view.dispatch(view.state.tr.setMeta(TABLE_INTERACTION_PLUGIN_KEY, { type: 'close' } satisfies InteractionMeta));
+    view.dispatch(
+      view.state.tr.setMeta(TABLE_INTERACTION_PLUGIN_KEY, {
+        type: 'close',
+      } satisfies InteractionMeta),
+    );
     return true;
   }
 
@@ -489,7 +511,10 @@ const handleCellKeydown = (view: EditorView, event: KeyboardEvent): boolean => {
 };
 
 const handleCopyEvent = (view: EditorView, event: ClipboardEvent): boolean => {
-  if (!hasTableSelection(view.state)) {
+  // Only hijack the clipboard for a genuine multi-cell CellSelection. A plain
+  // text caret inside a single cell is a TextSelection and must fall through to
+  // ProseMirror's default copy so partial text selections work normally.
+  if (!(view.state.selection instanceof CellSelection)) {
     return false;
   }
   const matrix = extractSelectionMatrix(view.state);
@@ -504,7 +529,9 @@ const handleCopyEvent = (view: EditorView, event: ClipboardEvent): boolean => {
 };
 
 const handlePasteEvent = (view: EditorView, event: ClipboardEvent): boolean => {
-  if (!hasTableSelection(view.state)) {
+  // As with copy, only a real multi-cell CellSelection triggers TSV matrix
+  // paste; a single-cell text caret uses ProseMirror's default paste handling.
+  if (!(view.state.selection instanceof CellSelection)) {
     return false;
   }
   const data =
@@ -525,7 +552,9 @@ const handlePasteEvent = (view: EditorView, event: ClipboardEvent): boolean => {
   return true;
 };
 
-export const TABLE_INTERACTION_PLUGIN_KEY = new PluginKey<TableInteractionState>('lashTableInteraction');
+export const TABLE_INTERACTION_PLUGIN_KEY = new PluginKey<TableInteractionState>(
+  'lashTableInteraction',
+);
 
 export const createLashTableInteractionPlugin = () =>
   new Plugin<TableInteractionState>({
@@ -554,7 +583,8 @@ export const createLashTableInteractionPlugin = () =>
             return {
               openCellPos: targetPos ?? null,
               activeIndex: typeof meta.index === 'number' ? meta.index : 0,
-              optionCount: typeof meta.optionCount === 'number' ? meta.optionCount : value.optionCount,
+              optionCount:
+                typeof meta.optionCount === 'number' ? meta.optionCount : value.optionCount,
             };
           }
         }
@@ -579,7 +609,11 @@ export const createLashTableInteractionPlugin = () =>
             return false;
           }
           if (state.openCellPos !== null && event.key === 'Escape') {
-            view.dispatch(view.state.tr.setMeta(TABLE_INTERACTION_PLUGIN_KEY, { type: 'close' } satisfies InteractionMeta));
+            view.dispatch(
+              view.state.tr.setMeta(TABLE_INTERACTION_PLUGIN_KEY, {
+                type: 'close',
+              } satisfies InteractionMeta),
+            );
             return true;
           }
           return false;
@@ -593,7 +627,8 @@ export const createLashTableInteractionPlugin = () =>
       let previousIndex: number = 0;
       return {
         update(updatedView, _prevState) {
-          const state = TABLE_INTERACTION_PLUGIN_KEY.getState(updatedView.state) ?? createInitialState();
+          const state =
+            TABLE_INTERACTION_PLUGIN_KEY.getState(updatedView.state) ?? createInitialState();
 
           // Close previous picker if position changed
           if (previousPos !== null && previousPos !== state.openCellPos) {
@@ -656,7 +691,9 @@ const LashTableCell = BaseTableCellExtension.extend<{ table: LashTableOptions }>
       value: {
         default: '',
         parseHTML: (element) => element.getAttribute('data-cell-value') ?? '',
-        renderHTML: (attrs) => ({ 'data-cell-value': typeof attrs.value === 'string' ? attrs.value : '' }),
+        renderHTML: (attrs) => ({
+          'data-cell-value': typeof attrs.value === 'string' ? attrs.value : '',
+        }),
       },
       options: {
         default: [],

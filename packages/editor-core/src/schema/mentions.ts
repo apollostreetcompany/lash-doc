@@ -10,7 +10,12 @@ import { Node, mergeAttributes, type Extensions } from '@tiptap/core';
 
 export interface LashMentionOptions {
   context?: MentionContext;
-  /** Resolved at editor-init time; the suggestion plugin queries this. */
+  /**
+   * Forward-looking contract for a future in-editor suggestion plugin. NOTE: the
+   * live mention picker is currently driven by the React `MentionPanel`, which
+   * calls the providers directly — `buildMentionExtensions` only registers the
+   * mention node schema and does not yet consume these options.
+   */
   providers?: { user?: MentionProvider; group?: MentionProvider };
 }
 

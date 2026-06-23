@@ -6,6 +6,7 @@ import {
   canonicalize,
   hashCanonical,
   type DiffJSON,
+  type DiffSpan,
   type DocumentId,
   type RevocationRecord,
   type ShareScope,
@@ -43,7 +44,7 @@ export interface ShareSigner {
   ): Promise<
     { ok: true; token: ShareToken } | { ok: false; reason: 'expired' | 'invalid' | 'revoked' }
   >;
-  revoke(jti: string, revokedBy: string, reason?: string): Promise<void>;
+  revoke(jti: string, revokedBy: string, reason?: string, docId?: DocumentId): Promise<void>;
 }
 
 export interface CreateShareSignerConfig {
@@ -129,6 +130,13 @@ export const createShareSigner = (config: CreateShareSignerConfig): ShareSigner 
         return { ok: false, reason: 'expired' };
       }
       if (await config.revocations.isRevoked(stored.jti)) {
+        await config.audit.record({
+          ts: config.now?.() ?? new Date().toISOString(),
+          actorId: stored.issuedBy,
+          action: 'share-link.revoked',
+          docId: stored.docId,
+          reason: 'revoked',
+        });
         return { ok: false, reason: 'revoked' };
       }
       await config.audit.record({
@@ -139,41 +147,126 @@ export const createShareSigner = (config: CreateShareSignerConfig): ShareSigner 
       });
       return { ok: true, token: { ...stored, token } };
     },
-    async revoke(jti, revokedBy, reason) {
+    async revoke(jti, revokedBy, reason, docId) {
+      // Revocation must not depend on this signer instance having issued the
+      // token: a freshly constructed signer (or a different process) must be
+      // able to revoke any jti. We prefer the in-memory token's docId when
+      // available, otherwise fall back to the caller-supplied docId.
       const token = issued.get(jti);
-      if (!token) return;
+      const resolvedDocId = token?.docId ?? docId;
+      const now = config.now?.() ?? new Date().toISOString();
       await config.revocations.revoke({
         jti,
-        revokedAt: config.now?.() ?? new Date().toISOString(),
+        revokedAt: now,
         revokedBy,
         reason,
       });
-      await config.audit.record({
-        ts: config.now?.() ?? new Date().toISOString(),
-        actorId: revokedBy,
-        action: 'share-link.revoked',
-        docId: token.docId,
-        reason,
-      });
+      if (resolvedDocId) {
+        await config.audit.record({
+          ts: now,
+          actorId: revokedBy,
+          action: 'share-link.revoked',
+          docId: resolvedDocId,
+          reason,
+        });
+      }
     },
   };
 };
 
+/**
+ * Returns the identity tokens a redaction rule `path` may target on a span.
+ * A rule matches a span when its `path` equals one of these tokens. Supported
+ * forms (most general first):
+ *   - `*` / `spans`            — every span
+ *   - `spans.text`            — every text-bearing (inserted/deleted) span
+ *   - `<kind>` / `kind:<kind>` — spans of that DiffSpanKind
+ *   - `id:<id>`               — a single span by stable id
+ *   - `entry:<entryId>`       — spans produced by a HistoryEntry
+ *   - `author:<authorId>`     — spans by an author
+ *   - `actor:<actorType>`     — spans by an actor type (e.g. ai)
+ * This gives the typed RedactionPolicy real per-path targeting against the
+ * diff model without inventing a parallel addressing scheme, while keeping the
+ * existing `spans.text` convention used by the web/test policies working.
+ */
+const spanPathTokens = (span: DiffSpan): string[] => {
+  const tokens: string[] = ['*', 'spans', span.kind, `kind:${span.kind}`, `id:${span.id}`];
+  if (span.kind === 'inserted' || span.kind === 'deleted') tokens.push('spans.text');
+  if (span.entryId) tokens.push(`entry:${span.entryId}`);
+  if (span.authorId) tokens.push(`author:${span.authorId}`);
+  if (span.actorType) tokens.push(`actor:${span.actorType}`);
+  return tokens;
+};
+
+const ruleMatchesSpan = (rulePath: string, span: DiffSpan): boolean =>
+  spanPathTokens(span).includes(rulePath);
+
+/** Deterministic, non-reversible placeholder for `hash` actions. */
+const hashPlaceholder = (text: string): string => {
+  let h = 0;
+  for (let i = 0; i < text.length; i += 1) {
+    h = (Math.imul(31, h) + text.charCodeAt(i)) | 0;
+  }
+  return `[hashed:${(h >>> 0).toString(16).padStart(8, '0')}]`;
+};
+
+/**
+ * Applies a RedactionPolicy to a diff, honoring each rule's `path` (per-span
+ * targeting) and `action`:
+ *   - `redact` replaces span text with a placeholder and flags `redacted`.
+ *   - `hash` replaces span text with a deterministic, non-reversible digest.
+ *   - `omit` drops the span from the output entirely.
+ * Only inserted/deleted spans carry text and are eligible for redact/hash;
+ * any span kind may be omitted. The first matching rule for a span wins.
+ */
 export const redactDiff = (
   diff: DiffJSON,
   policy: RedactionPolicy,
   _callerId: string,
 ): DiffJSON => {
   if (!policy.rules.length) return diff;
-  return {
-    ...diff,
-    spans: diff.spans.map((span) => {
-      if (span.kind !== 'inserted' && span.kind !== 'deleted') {
-        return { ...span };
-      }
-      return { ...span, text: '[redacted]', redacted: true };
-    }),
-  };
+  const spans: DiffSpan[] = [];
+  for (const span of diff.spans) {
+    const rule = policy.rules.find((r) => ruleMatchesSpan(r.path, span));
+    if (!rule) {
+      spans.push({ ...span });
+      continue;
+    }
+    if (rule.action === 'omit') {
+      continue;
+    }
+    if (span.kind === 'inserted' || span.kind === 'deleted') {
+      const text = rule.action === 'hash' ? hashPlaceholder(span.text) : '[redacted]';
+      spans.push({ ...span, text, redacted: true });
+      continue;
+    }
+    // No text to mask on this span kind; mark it redacted so consumers render
+    // a placeholder while keeping the span (and its counts) present.
+    spans.push({ ...span, redacted: true });
+  }
+  return { ...diff, spans };
+};
+
+/**
+ * Resolves the active policy via the PolicyStore, then redacts the diff with it.
+ * Use this when callers hold a policy sha+version rather than a resolved policy.
+ * Throws if the policy cannot be resolved so a missing policy never silently
+ * yields an unredacted diff.
+ */
+export const redactDiffWithPolicy = async (
+  diff: DiffJSON,
+  policies: PolicyStore,
+  policySha: string,
+  version: number,
+  callerId: string,
+): Promise<DiffJSON> => {
+  const policy = await policies.resolve(policySha, version);
+  if (!policy) {
+    throw new Error(
+      `redactDiffWithPolicy: unresolved redaction policy (sha=${policySha}, version=${version}).`,
+    );
+  }
+  return redactDiff(diff, policy, callerId);
 };
 
 export interface AuditEvent {
@@ -198,7 +291,16 @@ export interface AuditLog {
   query(filter: { docId?: DocumentId; since?: string }): Promise<AuditEvent[]>;
 }
 
-export const createAuditLog = (_config: { adapter: 'memory' | 'postgres' }): AuditLog => {
+export const createAuditLog = (config: { adapter: 'memory' | 'postgres' }): AuditLog => {
+  // The 'postgres' adapter is not backed by durable storage in this package.
+  // Rather than silently degrading to in-memory (which would misrepresent the
+  // durability the API implies), fail loudly so callers must wire a real
+  // durable AuditLog before requesting it.
+  if (config.adapter === 'postgres') {
+    throw new Error(
+      "createAuditLog: 'postgres' adapter is not implemented in @lash/share; supply a durable AuditLog implementation or use adapter:'memory'.",
+    );
+  }
   const events: AuditEvent[] = [];
   return {
     async record(event) {

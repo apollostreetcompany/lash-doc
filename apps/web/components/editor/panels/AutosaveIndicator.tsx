@@ -36,33 +36,41 @@ export function AutosaveIndicator({ editor }: AutosaveIndicatorProps) {
     return () => clearInterval(id);
   }, [lastSavedAt]);
 
-  if (status === 'idle') {
-    return null;
-  }
-
-  let label: string;
+  let label = '';
   if (status === 'saving') {
     label = 'Saving…';
   } else if (status === 'error') {
     label = 'Save failed';
   } else if (status === 'pending') {
     label = 'Unsaved changes';
-  } else {
-    // status === 'saved'
+  } else if (status === 'saved') {
     const rel = formatRelativeSavedAt(lastSavedAt, nowMs);
     label = rel ? `All changes saved · ${rel}` : 'All changes saved';
   }
 
   return (
-    <span
-      data-testid="autosave-indicator"
-      data-status={status}
-      className="lash-autosave-indicator"
-      role="status"
-      aria-live="polite"
-      title={lastSavedAt ?? undefined}
-    >
-      {label}
-    </span>
+    <>
+      {/*
+       * Always-mounted, visually-hidden live region. Keeping the
+       * role="status"/aria-live="polite" element in the DOM (including the
+       * `idle` state, where it is empty) means assistive tech is already
+       * monitoring it before the first status change, so the initial
+       * 'Unsaved changes'/'Saving…' announcement is not dropped. A live region
+       * inserted together with its first content is frequently not announced.
+       */}
+      <span data-testid="autosave-live-region" className="sr-only" role="status" aria-live="polite">
+        {label}
+      </span>
+      {status === 'idle' ? null : (
+        <span
+          data-testid="autosave-indicator"
+          data-status={status}
+          className="lash-autosave-indicator"
+          title={lastSavedAt ?? undefined}
+        >
+          {label}
+        </span>
+      )}
+    </>
   );
 }

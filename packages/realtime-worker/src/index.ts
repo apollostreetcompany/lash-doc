@@ -109,6 +109,13 @@ export default {
     if (route.kind === 'room-session') {
       const actorId = normalizeActorId(url.searchParams.get('actorId'));
       const inviteToken = url.searchParams.get('inviteToken');
+      // SECURITY: when no session secret is configured we run on PUBLIC dev
+      // fallback secrets (LOCAL_DEV_SESSION_SECRET / LOCAL_DEV_INVITE_SECRET),
+      // so any token — invite or session — would be forgeable. Refuse to serve a
+      // non-local host entirely in that mode rather than honoring invite tokens
+      // signed with a public secret. (Do NOT move this gate into the no-token
+      // branch: that lets dev-secret-forged invite tokens through — see
+      // codex:rescue review of F-C21-03.)
       if (usingLocalFallback && !isLocalRealtimeFallbackHost(url)) {
         return deny('invalid');
       }

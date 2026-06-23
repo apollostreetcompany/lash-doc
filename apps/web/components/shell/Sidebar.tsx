@@ -17,6 +17,7 @@ export interface SidebarProps {
   outlineItems: OutlineItem[];
   onToggleHeading: (item: OutlineItem) => void;
   onFocusHeading: (item: OutlineItem) => void;
+  onExpandAll?: () => void;
   onCloseMobile?: () => void;
   /** When true, the outline section is omitted entirely (count goes to zero). */
   hideOutline?: boolean;
@@ -25,11 +26,14 @@ export interface SidebarProps {
 interface NavLink {
   icon: IconName;
   label: string;
-  active?: boolean;
 }
 
+// These workspace destinations are not yet routed. Until navigation is wired,
+// they are rendered as explicitly disabled "coming soon" controls so users are
+// not misled into clicking dead buttons (see F-C01-07 / F-C25-07). The current
+// document is already the active view, so it is shown as a non-interactive
+// current-page marker rather than a clickable link.
 const PRIMARY_NAV: NavLink[] = [
-  { icon: 'document', label: 'Current doc', active: true },
   { icon: 'home', label: 'Home' },
   { icon: 'inbox', label: 'Inbox' },
   { icon: 'starred', label: 'Starred' },
@@ -41,18 +45,33 @@ const SECONDARY_NAV: NavLink[] = [
   { icon: 'gear', label: 'Settings' },
 ];
 
-function NavItem({ icon, label, active }: NavLink) {
+function NavItem({ icon, label }: NavLink) {
+  // No destination is wired yet, so the control is disabled and announced as
+  // unavailable instead of presenting a clickable-but-inert affordance.
   return (
     <button
       type="button"
       className="lash-sidebar-item"
-      data-active={active ? 'true' : 'false'}
-      aria-current={active ? 'page' : undefined}
-      title={label}
+      data-disabled="true"
+      disabled
+      aria-disabled="true"
+      title={`${label} (coming soon)`}
     >
       <Icon name={icon} />
       <span className="lash-sidebar-item-label">{label}</span>
+      <span className="lash-sidebar-item-badge">Soon</span>
     </button>
+  );
+}
+
+function CurrentDocItem() {
+  // The current document is the active view; render it as a non-interactive
+  // current-page marker rather than a clickable button that does nothing.
+  return (
+    <div className="lash-sidebar-item" data-active="true" aria-current="page" title="Current doc">
+      <Icon name="document" />
+      <span className="lash-sidebar-item-label">Current doc</span>
+    </div>
   );
 }
 
@@ -62,6 +81,7 @@ export function Sidebar({
   outlineItems,
   onToggleHeading,
   onFocusHeading,
+  onExpandAll,
   onCloseMobile,
   hideOutline = false,
 }: SidebarProps) {
@@ -76,6 +96,7 @@ export function Sidebar({
       </div>
 
       <nav className="lash-sidebar-nav">
+        <CurrentDocItem />
         {PRIMARY_NAV.map((item) => (
           <NavItem key={item.label} {...item} />
         ))}
@@ -99,6 +120,7 @@ export function Sidebar({
             items={outlineItems}
             onToggle={onToggleHeading}
             onFocus={onFocusHeading}
+            onExpandAll={onExpandAll}
           />
         ) : null}
 
@@ -141,14 +163,15 @@ interface SidebarOutlineProps {
   items: OutlineItem[];
   onToggle: (item: OutlineItem) => void;
   onFocus: (item: OutlineItem) => void;
+  onExpandAll?: () => void;
 }
 
-function SidebarOutline({ items, onToggle, onFocus }: SidebarOutlineProps): ReactNode {
+function SidebarOutline({ items, onToggle, onFocus, onExpandAll }: SidebarOutlineProps): ReactNode {
   // OutlinePanel renders its own `Outline` heading; we provide the section
   // wrapper here but suppress an extra label to keep the chrome quiet.
   return (
     <div className="lash-sidebar-section">
-      <OutlinePanel items={items} onToggle={onToggle} onFocus={onFocus} />
+      <OutlinePanel items={items} onToggle={onToggle} onFocus={onFocus} onExpandAll={onExpandAll} />
     </div>
   );
 }

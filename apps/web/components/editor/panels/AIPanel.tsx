@@ -44,12 +44,42 @@ const SCHEMA_SUMMARY: ValidatorOptions['schemaSummary'] = {
   markTypes: ['bold', 'italic', 'underline', 'code', 'link'],
 };
 
+/** ProseMirror document positions (NOT plaintext offsets). */
+interface PmRange {
+  from: number;
+  to: number;
+}
+
 const selectedText = (editor: Editor | null): string => {
   if (!editor) return '';
   const { from, to, empty } = editor.state.selection;
   if (empty) return '';
   return editor.state.doc.textBetween(from, to, '\n');
 };
+
+/** The current selection as true ProseMirror positions, captured at request
+ *  time. These map directly to setTextSelection and avoid reconstructing
+ *  positions from plaintext offsets (which drift across block boundaries and
+ *  resolve to the first occurrence of repeated text). */
+const selectionPmRange = (editor: Editor | null): PmRange | null => {
+  if (!editor) return null;
+  const { from, to, empty } = editor.state.selection;
+  if (empty) return null;
+  return { from, to };
+};
+
+/** Whole-document range in true ProseMirror positions (used by the doc-wide
+ *  rewrite citation). */
+const docPmRange = (editor: Editor | null): PmRange | null => {
+  if (!editor) return null;
+  const { doc } = editor.state;
+  // First/last valid text positions inside the doc node.
+  return { from: 1, to: Math.max(1, doc.content.size - 1) };
+};
+
+/** Stable key for matching a doc citation back to its captured PM range. */
+const citationKey = (citation: Extract<EditPatchCitation, { type: 'doc' }>): string =>
+  `${citation.baseVersion}:${citation.rangeFrom}:${citation.rangeTo}`;
 
 const improveText = (text: string) => {
   const normalized = text.replace(/\s+/g, ' ').trim();
@@ -85,6 +115,9 @@ export function AIPanel({
     { type: 'doc' }
   > | null>(null);
   const [jumpTarget, setJumpTarget] = useState('');
+  // Maps a doc citation (by key) to the true ProseMirror positions captured at
+  // request time, so jumpToCitation can navigate without reconstructing offsets.
+  const citationPmRanges = useRef(new Map<string, PmRange>());
 
   const selectionText = selectedText(editor);
   const selectionRange = useMemo(() => {
@@ -100,6 +133,13 @@ export function AIPanel({
   const nextPatchId = () => {
     patchCounterRef.current += 1;
     return `ai-patch:${patchCounterRef.current}`;
+  };
+
+  const recordCitationPmRange = (
+    citation: Extract<EditPatchCitation, { type: 'doc' }>,
+    pmRange: PmRange,
+  ) => {
+    citationPmRanges.current.set(citationKey(citation), pmRange);
   };
 
   const validateAndStage = (patch: EditPatch, confirmations = {}) => {
@@ -125,6 +165,18 @@ export function AIPanel({
       setStatus('Select text before requesting an AI edit.');
       return;
     }
+    const pmRange = selectionPmRange(editor);
+    if (!pmRange) {
+      setStatus('Select text before requesting an AI edit.');
+      return;
+    }
+    const citation: Extract<EditPatchCitation, { type: 'doc' }> = {
+      type: 'doc',
+      baseVersion,
+      rangeFrom: selectionRange.from,
+      rangeTo: selectionRange.to,
+    };
+    recordCitationPmRange(citation, pmRange);
     validateAndStage({
       patchId: nextPatchId(),
       docId,
@@ -141,9 +193,7 @@ export function AIPanel({
         },
       ],
       rationale: 'Tighten the selected wording while preserving the original meaning.',
-      citations: [
-        { type: 'doc', baseVersion, rangeFrom: selectionRange.from, rangeTo: selectionRange.to },
-      ],
+      citations: [citation],
     });
   };
 
@@ -165,6 +215,14 @@ export function AIPanel({
 
   const createGlobalPatch = () => {
     if (!baseVersion || !currentText) return;
+    const docCitation: Extract<EditPatchCitation, { type: 'doc' }> = {
+      type: 'doc',
+      baseVersion,
+      rangeFrom: 0,
+      rangeTo: currentText.length,
+    };
+    const docRange = docPmRange(editor);
+    if (docRange) recordCitationPmRange(docCitation, docRange);
     validateAndStage(
       {
         patchId: nextPatchId(),
@@ -182,7 +240,7 @@ export function AIPanel({
           },
         ],
         rationale: 'Rewrite the full document only after explicit user confirmation.',
-        citations: [{ type: 'doc', baseVersion, rangeFrom: 0, rangeTo: currentText.length }],
+        citations: [docCitation],
         allowGlobal: true,
       },
       { globalEditConfirmed: globalConfirmed },
@@ -206,20 +264,36 @@ export function AIPanel({
       setStatus('Select text before asking AI.');
       return;
     }
-    setChatAnswer(`AI answer grounded in "${selectionText}".`);
-    setChatCitation({
+    const pmRange = selectionPmRange(editor);
+    if (!pmRange) {
+      setStatus('Select text before asking AI.');
+      return;
+    }
+    const citation: Extract<EditPatchCitation, { type: 'doc' }> = {
       type: 'doc',
       baseVersion,
       rangeFrom: selectionRange.from,
       rangeTo: selectionRange.to,
-    });
+    };
+    recordCitationPmRange(citation, pmRange);
+    setChatAnswer(`AI answer grounded in "${selectionText}".`);
+    setChatCitation(citation);
     setStatus('AI answer includes a document citation.');
   };
 
   const jumpToCitation = (citation: Extract<EditPatchCitation, { type: 'doc' }>) => {
     if (!editor) return;
-    const from = citation.rangeFrom + 1;
-    const to = Math.max(from, citation.rangeTo + 1);
+    const pmRange = citationPmRanges.current.get(citationKey(citation));
+    if (!pmRange) {
+      // No captured ProseMirror range means this citation was not produced in
+      // this session (e.g. a rehydrated patch). Fail loudly rather than
+      // navigating to a fabricated, likely-wrong position.
+      setStatus('Cannot navigate to citation: its source position is unavailable.');
+      return;
+    }
+    const docSize = editor.state.doc.content.size;
+    const from = Math.min(pmRange.from, docSize);
+    const to = Math.min(Math.max(from, pmRange.to), docSize);
     editor.chain().focus().setTextSelection({ from, to }).run();
     setJumpTarget(currentText.slice(citation.rangeFrom, citation.rangeTo));
   };

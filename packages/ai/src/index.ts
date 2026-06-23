@@ -29,6 +29,14 @@ export interface ValidatorOptions {
   /** The doc state JSON the patch should apply atop. Must be the doc whose
    *  sha256 (via `hashCanonical`) equals `EditPatch.baseVersion`. */
   baseDoc: unknown;
+  /** Optional precomputed sha256 of `baseDoc` (via `hashCanonical` from
+   *  `@lash/types`). When supplied, the validator compares it against
+   *  `EditPatch.baseVersion` and rejects with `'base-version-stale'` on
+   *  mismatch. Hashing is async and `validateEditPatch` is a pure synchronous
+   *  function, so the caller hashes `baseDoc` out-of-band and passes the digest
+   *  here. When omitted, staleness is enforced solely at the host apply
+   *  boundary (see EditorWorkspace.handleApplyAiPatch). */
+  baseVersionHash?: string;
   /** The user's selection at request time; ops must lie within unless
    *  `allowGlobal: true` AND `confirmations.globalEditConfirmed: true`. */
   selection: { from: number; to: number } | null;
@@ -160,6 +168,14 @@ export const validateEditPatch = (
   }
   if (patch.operations.length > MAX_PATCH_OPS) {
     return { ok: false, reason: 'too-many-ops', details: `maximum is ${MAX_PATCH_OPS}` };
+  }
+
+  if (options.baseVersionHash !== undefined && options.baseVersionHash !== patch.baseVersion) {
+    return {
+      ok: false,
+      reason: 'base-version-stale',
+      details: `Patch baseVersion ${patch.baseVersion} does not match current doc ${options.baseVersionHash}`,
+    };
   }
 
   for (const op of patch.operations) {

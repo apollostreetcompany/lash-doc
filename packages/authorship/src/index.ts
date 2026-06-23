@@ -130,17 +130,28 @@ export const createAuthorshipMap = (): AuthorshipMap => {
   };
 
   const recordEntry: AuthorshipMap['recordEntry'] = (entry) => {
-    applyOps(entry.ops);
+    // Op coordinates within a HistoryEntry are sequential: each op's from/to
+    // index into the document state produced by the prior ops. We interleave the
+    // remap and attribution so that every freshly attributed interval is itself
+    // mapped through the ops that follow it in the same entry. Applying the whole
+    // sequence up front (and putting at raw op coordinates) would leave intervals
+    // for ops at index > 0 at the wrong final positions for multi-op entries.
     entry.ops.forEach((op, sourceOpIndex) => {
-      if (op.op !== 'replace_text' || !op.text.length) return;
-      put({
-        from: op.from,
-        to: op.from + op.text.length,
-        authorId: entry.actor.id,
-        ts: entry.ts,
-        sourceEntryId: entry.id,
-        sourceOpIndex,
-      });
+      if (op.op === 'replace_text') {
+        applyTextReplace(op.from, op.to, op.text.length);
+        if (op.text.length) {
+          put({
+            from: op.from,
+            to: op.from + op.text.length,
+            authorId: entry.actor.id,
+            ts: entry.ts,
+            sourceEntryId: entry.id,
+            sourceOpIndex,
+          });
+        }
+      } else if (op.op === 'delete_range') {
+        applyTextReplace(op.from, op.to, 0);
+      }
     });
   };
 
