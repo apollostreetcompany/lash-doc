@@ -79,6 +79,7 @@ Success criteria:
 54. Beads 23-36 landed as one integrated deployable-main merge through PR #28, because intermediate stacked PRs #18-#27 intentionally represented red partial states. PR #28 was retargeted to `main`, squash-merged as `1b85b26682505d5a8e10e6051c4f4464b612898c`, protected `main` CI run `26914289177` passed `build-and-test`, and superseded PRs #15-#27 were closed.
 55. Bead 37 packages the feature-audit metadata and insight-router hardening: `FEATURE_AUDIT/STORIES.csv` is the canonical 201-story tracker, `.understand-anything/knowledge-graph.json` is the current architecture graph, and `@lash/insight-router` provides fail-loud routing placeholders for Persephone, Hermes, and Garden writing places.
 56. Bead 37 validation fixed four branch-surfaced UX/test issues before PR: route-title hydration now runs before interaction on document switches, the outline expand-all control meets mobile touch-target minimums, solo documents keep collaborator chrome honest without placeholder peers, and the natural-date mention e2e uses a fixed browser clock and timezone.
+57. Bead 37 merged through PR #30 as `02e03c4dcc860bc760f7d6a5dd6ae1cabf849d9d`; required PR CI run `28008919283` and post-merge `main` CI run `28009206138` both passed `build-and-test`.
 
 ## State
 
@@ -141,11 +142,11 @@ Success criteria:
 - [x] PR #28 merged the integrated Beads 23-36 stack into `main` as `1b85b26682505d5a8e10e6051c4f4464b612898c`.
 - [x] Final Beads 23-36 protected `main` CI passed: run `26914289177`, workflow `CI`, job `build-and-test`.
 - [x] Superseded stacked PRs #15-#27 were closed after the integrated merge.
-- [x] Bead 37 - Feature audit metadata, understand graph, and insight-router hardening prepared for PR.
+- [x] Bead 37 - Feature audit metadata, understand graph, and insight-router hardening merged through PR #30.
 
 ### Now
 
-- Bead 37 PR branch `codex/chore/feature-audit-metadata` is fully validated locally and ready for PR/CI merge.
+- Bead 37 is merged to `main`; current focus is product readiness assessment and next-stack selection.
 
 ### Next
 
@@ -230,6 +231,8 @@ Success criteria:
 - Integrated Beads 23-36 PR #28: `https://github.com/apollostreetcompany/lash-doc/pull/28` (merged)
 - Superseded stacked PRs #15-#27: closed after PR #28 landed on `main`
 - Final Beads 23-36 main CI run: `https://github.com/apollostreetcompany/lash-doc/actions/runs/26914289177`
+- GitHub PR #30: `https://github.com/apollostreetcompany/lash-doc/pull/30` (merged)
+- Bead 37 main CI run: `https://github.com/apollostreetcompany/lash-doc/actions/runs/28009206138`
 - GitHub PR #12: `https://github.com/apollostreetcompany/lash-doc/pull/12`
 - Post-deploy main CI run: `https://github.com/apollostreetcompany/lash-doc/actions/runs/26026635724`
 - Final Cloudflare deployment preview: `https://cad5a3ac.lash-9xx.pages.dev`
