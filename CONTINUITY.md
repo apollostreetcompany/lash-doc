@@ -91,6 +91,7 @@ Success criteria:
 66. Final local review for the delight sprint found no merge blockers after lint, typecheck, unit tests, production build, and bead-specific receipts. RepoPrompt oracle review was attempted but blocked by a configured API-key 401, so the committed final review uses primary-agent review plus local/CI gates and explicitly carries forward the Render live-service, realtime-secret, outline, and comment-anchoring concerns.
 67. PR #32 merged the delight sprint into `main` as `11ff925ad4e07d0df5b5a1698ad69cc41b76fc26`; PR CI run `28105284971` and post-merge main CI run `28105654731` both passed `build-and-test`. The follow-up OUT-01 bead starts from that merge in worktree `/Users/borker/dev/lash-doc-delight-followup` on branch `codex/ux/delightful-writing-followup`.
 68. OUT-01 follow-up makes the document-side outline the primary desktop outline: the global sidebar defaults to collapsed icon rail, the canonical `lash-outline-panel` renders beside the document at wide desktop widths, sidebar outline fallback uses sidebar-specific IDs to avoid duplicate landmarks, and the mobile drawer retains outline access. Validation receipts live under `artifacts/ux-sprint/reports/out-02-*`.
+69. PR #33 merged the OUT-01 follow-up into `main` as `e5ab31e8a9875b5c625d783206e5c57749769710`; PR CI run `28107894887` passed `build-and-test` in 5m20s, and post-merge main CI run `28108304331` passed `build-and-test` in 5m45s.
 
 ## State
 
@@ -163,16 +164,17 @@ Success criteria:
 - [x] Delight sprint final local review - no merge blockers; residual concerns documented.
 - [x] Delight sprint PR #32 merged to remote `main` as `11ff925ad4e07d0df5b5a1698ad69cc41b76fc26`; post-merge `main` CI run `28105654731` passed.
 - [x] OUT-01 follow-up - document-side desktop outline, collapsed icon rail, mobile fallback, canonical tracker update, visual proof, and focused e2e coverage.
+- [x] OUT-01 follow-up PR #33 merged to remote `main` as `e5ab31e8a9875b5c625d783206e5c57749769710`; post-merge `main` CI run `28108304331` passed.
 
 ### Now
 
-- OUT-01 follow-up review, PR, and merge.
+- No active bead. Current focus is product assessment and next-bead selection for daily-writing readiness.
 
 ### Next
 
 - Production web hosting strategy for dynamic `/doc/[id]` routes and any future Riddle integration remain separate workstreams.
 - Decide whether to turn the 19 deferred feature-audit scaffold items into a new bead stack.
-- Open PR for `codex/ux/delightful-writing-followup`, run required CI, merge through protected `main`, and verify post-merge state.
+- Prioritize the next writing-experience bead; COM-01 remains the strongest visible UX gap after the document-side outline pass.
 
 ## Open Questions
 
@@ -257,6 +259,8 @@ Success criteria:
 - Final Beads 23-36 main CI run: `https://github.com/apollostreetcompany/lash-doc/actions/runs/26914289177`
 - GitHub PR #30: `https://github.com/apollostreetcompany/lash-doc/pull/30` (merged)
 - Bead 37 main CI run: `https://github.com/apollostreetcompany/lash-doc/actions/runs/28009206138`
+- GitHub PR #33: `https://github.com/apollostreetcompany/lash-doc/pull/33` (merged)
+- OUT-01 follow-up main CI run: `https://github.com/apollostreetcompany/lash-doc/actions/runs/28108304331`
 - GitHub PR #12: `https://github.com/apollostreetcompany/lash-doc/pull/12`
 - Post-deploy main CI run: `https://github.com/apollostreetcompany/lash-doc/actions/runs/26026635724`
 - Final Cloudflare deployment preview: `https://cad5a3ac.lash-9xx.pages.dev`
