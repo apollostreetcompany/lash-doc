@@ -56,3 +56,7 @@ test-focus-fix.md
 Claude-Code-*.txt
 visual-snapshots/
 test-results/
+
+# Third-party visual references captured locally for UX analysis.
+# Keep source URLs and comparison notes in committed reports instead.
+artifacts/ux-sprint/raw/quip/*.png
