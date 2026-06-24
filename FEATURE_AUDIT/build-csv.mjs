@@ -127,7 +127,9 @@ md.push('| Cluster | Name | Stories |');
 md.push('| --- | --- | --- |');
 for (const c of ordered)
   md.push(`| ${c.cluster} | ${CLUSTER_NAMES[c.cluster] || ''} | ${counts[c.cluster]} |`);
-md.push('| C26 | Insight routing / writing places (NEW) | 0 (to design) |');
+if (!ordered.some((c) => c.cluster === 'C26')) {
+  md.push('| C26 | Insight routing / writing places (NEW) | 0 (to design) |');
+}
 md.push('');
 writeFileSync(OUT_MD, md.join('\n') + '\n', 'utf8');
 

@@ -87,6 +87,7 @@ Success criteria:
 62. INF-02 surfaced and fixes the realtime deploy Makefile command: package scripts with names that collide with pnpm built-ins must be invoked with `pnpm --filter <pkg> run <script>`, so `deploy-realtime-cloudflare` now calls `run deploy` and `realtime-dry-run` calls `run deploy:dry-run`.
 63. INF-02 deployed the Cloudflare realtime Worker to `https://lash-realtime.ryan-borker.workers.dev` as version `06150817-80d3-4c52-b86d-cbfd2ac92f4f`. Public service health passes and unauthenticated/non-invite session minting returns 403; `wrangler secret list` is empty, so production document sessions intentionally remain closed until the dynamic web runtime has shared production invite/session secrets.
 64. INF-01 adds a Render Blueprint and preflight for a dynamic Next.js web runtime: `render.yaml` defines `lash-doc-web`, `make verify-render` builds without `LASH_STATIC_EXPORT`, proves `/doc/[id]` is server-rendered on demand, and starts Next with `next start -H 0.0.0.0 -p $PORT`. Render CLI auth works and no existing Lash service was found, but this CLI has no service-create/Blueprint-apply command and no `RENDER_API_KEY` is present, so live Render service creation remains a Dashboard/API apply step.
+65. TRK-01 reconciles the feature tracker summary to the canonical CSV: `STORIES.csv` has 201 rows across 26 clusters, C26 has 9 insight-routing/writing-place stories, and `STORIES_SUMMARY.md` now records the current implementation/test/fix/retest counts plus delight sprint overlay status. Validation lives at `artifacts/ux-sprint/reports/trk-01-validate.log`.
 
 ## State
 
@@ -153,17 +154,19 @@ Success criteria:
 - [x] Delight sprint VIS-01 - Quip-vs-Lash visual baseline and outline screenshot capture.
 - [x] Delight sprint ROU-01 - Insight-router reliability coverage and UI-host decision record.
 - [x] Delight sprint Product Delight Wave 1 - CAN-01/MOB-01 improved, OUT-01/COM-01/FMT-01 guarded with residual UX gaps documented.
+- [x] Delight sprint INF-02 - Cloudflare realtime Worker deployed and verified with sessions intentionally locked.
+- [x] Delight sprint INF-01 - Render dynamic runtime Blueprint/preflight added; live service creation remains Dashboard/API apply.
+- [x] Delight sprint TRK-01 - Feature tracker summary reconciled to 201 canonical CSV rows.
 
 ### Now
 
-- Delight sprint tracker reconciliation (TRK-01), then review/PR/merge.
+- Delight sprint final review, PR, and merge.
 
 ### Next
 
 - Production web hosting strategy for dynamic `/doc/[id]` routes and any future Riddle integration remain separate workstreams.
 - Decide whether to turn the 19 deferred feature-audit scaffold items into a new bead stack.
-- Complete and review remaining delight sprint bead TRK-01.
-- Run TRK-01 last to reconcile the canonical tracker and summary with sprint outcomes.
+- Open PR for `codex/ux/delightful-writing-sprint`, run required CI, merge through protected `main`, and verify post-merge state.
 
 ## Open Questions
 
