@@ -86,6 +86,7 @@ export function Sidebar({
   hideOutline = false,
 }: SidebarProps) {
   const showOutline = !hideOutline;
+  const renderSidebarOutline = showOutline && (!collapsed || Boolean(onCloseMobile));
   return (
     <aside className="lash-sidebar" data-testid="lash-sidebar" aria-label="Workspace navigation">
       <div className="lash-sidebar-brand">
@@ -115,7 +116,7 @@ export function Sidebar({
           </button>
         ) : null}
 
-        {showOutline ? (
+        {renderSidebarOutline ? (
           <SidebarOutline
             items={outlineItems}
             onToggle={onToggleHeading}
@@ -171,7 +172,16 @@ function SidebarOutline({ items, onToggle, onFocus, onExpandAll }: SidebarOutlin
   // wrapper here but suppress an extra label to keep the chrome quiet.
   return (
     <div className="lash-sidebar-section">
-      <OutlinePanel items={items} onToggle={onToggle} onFocus={onFocus} onExpandAll={onExpandAll} />
+      <OutlinePanel
+        items={items}
+        onToggle={onToggle}
+        onFocus={onFocus}
+        onExpandAll={onExpandAll}
+        testId="lash-sidebar-outline-panel"
+        titleId="lash-sidebar-outline-title"
+        testIdPrefix="sidebar-outline"
+        title="Outline"
+      />
     </div>
   );
 }

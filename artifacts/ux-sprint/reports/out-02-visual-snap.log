@@ -1,0 +1,15 @@
+Lash web is running at http://127.0.0.1:3000 (pid 44920, log /Users/borker/dev/lash-doc-delight-followup/.lash-web.log)
+tmux session: lash-doc-web
+-> desktop-1440 1440x900
+-> tablet-1024 1024x768
+-> tablet-large-768 768x1024
+-> mobile-375 375x812
+-> desktop-1440-outline
+-> entrance frames @1440
+-> focus-mode-1440
+-> desktop-1440-chat
+-> desktop-1440-table
+
+Snapshots written to artifacts/ux-sprint/lash/followup-outline
+./scripts/lash-web-stop.sh
+Stopped Lash web (tmux session lash-doc-web).

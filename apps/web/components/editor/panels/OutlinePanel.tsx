@@ -13,26 +13,39 @@ export interface OutlinePanelProps {
   onToggle: (item: OutlineItem) => void;
   onFocus: (item: OutlineItem) => void;
   onExpandAll?: () => void;
+  testId?: string;
+  titleId?: string;
+  testIdPrefix?: string;
+  title?: string;
 }
 
-export function OutlinePanel({ items, onToggle, onFocus, onExpandAll }: OutlinePanelProps) {
+export function OutlinePanel({
+  items,
+  onToggle,
+  onFocus,
+  onExpandAll,
+  testId = 'lash-outline-panel',
+  titleId = 'lash-outline-title',
+  testIdPrefix = 'outline',
+  title = 'Outline',
+}: OutlinePanelProps) {
   const hasCollapsed = items.some((item) => item.collapsed);
   return (
     <aside
-      data-testid="lash-outline-panel"
+      data-testid={testId}
       role="navigation"
-      aria-labelledby="lash-outline-title"
+      aria-labelledby={titleId}
       className="lash-outline-panel"
     >
       <div className="outline-header">
-        <h2 className="outline-title" id="lash-outline-title">
-          Outline
+        <h2 className="outline-title" id={titleId}>
+          {title}
         </h2>
         {onExpandAll ? (
           <button
             type="button"
             className="outline-expand-all-button"
-            data-testid="outline-expand-all"
+            data-testid={`${testIdPrefix}-expand-all`}
             onClick={onExpandAll}
             disabled={!hasCollapsed}
             aria-label="Expand all headings"
@@ -42,7 +55,7 @@ export function OutlinePanel({ items, onToggle, onFocus, onExpandAll }: OutlineP
           </button>
         ) : null}
       </div>
-      <ol className="outline-list" aria-labelledby="lash-outline-title">
+      <ol className="outline-list" aria-labelledby={titleId}>
         {items.map((item) => {
           const indentStyle = { marginLeft: `${(item.level - 1) * 1.1}rem` };
           const metaLabel = `${item.descendantCount} sections · ${item.hiddenBlockCount} blocks`;
@@ -58,7 +71,7 @@ export function OutlinePanel({ items, onToggle, onFocus, onExpandAll }: OutlineP
               <button
                 type="button"
                 className="outline-collapse-button"
-                data-testid={`outline-toggle-${item.headingId}`}
+                data-testid={`${testIdPrefix}-toggle-${item.headingId}`}
                 aria-label={`${item.collapsed ? 'Expand' : 'Collapse'} ${item.title}`}
                 aria-expanded={item.collapsed ? 'false' : 'true'}
                 onClick={() => onToggle(item)}
@@ -68,7 +81,7 @@ export function OutlinePanel({ items, onToggle, onFocus, onExpandAll }: OutlineP
               <button
                 type="button"
                 className="outline-jump-button"
-                data-testid={`outline-jump-${item.headingId}`}
+                data-testid={`${testIdPrefix}-jump-${item.headingId}`}
                 aria-label={`Jump to ${item.title}`}
                 onClick={() => onFocus(item)}
               >
