@@ -1,0 +1,17 @@
+ROU-01 Step 0 host decision
+- Verified app/web has no current insight-router/WritingPlace/availabilityFor host.
+- Search pattern `insight-router|WritingPlace|availabilityFor|places` returned only unrelated substring matches in EditorWorkspace.tsx (`history`) and mention-real-editor.spec.ts (`replaces`).
+- Decision: no sensible clean non-Bead-2 UI/integration host exists in the current app. No UI file was edited.
+- Integration hook remains the router library surface: `places()`, `availabilityFor(payload)`, and `route(payload, placeId)`.
+
+Required validation output:
+
+ RUN  v1.6.1 /Users/borker/dev/lash-doc-delight-sprint
+
+ ✓ packages/testing/unit/insight-router/router.test.ts  (15 tests) 6ms
+
+ Test Files  1 passed (1)
+      Tests  15 passed (15)
+   Start at  22:43:16
+   Duration  382ms (transform 58ms, setup 0ms, collect 52ms, tests 6ms, environment 0ms, prepare 105ms)
+

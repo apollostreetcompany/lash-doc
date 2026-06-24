@@ -68,6 +68,29 @@ describe('stableInsightId / createInsightPayload', () => {
 });
 
 describe('InsightRouter routing', () => {
+  it('throws on duplicate register and exposes registry helpers', () => {
+    const router = new InsightRouter({ now: fixedClock });
+    const doc = createDocumentInsertPlace(() => 'pos:1');
+    const memory = createPersephonePlace({ remember: async () => ({ id: 'mem-1' }) });
+
+    expect(router.has('doc')).toBe(false);
+    expect(router.register(doc)).toBe(router);
+    expect(router.has('doc')).toBe(true);
+    expect(router.resolve('doc')).toBe(doc);
+    expect(router.places()).toEqual([doc]);
+    expect(() => router.register(createDocumentInsertPlace(() => 'pos:2'))).toThrow(
+      'writing place "doc" is already registered',
+    );
+
+    router.register(memory);
+    expect(router.places().map((place) => place.id)).toEqual(['doc', 'persephone']);
+    expect(router.unregister('doc')).toBe(true);
+    expect(router.has('doc')).toBe(false);
+    expect(router.resolve('doc')).toBeUndefined();
+    expect(router.unregister('doc')).toBe(false);
+    expect(router.places().map((place) => place.id)).toEqual(['persephone']);
+  });
+
   it('routes to a built-in place and records a success', async () => {
     const insert = vi.fn(() => 'pos:42');
     const router = new InsightRouter({ now: fixedClock }).register(
@@ -108,6 +131,67 @@ describe('InsightRouter routing', () => {
     expect(insert).toHaveBeenCalledTimes(1);
   });
 
+  it('does not cache failed writes as idempotent successes', async () => {
+    let writes = 0;
+    const write: WritingPlace['write'] = (_payload, ctx) => {
+      writes += 1;
+      if (writes === 1) {
+        return {
+          ok: false,
+          placeId: 'flaky',
+          code: 'failed',
+          error: 'transient write failure',
+          at: ctx.now(),
+        };
+      }
+      return {
+        ok: true,
+        placeId: 'flaky',
+        ref: 'flaky:ok',
+        idempotent: false,
+        at: ctx.now(),
+      };
+    };
+    const flaky: WritingPlace = {
+      id: 'flaky',
+      label: 'Flaky place',
+      kind: 'external',
+      description: 'fails once',
+      isConfigured: () => true,
+      accepts: () => true,
+      write,
+    };
+    const router = new InsightRouter({ now: fixedClock }).register(flaky);
+
+    const first = await router.route(payload(), 'flaky');
+    const second = await router.route(payload(), 'flaky');
+    const third = await router.route(payload(), 'flaky');
+
+    expect(first).toEqual({
+      ok: false,
+      placeId: 'flaky',
+      code: 'failed',
+      error: 'transient write failure',
+      at: FIXED,
+    });
+    expect(second).toEqual({
+      ok: true,
+      placeId: 'flaky',
+      ref: 'flaky:ok',
+      idempotent: false,
+      at: FIXED,
+    });
+    expect(third).toEqual({
+      ok: true,
+      placeId: 'flaky',
+      ref: 'flaky:ok',
+      idempotent: true,
+      at: FIXED,
+    });
+    expect(writes).toBe(2);
+    expect(router.history().map((entry) => entry.result.ok)).toEqual([false, true, true]);
+  });
+
   it('isolates a throwing place and stays usable (no silent fallback)', async () => {
     const exploding: WritingPlace = {
       id: 'boom',
@@ -137,9 +221,11 @@ describe('InsightRouter routing', () => {
   });
 
   it('rejects invalid payloads, unknown places, and guard refusals with typed codes', async () => {
-    const router = new InsightRouter({ now: fixedClock }).register(
-      createDocumentInsertPlace(() => 'pos'),
-    );
+    const guarded: WritingPlace = {
+      ...createDocumentInsertPlace(() => 'pos'),
+      accepts: () => 'blocked by policy',
+    };
+    const router = new InsightRouter({ now: fixedClock }).register(guarded);
     const invalid = await router.route(payload({ text: '' }), 'doc');
     expect(invalid.ok).toBe(false);
     if (!invalid.ok) expect(invalid.code).toBe('invalid');
@@ -147,6 +233,50 @@ describe('InsightRouter routing', () => {
     const unknown = await router.route(payload(), 'nowhere');
     expect(unknown.ok).toBe(false);
     if (!unknown.ok) expect(unknown.code).toBe('rejected');
+
+    const rejected = await router.route(payload(), 'doc');
+    expect(rejected.ok).toBe(false);
+    if (!rejected.ok) {
+      expect(rejected.code).toBe('rejected');
+      expect(rejected.error).toBe('blocked by policy');
+    }
+  });
+
+  it('records failure audit detail without secrets or fallback rewrites', async () => {
+    const router = new InsightRouter({ now: fixedClock }).register(
+      createDocumentInsertPlace(() => 'pos'),
+    );
+    const author = { type: 'ai', id: 'ai:editor' } as const;
+    const result = await router.route(
+      payload({
+        id: 'bad:1',
+        kind: 'unsupported' as InsightPayload['kind'],
+        source: { author },
+      }),
+      'doc',
+    );
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result).toMatchObject({
+        placeId: 'doc',
+        code: 'invalid',
+        at: FIXED,
+      });
+      expect(result.error).toContain('payload.kind must be one of:');
+      expect(result.error).not.toContain('secret');
+    }
+
+    expect(router.history()).toEqual([
+      {
+        payloadId: 'bad:1',
+        placeId: 'doc',
+        kind: 'unknown',
+        actor: author,
+        result,
+        at: FIXED,
+      },
+    ]);
   });
 });
 
@@ -187,15 +317,22 @@ describe('external writing-place placeholders', () => {
     });
   });
 
-  it('availabilityFor reflects configured + accepts state', () => {
+  it('availabilityFor reflects configured + accepts state with visible unconfigured reasons', () => {
     const router = createDefaultInsightRouter({
       now: fixedClock,
       persephone: { remember: async () => ({ id: 'm' }) },
     });
     const avail = router.availabilityFor(payload());
-    const byId = Object.fromEntries(avail.map((a) => [a.place.id, a.available]));
-    expect(byId.persephone).toBe(true);
-    expect(byId.hermes).toBe(false);
-    expect(byId.garden).toBe(false);
+    const byId = Object.fromEntries(avail.map((a) => [a.place.id, a]));
+    expect(router.places().map((place) => place.id)).toEqual(['persephone', 'hermes', 'garden']);
+    expect(byId.persephone).toMatchObject({ available: true });
+    expect(byId.hermes).toMatchObject({
+      available: false,
+      reason: 'Hermes (agent) is not configured',
+    });
+    expect(byId.garden).toMatchObject({
+      available: false,
+      reason: 'Garden (todos) is not configured',
+    });
   });
 });

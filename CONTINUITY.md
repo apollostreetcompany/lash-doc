@@ -82,6 +82,7 @@ Success criteria:
 57. Bead 37 merged through PR #30 as `02e03c4dcc860bc760f7d6a5dd6ae1cabf849d9d`; required PR CI run `28008919283` and post-merge `main` CI run `28009206138` both passed `build-and-test`.
 58. The delight sprint starts from `main` commit `358be3a` in worktree `/Users/borker/dev/lash-doc-delight-sprint` on branch `codex/ux/delightful-writing-sprint`; the validated release-feedback packet is `docs/plans/lash-delight-quip-feedback-packet.md` with feedback IDs VIS-01, CAN-01, OUT-01, COM-01, FMT-01, MOB-01, INF-01, INF-02, ROU-01, and TRK-01.
 59. VIS-01 establishes the delight sprint's evidence baseline: `scripts/visual-snap.mjs` now emits `desktop-1440-outline.png`, baseline screenshots live under `artifacts/ux-sprint/lash/baseline/`, and `artifacts/ux-sprint/reports/vis-01-visual-proof.md` records Quip-reference gap notes. The main observed gaps are dashboard-like chrome around the document, outline buried in app navigation, right rail/admin weight, and mobile topbar clipping.
+60. ROU-01 confirms there is no current `apps/web` UI host for insight routing; the sprint hardens router reliability with library-level tests and records the UI integration as a later product-host decision instead of forcing it into Bead-2-owned editor files.
 
 ## State
 
