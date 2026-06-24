@@ -83,6 +83,7 @@ Success criteria:
 58. The delight sprint starts from `main` commit `358be3a` in worktree `/Users/borker/dev/lash-doc-delight-sprint` on branch `codex/ux/delightful-writing-sprint`; the validated release-feedback packet is `docs/plans/lash-delight-quip-feedback-packet.md` with feedback IDs VIS-01, CAN-01, OUT-01, COM-01, FMT-01, MOB-01, INF-01, INF-02, ROU-01, and TRK-01.
 59. VIS-01 establishes the delight sprint's evidence baseline: `scripts/visual-snap.mjs` now emits `desktop-1440-outline.png`, baseline screenshots live under `artifacts/ux-sprint/lash/baseline/`, and `artifacts/ux-sprint/reports/vis-01-visual-proof.md` records Quip-reference gap notes. The main observed gaps are dashboard-like chrome around the document, outline buried in app navigation, right rail/admin weight, and mobile topbar clipping.
 60. ROU-01 confirms there is no current `apps/web` UI host for insight routing; the sprint hardens router reliability with library-level tests and records the UI integration as a later product-host decision instead of forcing it into Bead-2-owned editor files.
+61. Product Delight Wave 1 closes the concrete 375px mobile clipping defect and calms the desktop writing surface by flattening the document paper and reducing right-rail card weight. The pass is intentionally partial for OUT-01/COM-01: outline still belongs visually to the dark global sidebar, and comments still need stronger document-range anchoring in a later UX bead.
 
 ## State
 
@@ -146,16 +147,19 @@ Success criteria:
 - [x] Final Beads 23-36 protected `main` CI passed: run `26914289177`, workflow `CI`, job `build-and-test`.
 - [x] Superseded stacked PRs #15-#27 were closed after the integrated merge.
 - [x] Bead 37 - Feature audit metadata, understand graph, and insight-router hardening merged through PR #30.
+- [x] Delight sprint VIS-01 - Quip-vs-Lash visual baseline and outline screenshot capture.
+- [x] Delight sprint ROU-01 - Insight-router reliability coverage and UI-host decision record.
+- [x] Delight sprint Product Delight Wave 1 - CAN-01/MOB-01 improved, OUT-01/COM-01/FMT-01 guarded with residual UX gaps documented.
 
 ### Now
 
-- Delight sprint Wave 1: implement product delight fixes (CAN-01/OUT-01/COM-01/FMT-01/MOB-01), router reliability/test closure (ROU-01), Cloudflare realtime receipts (INF-02), then dynamic Render runtime preflight (INF-01).
+- Delight sprint infrastructure receipts: Cloudflare realtime receipts (INF-02), then dynamic Render runtime preflight (INF-01).
 
 ### Next
 
 - Production web hosting strategy for dynamic `/doc/[id]` routes and any future Riddle integration remain separate workstreams.
 - Decide whether to turn the 19 deferred feature-audit scaffold items into a new bead stack.
-- Complete and review delight sprint beads VIS-01, CAN-01, OUT-01, COM-01, FMT-01, MOB-01, INF-01, INF-02, ROU-01, and TRK-01.
+- Complete and review remaining delight sprint beads INF-01, INF-02, and TRK-01.
 - Run TRK-01 last to reconcile the canonical tracker and summary with sprint outcomes.
 
 ## Open Questions

@@ -1,0 +1,51 @@
+
+> lash-doc@ test:e2e /Users/borker/dev/lash-doc-delight-sprint
+> NEXT_PUBLIC_LASH_TEST_HOOKS=true pnpm --filter @lash/web build && playwright test "--" "--project=chromium" "apps/web/e2e/mobile/mobile-editor.spec.ts"
+
+
+> @lash/web@0.1.0 build /Users/borker/dev/lash-doc-delight-sprint/apps/web
+> next build
+
+  ▲ Next.js 14.2.5
+  - Experiments (use with caution):
+    · typedRoutes
+
+   Creating an optimized production build ...
+ ✓ Compiled successfully
+   Linting and checking validity of types ...
+   Collecting page data ...
+   Generating static pages (0/4) ...
+   Generating static pages (1/4) 
+   Generating static pages (2/4) 
+   Generating static pages (3/4) 
+ ✓ Generating static pages (4/4)
+   Finalizing page optimization ...
+   Collecting build traces ...
+
+Route (app)                              Size     First Load JS
+┌ ○ /                                    148 B           328 kB
+├ ○ /_not-found                          870 B            88 kB
+└ ƒ /doc/[id]                            147 B           328 kB
++ First Load JS shared by all            87.1 kB
+  ├ chunks/247-2f6bf97138bdf827.js       31.5 kB
+  ├ chunks/c4040940-1fe014dc614768de.js  53.6 kB
+  └ other shared chunks (total)          1.97 kB
+
+
+○  (Static)   prerendered as static content
+ƒ  (Dynamic)  server-rendered on demand
+
+[2m[WebServer] [22m(node:37288) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+[2m[WebServer] [22m(Use `node --trace-warnings ...` to show where the warning was created)
+[2m[WebServer] [22m(node:37399) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+[2m[WebServer] [22m(Use `node --trace-warnings ...` to show where the warning was created)
+
+Running 1 test using 1 worker
+
+(node:37726) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:37726) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ✓  1 [chromium] › apps/web/e2e/mobile/mobile-editor.spec.ts:14:7 › mobile writing surface › keeps document chrome inside the viewport while editing and reviewing (2.2s)
+
+  1 passed (3.8s)
