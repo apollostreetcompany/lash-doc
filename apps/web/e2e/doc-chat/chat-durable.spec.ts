@@ -1,20 +1,10 @@
 import { expect, test, type Browser, type BrowserContext, type Page } from '@playwright/test';
+import type { Editor } from '@tiptap/core';
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
 import { once } from 'node:events';
 
 type LashTestWindow = Window & {
-  __lashEditor?: {
-    commands: {
-      focus: (position?: 'start' | 'end') => boolean;
-      setContent: (content: string) => boolean;
-    };
-    chain: () => {
-      focus: () => {
-        setTextSelection: (range: { from: number; to: number }) => { run: () => boolean };
-      };
-    };
-    getText: (options?: { blockSeparator?: string }) => string;
-  };
+  __lashEditor?: Editor;
 };
 
 const EMPTY_DOC = '<p></p>';
@@ -71,9 +61,34 @@ const createThreadWithReply = async (page: Page, reply: string) => {
   await expect(page.getByTestId('chat-create-thread')).toBeEnabled();
   await page.getByTestId('chat-create-thread').click();
   await expect(page.getByTestId('chat-thread')).toHaveCount(1);
+  await expect(page.getByTestId('chat-anchor-row')).toBeVisible();
+  await expect(page.getByTestId('chat-current-target')).toContainText('target');
+  await expect(page.getByTestId('chat-document-anchor-marker')).toBeVisible();
   await page.getByTestId('chat-reply-input').fill(reply);
   await page.getByTestId('chat-add-reply').click();
   await expect(page.getByTestId('chat-message').filter({ hasText: reply })).toBeVisible();
+};
+
+const selectedEditorText = (page: Page) =>
+  page.evaluate(() => {
+    const editor = (window as LashTestWindow).__lashEditor;
+    if (!editor) throw new Error('Lash editor test hook is unavailable');
+    const { from, to } = editor.state.selection;
+    return editor.state.doc.textBetween(from, to, '\n');
+  });
+
+const expectAnchorJumpSelects = async (page: Page, needle: string) => {
+  await expect(page.getByTestId('chat-jump-anchor')).toBeEnabled();
+  await page.evaluate(() => {
+    const editor = (window as LashTestWindow).__lashEditor;
+    if (!editor) throw new Error('Lash editor test hook is unavailable');
+    editor.commands.focus('end');
+  });
+  await page.getByTestId('chat-jump-anchor').click();
+  await expect(page.getByTestId('chat-anchor-jump-status')).toContainText(
+    `Selected ${needle} in the document.`,
+  );
+  await expect.poll(() => selectedEditorText(page)).toBe(needle);
 };
 
 const assertRealtimePortFree = () => {
@@ -173,12 +188,18 @@ test.describe('durable comments', () => {
 
     await selectText(page, 'target');
     await createThreadWithReply(page, 'Please check this wording');
+    await expectAnchorJumpSelects(page, 'target');
     await page.getByTestId('chat-resolve-thread').click();
     await expect(page.getByTestId('chat-thread-status')).toContainText('Resolved');
 
     await page.reload();
     await waitForEditor(page);
     await expect(page.getByTestId('chat-thread')).toHaveCount(1);
+    await expect(page.getByTestId('chat-anchor-row')).toBeVisible();
+    await expect(page.getByTestId('chat-current-target')).toContainText('Context lost');
+    await expect(page.getByTestId('chat-orphaned')).toContainText('Orphaned');
+    await expect(page.getByTestId('chat-document-anchor-marker')).toHaveCount(0);
+    await expect(page.getByTestId('chat-jump-anchor')).toBeDisabled();
     await expect(
       page.getByTestId('chat-message').filter({ hasText: 'Please check this wording' }),
     ).toBeVisible();
@@ -199,6 +220,9 @@ test.describe('durable comments', () => {
       await createThreadWithReply(clients.pageA, 'Remote reviewer can see this');
 
       await expect(clients.pageB.getByTestId('chat-thread')).toHaveCount(1);
+      await expect(clients.pageB.getByTestId('chat-anchor-row')).toBeVisible();
+      await expect(clients.pageB.getByTestId('chat-current-target')).toContainText('target');
+      await expect(clients.pageB.getByTestId('chat-document-anchor-marker')).toBeVisible();
       await expect(
         clients.pageB
           .getByTestId('chat-message')
@@ -207,6 +231,7 @@ test.describe('durable comments', () => {
 
       await typeIntoEditor(clients.pageB, ' after remote edit');
       await expect(clients.pageA.getByTestId('chat-anchor-status')).toContainText('Anchored');
+      await expect(clients.pageA.getByTestId('chat-current-target')).toContainText('target');
       await expect(clients.pageA.getByTestId('chat-current-context')).toContainText('target');
     } finally {
       await clients.close();

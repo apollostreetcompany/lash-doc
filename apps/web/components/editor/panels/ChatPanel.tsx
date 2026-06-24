@@ -9,6 +9,8 @@ import type { Editor } from '@tiptap/core';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type * as Y from 'yjs';
 
+import { Icon } from '../../shell/Icon';
+
 export interface ChatPanelProps {
   editor: Editor | null;
   docId: DocumentId;
@@ -25,6 +27,16 @@ type LocalThread = ChatThread & {
   status: ThreadStatus;
   resolvedAt: string | null;
   updatedAt: string;
+};
+type ThreadView = {
+  thread: LocalThread;
+  mappedAnchor: ReturnType<typeof mapAnchor>;
+};
+type AnchorMarker = {
+  threadId: string;
+  top: number;
+  left: number;
+  label: string;
 };
 
 const LOCAL_USER = { type: 'user', id: 'local-user' } as const;
@@ -58,6 +70,55 @@ const createLocalId = (prefix: string) => {
     return `${prefix}:${crypto.randomUUID()}`;
   }
   return `${prefix}:${Date.now().toString(36)}:${Math.random().toString(36).slice(2)}`;
+};
+
+const docPositionForTextOffset = (editor: Editor, offset: number) => {
+  const doc = editor.state.doc;
+  const target = Math.max(0, offset);
+  for (let pos = 1; pos <= doc.content.size; pos += 1) {
+    if (doc.textBetween(0, pos, '\n').length >= target) {
+      return pos;
+    }
+  }
+  return doc.content.size;
+};
+
+const docRangeForText = (editor: Editor, text: string, preferredOffset: number) => {
+  if (!text) return null;
+  const doc = editor.state.doc;
+  const maxSpan = text.length + 6;
+  const findInWindow = (start: number, end: number) => {
+    for (let from = start; from <= end; from += 1) {
+      const maxTo = Math.min(doc.content.size, from + maxSpan);
+      for (let to = from + 1; to <= maxTo; to += 1) {
+        if (doc.textBetween(from, to, '\n') === text) {
+          return { from, to };
+        }
+      }
+    }
+    return null;
+  };
+  const preferred = docPositionForTextOffset(editor, preferredOffset);
+  const localWindow = Math.max(32, text.length * 2);
+  const local = findInWindow(
+    Math.max(1, preferred - localWindow),
+    Math.min(doc.content.size, preferred + localWindow),
+  );
+  if (local) {
+    return local;
+  }
+  return findInWindow(1, doc.content.size);
+};
+
+const scrollSelectionIntoView = () => {
+  const selection = window.getSelection();
+  if (!selection || selection.rangeCount === 0) return;
+  const { startContainer } = selection.getRangeAt(0);
+  const element =
+    startContainer.nodeType === Node.ELEMENT_NODE
+      ? (startContainer as Element)
+      : startContainer.parentElement;
+  element?.scrollIntoView({ block: 'center', inline: 'nearest' });
 };
 
 const sameThreads = (left: LocalThread[], right: LocalThread[]) =>
@@ -194,6 +255,8 @@ export function ChatPanel({
   const [threads, setThreads] = useState<LocalThread[]>([]);
   const [filter, setFilter] = useState<ChatFilter>('all');
   const [replyDrafts, setReplyDrafts] = useState<Record<string, string>>({});
+  const [activeThreadId, setActiveThreadId] = useState<string | null>(null);
+  const [anchorJumpStatus, setAnchorJumpStatus] = useState('');
   const threadsRef = useRef<LocalThread[]>([]);
   const yThreadsMap = useMemo(
     () => realtimeDoc?.getMap<string>(CHAT_THREADS_YMAP) ?? null,
@@ -250,7 +313,10 @@ export function ChatPanel({
   );
 
   const selectionText = selectedText(editor);
-  const visibleThreads = threads.filter((thread) => threadMatchesFilter(thread, filter));
+  const visibleThreads = useMemo(
+    () => threads.filter((thread) => threadMatchesFilter(thread, filter)),
+    [filter, threads],
+  );
   const threadViews = useMemo(
     () =>
       visibleThreads.map((thread) => ({
@@ -264,6 +330,61 @@ export function ChatPanel({
         }),
       })),
     [baseVersion, currentText, visibleThreads],
+  ) satisfies ThreadView[];
+  const [anchorMarkers, setAnchorMarkers] = useState<AnchorMarker[]>([]);
+
+  useEffect(() => {
+    if (!editor || !open || !threadViews.length) {
+      setAnchorMarkers([]);
+      return;
+    }
+    let frame: number | null = null;
+    const updateMarkers = () => {
+      const nextMarkers = threadViews.flatMap(({ thread, mappedAnchor }) => {
+        if (mappedAnchor.orphaned) return [];
+        try {
+          const targetText = currentText.slice(mappedAnchor.from, mappedAnchor.to);
+          const range = docRangeForText(editor, targetText, mappedAnchor.from);
+          const from = range?.from ?? docPositionForTextOffset(editor, mappedAnchor.from);
+          const coords = editor.view.coordsAtPos(from);
+          return [
+            {
+              threadId: thread.id,
+              top: coords.top - 2,
+              left: Math.max(8, coords.left - 34),
+              label: thread.anchor.token.text,
+            },
+          ];
+        } catch {
+          return [];
+        }
+      });
+      setAnchorMarkers(nextMarkers);
+    };
+    const scheduleUpdate = () => {
+      if (frame !== null) {
+        window.cancelAnimationFrame(frame);
+      }
+      frame = window.requestAnimationFrame(updateMarkers);
+    };
+    scheduleUpdate();
+    window.addEventListener('scroll', scheduleUpdate, true);
+    window.addEventListener('resize', scheduleUpdate);
+    editor.on('transaction', scheduleUpdate);
+    editor.on('selectionUpdate', scheduleUpdate);
+    return () => {
+      if (frame !== null) {
+        window.cancelAnimationFrame(frame);
+      }
+      window.removeEventListener('scroll', scheduleUpdate, true);
+      window.removeEventListener('resize', scheduleUpdate);
+      editor.off('transaction', scheduleUpdate);
+      editor.off('selectionUpdate', scheduleUpdate);
+    };
+  }, [currentText, editor, open, threadViews]);
+  const threadViewsById = useMemo(
+    () => new Map(threadViews.map((view) => [view.thread.id, view])),
+    [threadViews],
   );
 
   if (!open) return null;
@@ -354,8 +475,50 @@ export function ChatPanel({
     );
   };
 
+  const jumpToMappedAnchor = (
+    mappedAnchor: { from: number; to: number; orphaned?: boolean },
+    thread: LocalThread,
+  ) => {
+    setActiveThreadId(thread.id);
+    if (!editor || mappedAnchor.orphaned) {
+      setAnchorJumpStatus(`Document target for ${thread.anchor.token.text} is unavailable.`);
+      return;
+    }
+    const targetText =
+      currentText.slice(mappedAnchor.from, mappedAnchor.to) || thread.anchor.token.text;
+    const range = docRangeForText(editor, targetText, mappedAnchor.from);
+    const from = range?.from ?? docPositionForTextOffset(editor, mappedAnchor.from);
+    const to = range?.to ?? Math.max(from + 1, docPositionForTextOffset(editor, mappedAnchor.to));
+    editor.chain().focus().setTextSelection({ from, to }).run();
+    scrollSelectionIntoView();
+    setAnchorJumpStatus(`Selected ${thread.anchor.token.text} in the document.`);
+  };
+
   return (
     <section className="lash-chat-panel" data-testid="doc-chat-panel" aria-label="Document chat">
+      {anchorMarkers.map((marker) => {
+        const view = threadViewsById.get(marker.threadId);
+        if (!view) return null;
+        return (
+          <button
+            key={marker.threadId}
+            type="button"
+            className="chat-document-anchor-marker"
+            data-testid="chat-document-anchor-marker"
+            data-active={activeThreadId === marker.threadId ? 'true' : 'false'}
+            style={{ top: marker.top, left: marker.left }}
+            aria-label={`Comment thread on ${marker.label}`}
+            onClick={() => {
+              jumpToMappedAnchor(view.mappedAnchor, view.thread);
+              document
+                .getElementById(`chat-thread-${domId(marker.threadId)}`)
+                ?.scrollIntoView({ block: 'nearest' });
+            }}
+          >
+            <Icon name="message" />
+          </button>
+        );
+      })}
       <div className="chat-panel-header">
         <h2 className="chat-panel-title">Doc Chat</h2>
         <span className="chat-panel-count" data-testid="chat-count">
@@ -400,6 +563,9 @@ export function ChatPanel({
           All
         </button>
       </div>
+      <p className="sr-only" aria-live="polite" data-testid="chat-anchor-jump-status">
+        {anchorJumpStatus}
+      </p>
 
       {threadViews.length ? (
         <ol
@@ -411,17 +577,21 @@ export function ChatPanel({
             const currentContext = mappedAnchor.orphaned
               ? 'Context lost'
               : currentText.slice(mappedAnchor.from, mappedAnchor.to);
+            const threadDomId = `chat-thread-${domId(thread.id)}`;
             const threadTitleId = `chat-thread-title-${domId(thread.id)}`;
             const threadTitle = `Thread on ${thread.anchor.token.text}`;
             const replyDraft = replyDrafts[thread.id] ?? '';
             return (
               <li key={thread.id}>
                 <article
+                  id={threadDomId}
                   className="chat-thread"
                   data-testid="chat-thread"
                   data-orphaned={mappedAnchor.orphaned ? 'true' : 'false'}
+                  data-active={activeThreadId === thread.id ? 'true' : 'false'}
                   aria-labelledby={threadTitleId}
                   tabIndex={0}
+                  onFocus={() => setActiveThreadId(thread.id)}
                 >
                   <h3 id={threadTitleId} className="sr-only">
                     {threadTitle}
@@ -441,7 +611,31 @@ export function ChatPanel({
                       </span>
                     )}
                   </div>
-                  <div className="chat-context-grid">
+                  <div className="chat-anchor-row" data-testid="chat-anchor-row">
+                    <span className="chat-anchor-glyph" aria-hidden="true">
+                      <Icon name="message" />
+                    </span>
+                    <div className="chat-anchor-copy">
+                      <span className="chat-context-label">
+                        {mappedAnchor.orphaned ? 'Detached target' : 'Current target'}
+                      </span>
+                      <p className="chat-anchor-quote" data-testid="chat-current-target">
+                        {currentContext}
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      className="chat-anchor-jump"
+                      data-testid="chat-jump-anchor"
+                      disabled={mappedAnchor.orphaned}
+                      aria-label={`Show document target for thread on ${thread.anchor.token.text}`}
+                      onClick={() => jumpToMappedAnchor(mappedAnchor, thread)}
+                    >
+                      <Icon name="eye" />
+                      <span>Show</span>
+                    </button>
+                  </div>
+                  <div className="chat-context-grid" data-testid="chat-context-grid">
                     <div>
                       <span className="chat-context-label">History</span>
                       <p data-testid="chat-history-context">{thread.anchor.token.text}</p>

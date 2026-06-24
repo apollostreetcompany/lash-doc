@@ -167,6 +167,9 @@
 - Delight sprint merge pass: PR #32 was squash-merged as `11ff925ad4e07d0df5b5a1698ad69cc41b76fc26`; protected main CI run `28105654731` passed `build-and-test` in 5m31s.
 - OUT-01 follow-up validation - pass: `git diff --check`, `pnpm run typecheck`, focused ESLint, focused Chromium e2e across sidebar/outline/a11y/focus (8 passed), and visual snapshot capture to `artifacts/ux-sprint/lash/followup-outline/`. Receipts: `artifacts/ux-sprint/reports/out-02-static-checks.log`, `artifacts/ux-sprint/reports/out-02-outline-e2e.log`, `artifacts/ux-sprint/reports/out-02-visual-snap.log`, and `artifacts/ux-sprint/reports/out-02-document-outline-proof.md`.
 - OUT-01 follow-up merge pass: PR #33 was squash-merged as `e5ab31e8a9875b5c625d783206e5c57749769710`; protected main CI run `28108304331` passed `build-and-test` in 5m45s: `https://github.com/apollostreetcompany/lash-doc/actions/runs/28108304331`.
+- Active COM-01 branch: `codex/ux/com-01-comment-rail` in worktree `/Users/borker/dev/lash-doc-com-01`, started from final `main` `01d08124373df396a38b14773707577765ae2919`. Local implementation is complete: mapped chat threads now derive a document-side marker, compact current-target row, and Show-in-document action while preserving durable thread storage/Yjs behavior.
+- COM-01 validation receipts: `artifacts/ux-sprint/reports/com-01-packet-validate.log`, `com-01-e2e.log`, `com-01-typecheck.log`, `com-01-lint.log`, `com-01-build.log`, `com-01-tracker-validate.log`, and `com-01-visual-proof.md`. Final screenshots are under `artifacts/ux-sprint/lash/com-01/final/`.
+- COM-01 caveats: duplicate identical text can still map to the first matching occurrence until the anchor model stores true editor positions; the reload test preserves the thread but shows `Context lost` if the test-seeded document body is gone.
 
 ## Operational Notes
 
@@ -200,5 +203,5 @@
 - Durable comments/suggestions: Bead 35 provides durable/synced thread metadata and suggestion resolution records. A dedicated server comment API, global audit/moderation view, richer suggestion history persistence, and policy-aware server-side distinction between comment/suggest/edit Yjs mutations remain follow-up work.
 - Runtime/deploy: Realtime rooms now have a Cloudflare Durable Object Worker with signed actor session grants, append-only Yjs update persistence, cumulative snapshots, reload hydration, and restore-as-new-head hook. Arbitrary `/doc/[id]` web routes remain local/Next-runtime only; static Cloudflare Pages export is blocked until a web dynamic-route hosting strategy is chosen.
 - Feature audit follow-up: `FEATURE_AUDIT/DEFERRED.md` identifies 19 deferred scaffold/net-new items that should become a separate implementation stack if the product direction requires them.
-- UX follow-up: COM-01 remains the most visible delight gap after OUT-01; comments/chat still need stronger document-range anchoring and a lighter conversation rail.
+- UX follow-up: COM-01 is locally complete and awaiting PR/merge; remaining writing-experience candidates are duplicate-precise comment anchors, local document-body persistence across reload, and first-run daily-writing polish.
 - Future custom-domain/production hosting decisions and future Riddle integration are separate workstreams; realtime infra should prefer Cloudflare first, then Render only if needed.

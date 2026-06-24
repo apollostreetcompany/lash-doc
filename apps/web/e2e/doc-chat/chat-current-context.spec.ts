@@ -31,5 +31,7 @@ test('chat-current-context', async ({ page }) => {
   await page.keyboard.type(' in current version');
 
   await expect(page.getByTestId('chat-current-context')).toContainText('target');
+  await expect(page.getByTestId('chat-current-target')).toContainText('target');
+  await expect(page.getByTestId('chat-document-anchor-marker')).toBeVisible();
   await expect(page.getByTestId('chat-anchor-status')).toContainText('Anchored');
 });

@@ -92,6 +92,8 @@ Success criteria:
 67. PR #32 merged the delight sprint into `main` as `11ff925ad4e07d0df5b5a1698ad69cc41b76fc26`; PR CI run `28105284971` and post-merge main CI run `28105654731` both passed `build-and-test`. The follow-up OUT-01 bead starts from that merge in worktree `/Users/borker/dev/lash-doc-delight-followup` on branch `codex/ux/delightful-writing-followup`.
 68. OUT-01 follow-up makes the document-side outline the primary desktop outline: the global sidebar defaults to collapsed icon rail, the canonical `lash-outline-panel` renders beside the document at wide desktop widths, sidebar outline fallback uses sidebar-specific IDs to avoid duplicate landmarks, and the mobile drawer retains outline access. Validation receipts live under `artifacts/ux-sprint/reports/out-02-*`.
 69. PR #33 merged the OUT-01 follow-up into `main` as `e5ab31e8a9875b5c625d783206e5c57749769710`; PR CI run `28107894887` passed `build-and-test` in 5m20s, and post-merge main CI run `28108304331` passed `build-and-test` in 5m45s.
+70. COM-01 starts from final `main` commit `01d08124373df396a38b14773707577765ae2919` in worktree `/Users/borker/dev/lash-doc-com-01` on branch `codex/ux/com-01-comment-rail`. The bead target is to make comments/chat feel document-anchored and Quip-like while preserving writing focus, accessibility, and existing durable thread behavior.
+71. COM-01 local implementation adds a derived document-side comment marker, compact current-target row, and Show-in-document action for mapped chat threads without changing storage/Yjs contracts. Validation receipts are `artifacts/ux-sprint/reports/com-01-*`; duplicate identical text remains a known anchor-model caveat, and test-seeded reloads correctly show orphan handling when the document body is gone.
 
 ## State
 
@@ -165,16 +167,17 @@ Success criteria:
 - [x] Delight sprint PR #32 merged to remote `main` as `11ff925ad4e07d0df5b5a1698ad69cc41b76fc26`; post-merge `main` CI run `28105654731` passed.
 - [x] OUT-01 follow-up - document-side desktop outline, collapsed icon rail, mobile fallback, canonical tracker update, visual proof, and focused e2e coverage.
 - [x] OUT-01 follow-up PR #33 merged to remote `main` as `e5ab31e8a9875b5c625d783206e5c57749769710`; post-merge `main` CI run `28108304331` passed.
+- [x] COM-01 local implementation - document-side comment marker, compact target row, Show-in-document action, focused e2e/a11y, tracker update, and visual proof.
 
 ### Now
 
-- No active bead. Current focus is product assessment and next-bead selection for daily-writing readiness.
+- COM-01 - Open PR, wait for required CI, squash-merge to `main`, verify post-merge `main` CI, and delete the remote branch.
 
 ### Next
 
 - Production web hosting strategy for dynamic `/doc/[id]` routes and any future Riddle integration remain separate workstreams.
 - Decide whether to turn the 19 deferred feature-audit scaffold items into a new bead stack.
-- Prioritize the next writing-experience bead; COM-01 remains the strongest visible UX gap after the document-side outline pass.
+- Plan the next writing-experience bead after COM-01 lands. Likely candidates: duplicate-precise comment anchors, document-body persistence for local reloads, or first-run daily-writing polish.
 
 ## Open Questions
 
@@ -228,6 +231,7 @@ Success criteria:
 - `apps/web/e2e/online-typing/collaboration-delight.spec.ts`
 - `apps/web/e2e/share/invite-access.spec.ts`
 - `apps/web/e2e/doc-chat/chat-durable.spec.ts`
+- `/Users/borker/dev/lash-doc-com-01`
 - `apps/web/e2e/suggest-mode/suggest-durable.spec.ts`
 - `apps/web/e2e/performance/large-doc-typing.spec.ts`
 - `apps/web/e2e/document-identity/document-identity.spec.ts`

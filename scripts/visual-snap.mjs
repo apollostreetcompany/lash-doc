@@ -24,8 +24,7 @@ const SEED_BLOCKS = [
   { kind: 'heading', level: 1, text: 'Quarterly product launch' },
   {
     kind: 'paragraph',
-    text:
-      'This document tracks the launch plan, owners, and outstanding risks for the upcoming release.',
+    text: 'This document tracks the launch plan, owners, and outstanding risks for the upcoming release.',
   },
   { kind: 'heading', level: 2, text: 'Goals' },
   {
@@ -49,8 +48,7 @@ const SEED_BLOCKS = [
   { kind: 'heading', level: 2, text: 'Notes' },
   {
     kind: 'paragraph',
-    text:
-      "The blocker is integration with the existing identity service. Will revisit after Friday's review.",
+    text: "The blocker is integration with the existing identity service. Will revisit after Friday's review.",
   },
 ];
 
@@ -58,8 +56,7 @@ const OUTLINE_SEED_BLOCKS = [
   { kind: 'heading', level: 1, text: 'Long-form product memo' },
   {
     kind: 'paragraph',
-    text:
-      'A deliberately long memo for capturing the default sidebar outline beside a mid-scrolled writing canvas.',
+    text: 'A deliberately long memo for capturing the default sidebar outline beside a mid-scrolled writing canvas.',
   },
   ...[
     'Context and audience',
@@ -78,14 +75,12 @@ const OUTLINE_SEED_BLOCKS = [
     { kind: 'heading', level: 3, text: `${section} detail A` },
     {
       kind: 'paragraph',
-      text:
-        'The body stays intentionally plain so the capture emphasizes document structure, side navigation, and calm reading rhythm rather than custom product hooks.',
+      text: 'The body stays intentionally plain so the capture emphasizes document structure, side navigation, and calm reading rhythm rather than custom product hooks.',
     },
     { kind: 'heading', level: 3, text: `${section} detail B` },
     {
       kind: 'paragraph',
-      text:
-        'Additional text creates enough vertical depth for a mid-document scroll position while keeping the outline panel fully default-rendered.',
+      text: 'Additional text creates enough vertical depth for a mid-document scroll position while keeping the outline panel fully default-rendered.',
     },
   ]),
 ];
@@ -273,6 +268,40 @@ try {
     await page.waitForTimeout(300);
     // Click chat tab to focus chat section
     await page.locator('[data-testid="rail-tab-chat"]').click();
+    await page.evaluate(() => {
+      const editor = window.__lashEditor;
+      if (!editor) return;
+      const target = 'responsiveness';
+      const text = editor.getText({ blockSeparator: '\n' });
+      const index = text.indexOf(target);
+      if (index < 0) return;
+      const docRangeForText = (needle) => {
+        for (let from = 1; from <= editor.state.doc.content.size; from += 1) {
+          const maxTo = Math.min(editor.state.doc.content.size, from + needle.length + 6);
+          for (let to = from + 1; to <= maxTo; to += 1) {
+            if (editor.state.doc.textBetween(from, to, '\n') === needle) {
+              return { from, to };
+            }
+          }
+        }
+        return null;
+      };
+      const range = docRangeForText(target);
+      if (!range) return;
+      editor.chain().focus().setTextSelection(range).run();
+    });
+    await page.waitForFunction(
+      () => {
+        const button = document.querySelector('[data-testid="chat-create-thread"]');
+        return button instanceof HTMLButtonElement && !button.disabled;
+      },
+      null,
+      { timeout: 5000 },
+    );
+    await page.locator('[data-testid="chat-create-thread"]').click();
+    await page.waitForSelector('[data-testid="chat-document-anchor-marker"]', {
+      timeout: 5000,
+    });
     await page.waitForTimeout(400);
     await page.screenshot({
       path: join(outDir, 'desktop-1440-chat.png'),
