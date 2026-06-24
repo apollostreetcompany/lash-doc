@@ -94,6 +94,7 @@ Success criteria:
 69. PR #33 merged the OUT-01 follow-up into `main` as `e5ab31e8a9875b5c625d783206e5c57749769710`; PR CI run `28107894887` passed `build-and-test` in 5m20s, and post-merge main CI run `28108304331` passed `build-and-test` in 5m45s.
 70. COM-01 starts from final `main` commit `01d08124373df396a38b14773707577765ae2919` in worktree `/Users/borker/dev/lash-doc-com-01` on branch `codex/ux/com-01-comment-rail`. The bead target is to make comments/chat feel document-anchored and Quip-like while preserving writing focus, accessibility, and existing durable thread behavior.
 71. COM-01 local implementation adds a derived document-side comment marker, compact current-target row, and Show-in-document action for mapped chat threads without changing storage/Yjs contracts. Validation receipts are `artifacts/ux-sprint/reports/com-01-*`; duplicate identical text remains a known anchor-model caveat, and test-seeded reloads correctly show orphan handling when the document body is gone.
+72. PR #35 merged COM-01 to remote `main` as `d3ff1ea4cc9958ee283a5cbbf6e69917475c88d1`; PR CI run `28112567847` passed `build-and-test` in 6m03s, post-merge `main` CI run `28112972711` passed `build-and-test` in 5m47s, and remote branch `codex/ux/com-01-comment-rail` was deleted.
 
 ## State
 
@@ -168,16 +169,17 @@ Success criteria:
 - [x] OUT-01 follow-up - document-side desktop outline, collapsed icon rail, mobile fallback, canonical tracker update, visual proof, and focused e2e coverage.
 - [x] OUT-01 follow-up PR #33 merged to remote `main` as `e5ab31e8a9875b5c625d783206e5c57749769710`; post-merge `main` CI run `28108304331` passed.
 - [x] COM-01 local implementation - document-side comment marker, compact target row, Show-in-document action, focused e2e/a11y, tracker update, and visual proof.
+- [x] COM-01 PR #35 merged to remote `main` as `d3ff1ea4cc9958ee283a5cbbf6e69917475c88d1`; post-merge `main` CI run `28112972711` passed.
 
 ### Now
 
-- COM-01 - Open PR, wait for required CI, squash-merge to `main`, verify post-merge `main` CI, and delete the remote branch.
+- COM-01 merge closeout metadata branch `codex/docs/com-01-merge-closeout`.
 
 ### Next
 
 - Production web hosting strategy for dynamic `/doc/[id]` routes and any future Riddle integration remain separate workstreams.
 - Decide whether to turn the 19 deferred feature-audit scaffold items into a new bead stack.
-- Plan the next writing-experience bead after COM-01 lands. Likely candidates: duplicate-precise comment anchors, document-body persistence for local reloads, or first-run daily-writing polish.
+- Plan the next writing-experience bead. Likely candidates: duplicate-precise comment anchors, document-body persistence for local reloads, or first-run daily-writing polish.
 
 ## Open Questions
 
