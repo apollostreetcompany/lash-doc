@@ -36,6 +36,15 @@ test('sr-thread-nav', async ({ page }) => {
 
   await expect(page.getByRole('heading', { level: 3, name: 'Thread on target' })).toBeAttached();
   await expect(page.getByRole('list', { name: 'Messages for target' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Comment thread on target' })).toBeVisible();
+  const showTarget = page.getByRole('button', {
+    name: 'Show document target for thread on target',
+  });
+  await expect(showTarget).toBeEnabled();
+  await showTarget.click();
+  await expect(page.getByTestId('chat-anchor-jump-status')).toContainText(
+    'Selected target in the document.',
+  );
   await expect(
     page.getByRole('button', { name: 'Add AI reply to thread on target' }),
   ).toBeEnabled();

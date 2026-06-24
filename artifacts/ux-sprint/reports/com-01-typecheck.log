@@ -1,0 +1,3 @@
+
+> lash-doc@ typecheck /Users/borker/dev/lash-doc-com-01
+> tsc -p tsconfig.json --noEmit

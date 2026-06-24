@@ -1,0 +1,40 @@
+
+> lash-doc@ build /Users/borker/dev/lash-doc-com-01
+> pnpm run typecheck && pnpm --filter @lash/web build
+
+
+> lash-doc@ typecheck /Users/borker/dev/lash-doc-com-01
+> tsc -p tsconfig.json --noEmit
+
+
+> @lash/web@0.1.0 build /Users/borker/dev/lash-doc-com-01/apps/web
+> next build
+
+  ▲ Next.js 14.2.5
+  - Experiments (use with caution):
+    · typedRoutes
+
+   Creating an optimized production build ...
+ ✓ Compiled successfully
+   Linting and checking validity of types ...
+   Collecting page data ...
+   Generating static pages (0/4) ...
+   Generating static pages (1/4)
+   Generating static pages (2/4)
+   Generating static pages (3/4)
+ ✓ Generating static pages (4/4)
+   Finalizing page optimization ...
+   Collecting build traces ...
+
+Route (app)                              Size     First Load JS
+┌ ○ /                                    148 B           329 kB
+├ ○ /_not-found                          870 B            88 kB
+└ ƒ /doc/[id]                            147 B           329 kB
++ First Load JS shared by all            87.1 kB
+  ├ chunks/247-2f6bf97138bdf827.js       31.5 kB
+  ├ chunks/c4040940-1fe014dc614768de.js  53.6 kB
+  └ other shared chunks (total)          1.97 kB
+
+
+○  (Static)   prerendered as static content
+ƒ  (Dynamic)  server-rendered on demand

@@ -1,0 +1,3 @@
+
+> lash-doc@ lint /Users/borker/dev/lash-doc-com-01
+> eslint . --ext .ts,.tsx,.js,.jsx --max-warnings=0
