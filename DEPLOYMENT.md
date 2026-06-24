@@ -29,6 +29,8 @@
 - Static export output: `apps/web/out`, produced by `LASH_STATIC_EXPORT=1 next build` via `pnpm run build:static`.
 - Deploy command: `make deploy-cloudflare`.
 - Public smoke/performance verification command: `make verify-cloudflare URL=https://lash-9xx.pages.dev/`.
+- Dynamic Render Blueprint: `render.yaml`, service `lash-doc-web`, Node runtime, build command `corepack enable && corepack prepare pnpm@8.10.0 --activate && pnpm install --frozen-lockfile && pnpm run build`, start command `pnpm --filter @lash/web exec next start -H 0.0.0.0 -p $PORT`.
+- Dynamic Render preflight command: `make verify-render`; it runs the production dynamic build and verifies `/` plus `/doc/render-smoke` through `next start` on `0.0.0.0:$PORT`.
 - GitHub remote is `https://github.com/apollostreetcompany/lash-doc.git`.
 - Default branch is `main`.
 - Branch protection is configured on `main` with strict required `build-and-test`, admin enforcement, and no force-push/delete.
@@ -46,7 +48,8 @@
 - Bead 35 stores document chat thread metadata and suggestion resolution records in document-scoped localStorage for local-only sessions, and mirrors them into per-record Y.Map entries in the existing realtime Y.Doc when realtime is enabled. No new deploy secret, binding, database, or service is required; Durable Object persistence captures these metadata updates through the same append-only Yjs update log and snapshot path as document content.
 - Bead 36 adds web UI and local test configurability: collaboration Ready/share, sync feedback, retry reconnect, and the `lash:realtime-url` localStorage override. Its post-subreview hardening also changes the realtime access split without adding a deploy secret, binding, database, or route: WebSocket joins require `doc.read`, while persisted/broadcast `yjs-update` messages require `doc.edit` inside the Durable Object.
 - INF-02 realtime deployment receipt: Cloudflare Worker `lash-realtime` deployed to `https://lash-realtime.ryan-borker.workers.dev` as version `06150817-80d3-4c52-b86d-cbfd2ac92f4f` on 2026-06-24. Public `GET /api/realtime/health` returned `ok: true`; unauthenticated `GET /api/realtime/rooms/inf-02/session?actorId=public-check` returned `403 invalid`; `wrangler secret list` returned `[]`. Production document sessions intentionally remain closed until `LASH_REALTIME_SESSION_SECRET` and `LASH_REALTIME_INVITE_SECRET` are set and matched by the dynamic web runtime.
-- The existing Cloudflare Pages public test site remains the static host for the last static-export deployment. The Beads 23-36 merged `main` build includes Bead 27 `/doc/[id]` Next routes, which are still local/Next-runtime routes until the web app deployment path is moved off static export or given an explicit dynamic route strategy; `pnpm run build:static` is expected to fail for that reason.
+- INF-01 dynamic Render receipt: `make verify-render` passed on 2026-06-24, and the Next build output classified `/doc/[id]` as dynamic server-rendered on demand. Render CLI auth works in Apollo Street Company's workspace and no existing Lash service was found, but Render CLI v2.6.1 exposes service inspection/deploy management rather than service creation/Blueprint apply; no `RENDER_API_KEY` is configured. Apply `render.yaml` through the Render Dashboard or API to create the live `lash-doc-web` service.
+- The existing Cloudflare Pages public test site remains the static host for the last static-export deployment. The Beads 23-36 merged `main` build includes Bead 27 `/doc/[id]` Next routes, which are now covered by the Render dynamic runtime Blueprint/preflight; Cloudflare Pages static export remains unsuitable for arbitrary dynamic document routes.
 
 ## Realtime Worker Preflight
 
@@ -95,4 +98,5 @@
 - CLI deployment inspection: `npx wrangler pages deployment list --project-name lash --environment production`
 - CLI fallback: redeploy a known-good checkout with `make deploy-cloudflare`.
 - Realtime Worker rollback path: inspect versions with `pnpm exec wrangler versions list --config packages/realtime-worker/wrangler.jsonc`, then roll back with `pnpm exec wrangler rollback --config packages/realtime-worker/wrangler.jsonc <version-id>`.
+- Render rollback path: use Render Dashboard -> `lash-doc-web` -> Deploys -> Roll back to the previous successful deploy, or trigger a known-good commit after the service is created from `render.yaml`.
 - For future deploy-affecting beads, record the health check URL, smoke URL, and rollback command/path in `handoff/beads.jsonl`.

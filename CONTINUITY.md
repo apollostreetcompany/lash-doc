@@ -86,6 +86,7 @@ Success criteria:
 61. Product Delight Wave 1 closes the concrete 375px mobile clipping defect and calms the desktop writing surface by flattening the document paper and reducing right-rail card weight. The pass is intentionally partial for OUT-01/COM-01: outline still belongs visually to the dark global sidebar, and comments still need stronger document-range anchoring in a later UX bead.
 62. INF-02 surfaced and fixes the realtime deploy Makefile command: package scripts with names that collide with pnpm built-ins must be invoked with `pnpm --filter <pkg> run <script>`, so `deploy-realtime-cloudflare` now calls `run deploy` and `realtime-dry-run` calls `run deploy:dry-run`.
 63. INF-02 deployed the Cloudflare realtime Worker to `https://lash-realtime.ryan-borker.workers.dev` as version `06150817-80d3-4c52-b86d-cbfd2ac92f4f`. Public service health passes and unauthenticated/non-invite session minting returns 403; `wrangler secret list` is empty, so production document sessions intentionally remain closed until the dynamic web runtime has shared production invite/session secrets.
+64. INF-01 adds a Render Blueprint and preflight for a dynamic Next.js web runtime: `render.yaml` defines `lash-doc-web`, `make verify-render` builds without `LASH_STATIC_EXPORT`, proves `/doc/[id]` is server-rendered on demand, and starts Next with `next start -H 0.0.0.0 -p $PORT`. Render CLI auth works and no existing Lash service was found, but this CLI has no service-create/Blueprint-apply command and no `RENDER_API_KEY` is present, so live Render service creation remains a Dashboard/API apply step.
 
 ## State
 
@@ -155,13 +156,13 @@ Success criteria:
 
 ### Now
 
-- Delight sprint infrastructure receipts: dynamic Render runtime preflight (INF-01), then tracker reconciliation (TRK-01).
+- Delight sprint tracker reconciliation (TRK-01), then review/PR/merge.
 
 ### Next
 
 - Production web hosting strategy for dynamic `/doc/[id]` routes and any future Riddle integration remain separate workstreams.
 - Decide whether to turn the 19 deferred feature-audit scaffold items into a new bead stack.
-- Complete and review remaining delight sprint beads INF-01 and TRK-01.
+- Complete and review remaining delight sprint bead TRK-01.
 - Run TRK-01 last to reconcile the canonical tracker and summary with sprint outcomes.
 
 ## Open Questions
