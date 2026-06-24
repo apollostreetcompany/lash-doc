@@ -80,6 +80,8 @@ Success criteria:
 55. Bead 37 packages the feature-audit metadata and insight-router hardening: `FEATURE_AUDIT/STORIES.csv` is the canonical 201-story tracker, `.understand-anything/knowledge-graph.json` is the current architecture graph, and `@lash/insight-router` provides fail-loud routing placeholders for Persephone, Hermes, and Garden writing places.
 56. Bead 37 validation fixed four branch-surfaced UX/test issues before PR: route-title hydration now runs before interaction on document switches, the outline expand-all control meets mobile touch-target minimums, solo documents keep collaborator chrome honest without placeholder peers, and the natural-date mention e2e uses a fixed browser clock and timezone.
 57. Bead 37 merged through PR #30 as `02e03c4dcc860bc760f7d6a5dd6ae1cabf849d9d`; required PR CI run `28008919283` and post-merge `main` CI run `28009206138` both passed `build-and-test`.
+58. The delight sprint starts from `main` commit `358be3a` in worktree `/Users/borker/dev/lash-doc-delight-sprint` on branch `codex/ux/delightful-writing-sprint`; the validated release-feedback packet is `docs/plans/lash-delight-quip-feedback-packet.md` with feedback IDs VIS-01, CAN-01, OUT-01, COM-01, FMT-01, MOB-01, INF-01, INF-02, ROU-01, and TRK-01.
+59. VIS-01 establishes the delight sprint's evidence baseline: `scripts/visual-snap.mjs` now emits `desktop-1440-outline.png`, baseline screenshots live under `artifacts/ux-sprint/lash/baseline/`, and `artifacts/ux-sprint/reports/vis-01-visual-proof.md` records Quip-reference gap notes. The main observed gaps are dashboard-like chrome around the document, outline buried in app navigation, right rail/admin weight, and mobile topbar clipping.
 
 ## State
 
@@ -146,12 +148,14 @@ Success criteria:
 
 ### Now
 
-- Bead 37 is merged to `main`; current focus is product readiness assessment and next-stack selection.
+- Delight sprint Wave 1: implement product delight fixes (CAN-01/OUT-01/COM-01/FMT-01/MOB-01), router reliability/test closure (ROU-01), Cloudflare realtime receipts (INF-02), then dynamic Render runtime preflight (INF-01).
 
 ### Next
 
 - Production web hosting strategy for dynamic `/doc/[id]` routes and any future Riddle integration remain separate workstreams.
 - Decide whether to turn the 19 deferred feature-audit scaffold items into a new bead stack.
+- Complete and review delight sprint beads VIS-01, CAN-01, OUT-01, COM-01, FMT-01, MOB-01, INF-01, INF-02, ROU-01, and TRK-01.
+- Run TRK-01 last to reconcile the canonical tracker and summary with sprint outcomes.
 
 ## Open Questions
 
@@ -239,6 +243,8 @@ Success criteria:
 - `FEATURE_AUDIT/STORIES.csv`
 - `FEATURE_AUDIT/ERRORS.md`
 - `FEATURE_AUDIT/REVIEW.md`
+- `docs/plans/lash-delight-quip-feedback-packet.md`
+- `artifacts/ux-sprint/`
 - `.understand-anything/knowledge-graph.json`
 - `.understand-anything/meta.json`
 - `.understand-anything/fingerprints.json`
