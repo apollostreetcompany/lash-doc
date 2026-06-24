@@ -44,13 +44,13 @@ realtime-dev:
 	pnpm exec wrangler dev --config packages/realtime-worker/wrangler.jsonc --local --port "$(LASH_REALTIME_PORT)"
 
 realtime-dry-run:
-	pnpm --filter @lash/realtime-worker deploy:dry-run
+	pnpm --filter @lash/realtime-worker run deploy:dry-run
 
 verify-realtime-runtime:
 	LASH_REALTIME_PORT="$(LASH_REALTIME_PORT)" pnpm run verify:realtime
 
 deploy-realtime-cloudflare: realtime-dry-run
-	pnpm --filter @lash/realtime-worker deploy
+	pnpm --filter @lash/realtime-worker run deploy
 
 deploy-cloudflare: build-static
 	npx wrangler pages deploy apps/web/out --project-name "$(CLOUDFLARE_PAGES_PROJECT)" --branch "$(CLOUDFLARE_BRANCH)" --commit-hash "$$(git rev-parse HEAD)" --commit-message "$$(git log -1 --pretty=%s)"

@@ -84,6 +84,8 @@ Success criteria:
 59. VIS-01 establishes the delight sprint's evidence baseline: `scripts/visual-snap.mjs` now emits `desktop-1440-outline.png`, baseline screenshots live under `artifacts/ux-sprint/lash/baseline/`, and `artifacts/ux-sprint/reports/vis-01-visual-proof.md` records Quip-reference gap notes. The main observed gaps are dashboard-like chrome around the document, outline buried in app navigation, right rail/admin weight, and mobile topbar clipping.
 60. ROU-01 confirms there is no current `apps/web` UI host for insight routing; the sprint hardens router reliability with library-level tests and records the UI integration as a later product-host decision instead of forcing it into Bead-2-owned editor files.
 61. Product Delight Wave 1 closes the concrete 375px mobile clipping defect and calms the desktop writing surface by flattening the document paper and reducing right-rail card weight. The pass is intentionally partial for OUT-01/COM-01: outline still belongs visually to the dark global sidebar, and comments still need stronger document-range anchoring in a later UX bead.
+62. INF-02 surfaced and fixes the realtime deploy Makefile command: package scripts with names that collide with pnpm built-ins must be invoked with `pnpm --filter <pkg> run <script>`, so `deploy-realtime-cloudflare` now calls `run deploy` and `realtime-dry-run` calls `run deploy:dry-run`.
+63. INF-02 deployed the Cloudflare realtime Worker to `https://lash-realtime.ryan-borker.workers.dev` as version `06150817-80d3-4c52-b86d-cbfd2ac92f4f`. Public service health passes and unauthenticated/non-invite session minting returns 403; `wrangler secret list` is empty, so production document sessions intentionally remain closed until the dynamic web runtime has shared production invite/session secrets.
 
 ## State
 
@@ -153,13 +155,13 @@ Success criteria:
 
 ### Now
 
-- Delight sprint infrastructure receipts: Cloudflare realtime receipts (INF-02), then dynamic Render runtime preflight (INF-01).
+- Delight sprint infrastructure receipts: dynamic Render runtime preflight (INF-01), then tracker reconciliation (TRK-01).
 
 ### Next
 
 - Production web hosting strategy for dynamic `/doc/[id]` routes and any future Riddle integration remain separate workstreams.
 - Decide whether to turn the 19 deferred feature-audit scaffold items into a new bead stack.
-- Complete and review remaining delight sprint beads INF-01, INF-02, and TRK-01.
+- Complete and review remaining delight sprint beads INF-01 and TRK-01.
 - Run TRK-01 last to reconcile the canonical tracker and summary with sprint outcomes.
 
 ## Open Questions

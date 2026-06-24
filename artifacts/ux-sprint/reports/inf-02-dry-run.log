@@ -1,0 +1,15 @@
+pnpm --filter @lash/realtime-worker deploy:dry-run
+
+> @lash/realtime-worker@0.1.0 deploy:dry-run /Users/borker/dev/lash-doc-delight-sprint/packages/realtime-worker
+> wrangler deploy --config wrangler.jsonc --dry-run
+
+
+ ⛅️ wrangler 4.97.0 (update available 4.104.0)
+──────────────────────────────────────────────
+Cloudflare agent skills are available for: Claude Code, Codex, GitHub Copilot, Gemini CLI, Warp, Kiro CLI, Antigravity, OpenClaw. Run wrangler in an interactive terminal to install them, or use `--install-skills` to install without prompting.
+Total Upload: 262.17 KiB / gzip: 51.83 KiB
+Your Worker has access to the following bindings:
+Binding                                        Resource
+env.LASH_REALTIME_ROOM (LashRealtimeRoom)      Durable Object
+
+--dry-run: exiting now.

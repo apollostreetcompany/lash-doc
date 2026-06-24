@@ -1,0 +1,3 @@
+
+> @lash/realtime-worker@0.1.0 typecheck /Users/borker/dev/lash-doc-delight-sprint/packages/realtime-worker
+> tsc -p tsconfig.json --noEmit

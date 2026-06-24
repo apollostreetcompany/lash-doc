@@ -1,0 +1,32 @@
+
+> @lash/realtime-worker@0.1.0 types /Users/borker/dev/lash-doc-delight-sprint/packages/realtime-worker
+> wrangler types --config wrangler.jsonc src/worker-configuration.d.ts && node ../../scripts/strip-trailing-whitespace.mjs src/worker-configuration.d.ts
+
+
+ ⛅️ wrangler 4.97.0 (update available 4.104.0)
+──────────────────────────────────────────────
+Cloudflare agent skills are available for: Claude Code, Codex, GitHub Copilot, Gemini CLI, Warp, Kiro CLI, Antigravity, OpenClaw. Run wrangler in an interactive terminal to install them, or use `--install-skills` to install without prompting.
+Generating project types...
+
+interface __BaseEnv_Env {
+	LASH_REALTIME_ROOM: DurableObjectNamespace<import("./index").LashRealtimeRoom>;
+}
+declare namespace Cloudflare {
+	interface GlobalProps {
+		mainModule: typeof import("./index");
+		durableNamespaces: "LashRealtimeRoom";
+	}
+	interface Env extends __BaseEnv_Env {}
+}
+interface Env extends __BaseEnv_Env {}
+
+Generating runtime types...
+
+Runtime types generated.
+
+
+✨ Types written to src/worker-configuration.d.ts
+
+📖 Read about runtime types
+https://developers.cloudflare.com/workers/languages/typescript/#generate-types
+📣 Remember to rerun 'wrangler types' after you change your wrangler.jsonc file.

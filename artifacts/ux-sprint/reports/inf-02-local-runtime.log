@@ -1,0 +1,48 @@
+LASH_REALTIME_PORT="8787" pnpm run verify:realtime
+
+> lash-doc@ verify:realtime /Users/borker/dev/lash-doc-delight-sprint
+> node scripts/verify-realtime-runtime.mjs
+
+{
+  "ok": true,
+  "baseUrl": "http://127.0.0.1:8787",
+  "deniedWithoutToken": {
+    "ok": false,
+    "error": "forbidden",
+    "reason": "invalid"
+  },
+  "serviceHealth": {
+    "ok": true,
+    "runtime": {
+      "provider": "cloudflare",
+      "coordination": "durable-object-room",
+      "transport": "websocket"
+    },
+    "service": "lash-realtime"
+  },
+  "roomHealth": {
+    "ok": true,
+    "actorId": "verify-runtime",
+    "roomId": "bead-28-health",
+    "runtime": {
+      "provider": "cloudflare",
+      "coordination": "durable-object-room",
+      "transport": "websocket"
+    },
+    "protocolVersion": 1,
+    "connections": 0,
+    "persistence": {
+      "updates": 0,
+      "snapshotSequence": null,
+      "hydrationUpdates": 0
+    }
+  },
+  "socketResult": {
+    "type": "pong",
+    "requestId": "verify-realtime-runtime",
+    "actorId": "verify-runtime",
+    "roomId": "bead-28-health",
+    "protocolVersion": 1,
+    "connections": 1
+  }
+}
