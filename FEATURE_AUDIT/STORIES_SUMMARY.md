@@ -25,8 +25,8 @@ Reconciled from canonical `FEATURE_AUDIT/STORIES.csv` on 2026-06-24. **201 stori
 
 | Status | Count |
 | --- | ---: |
-| none | 141 |
-| fixed | 36 |
+| none | 140 |
+| fixed | 37 |
 | spec-corrected | 4 |
 | deferred | 19 |
 | partial | 1 |
@@ -35,8 +35,8 @@ Reconciled from canonical `FEATURE_AUDIT/STORIES.csv` on 2026-06-24. **201 stori
 
 | Status | Count |
 | --- | ---: |
-| pending | 141 |
-| pass | 36 |
+| pending | 140 |
+| pass | 37 |
 | n/a | 23 |
 | partial | 1 |
 
@@ -79,7 +79,7 @@ The delight sprint did not add new product-feature rows to `STORIES.csv`; it rec
 | --- | --- | --- |
 | VIS-01 | passed | `artifacts/ux-sprint/reports/vis-01-visual-proof.md` |
 | CAN-01 | passed with residual UX debt | `artifacts/ux-sprint/reports/product-delight-visual-proof.md` |
-| OUT-01 | partial | `artifacts/ux-sprint/reports/product-delight-visual-proof.md` |
+| OUT-01 | passed after follow-up | `artifacts/ux-sprint/reports/out-02-document-outline-proof.md` |
 | COM-01 | partial | `artifacts/ux-sprint/reports/product-delight-visual-proof.md` |
 | FMT-01 | guarded | `artifacts/ux-sprint/reports/product-delight-visual-proof.md` |
 | MOB-01 | passed | `artifacts/ux-sprint/reports/product-delight-visual-proof.md` |
@@ -90,7 +90,6 @@ The delight sprint did not add new product-feature rows to `STORIES.csv`; it rec
 
 ## Current Product Gaps
 
-- OUT-01: outline remains visually anchored to the dark app sidebar rather than the document.
 - COM-01: comments/chat are calmer but still need stronger document-range anchoring.
 - INF-01: Render Blueprint and local dynamic runtime preflight pass, but live service creation remains a Dashboard/API apply step in this environment.
 - INF-02: Cloudflare realtime Worker is deployed and publicly healthy, but production document sessions remain closed until shared invite/session secrets are wired.

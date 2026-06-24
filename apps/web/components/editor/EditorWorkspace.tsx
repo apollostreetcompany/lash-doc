@@ -80,6 +80,7 @@ import { HistoryPanel, type HistoryTimeFilter } from './panels/HistoryPanel';
 import { MarkdownIO } from './panels/MarkdownIO';
 import { MentionPanel } from './panels/MentionPanel';
 import { OfflinePanel } from './panels/OfflinePanel';
+import { OutlinePanel } from './panels/OutlinePanel';
 import { SharePanel } from './panels/SharePanel';
 import { TableCellPanel, type ActiveCell } from './panels/TableCellPanel';
 
@@ -344,7 +345,7 @@ export function EditorWorkspace({ documentId = DEFAULT_DOCUMENT_ID }: EditorWork
   const [isSuggestMode, setIsSuggestMode] = useState(false);
   const [docTitle, setDocTitle] = useState(DEFAULT_DOC_TITLE);
   const [documents, setDocuments] = useState<LashDocumentRecord[]>([]);
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(true);
   const [railOpen, setRailOpen] = useState(true);
   const [activeTab, setActiveTab] = useState<RailTab>('chat');
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
@@ -1666,115 +1667,132 @@ export function EditorWorkspace({ documentId = DEFAULT_DOCUMENT_ID }: EditorWork
         />
 
         <div className="lash-doc-wrap">
-          <article className="lash-doc-paper" aria-labelledby="lash-doc-title-text">
-            <header className="lash-doc-header">
-              <input
-                aria-label="Document title"
-                className="lash-doc-title lash-doc-title-input"
-                data-testid="lash-doc-title-input"
-                id="lash-doc-title-text"
-                onBlur={handleDocTitleBlur}
-                onChange={handleDocTitleChange}
-                type="text"
-                value={docTitle}
-              />
-              <div
-                className="lash-doc-meta"
-                aria-label="Document metadata"
-                data-testid="lash-doc-meta"
-              >
-                <span>
-                  {historyEntries.length} version{historyEntries.length === 1 ? '' : 's'}
-                </span>
-                <span className="lash-doc-meta-dot" aria-hidden="true" />
-                <span>
-                  {outlineItems.length} section{outlineItems.length === 1 ? '' : 's'}
-                </span>
-                <span className="lash-doc-meta-dot" aria-hidden="true" />
-                <span data-testid="lash-doc-route">{documentPath(activeDocumentId)}</span>
-                <span className="lash-doc-meta-dot" aria-hidden="true" />
-                <span data-testid="invite-access-status">
-                  {inviteAccess === null
-                    ? 'Owner access'
-                    : inviteAccess.ok
-                      ? `Access granted: ${inviteAccess.scope}`
-                      : `Denied: ${inviteAccess.reason}`}
-                </span>
-                {isSuggestMode ? (
-                  <>
-                    <span className="lash-doc-meta-dot" aria-hidden="true" />
-                    <span
-                      style={{
-                        color: 'var(--color-coral-600)',
-                        fontWeight: 600,
-                        display: 'inline-flex',
-                        alignItems: 'center',
-                        gap: 4,
-                      }}
-                    >
-                      <Icon name="pencil" width={12} height={12} /> Suggesting
-                    </span>
-                  </>
-                ) : null}
-              </div>
-              {realtimePresence}
-            </header>
-
-            {isEditorReady && activeTableCell && !isFocusMode ? (
-              <TableCellPanel
-                active={activeTableCell}
-                onSetCellType={handleSetTableCellType}
-                onSetValue={handleSetTableCellValue}
-                onCycle={handleCycleTableCellOption}
-              />
-            ) : null}
-
-            <div className="lash-editor-content-wrapper" role="region" aria-label="Document editor">
-              {remoteCursorMarkers.length ? (
-                <div className="lash-remote-cursor-layer" aria-label="Remote cursors">
-                  {remoteCursorMarkers}
+          <div className="lash-doc-layout">
+            <article className="lash-doc-paper" aria-labelledby="lash-doc-title-text">
+              <header className="lash-doc-header">
+                <input
+                  aria-label="Document title"
+                  className="lash-doc-title lash-doc-title-input"
+                  data-testid="lash-doc-title-input"
+                  id="lash-doc-title-text"
+                  onBlur={handleDocTitleBlur}
+                  onChange={handleDocTitleChange}
+                  type="text"
+                  value={docTitle}
+                />
+                <div
+                  className="lash-doc-meta"
+                  aria-label="Document metadata"
+                  data-testid="lash-doc-meta"
+                >
+                  <span>
+                    {historyEntries.length} version{historyEntries.length === 1 ? '' : 's'}
+                  </span>
+                  <span className="lash-doc-meta-dot" aria-hidden="true" />
+                  <span>
+                    {outlineItems.length} section{outlineItems.length === 1 ? '' : 's'}
+                  </span>
+                  <span className="lash-doc-meta-dot" aria-hidden="true" />
+                  <span data-testid="lash-doc-route">{documentPath(activeDocumentId)}</span>
+                  <span className="lash-doc-meta-dot" aria-hidden="true" />
+                  <span data-testid="invite-access-status">
+                    {inviteAccess === null
+                      ? 'Owner access'
+                      : inviteAccess.ok
+                        ? `Access granted: ${inviteAccess.scope}`
+                        : `Denied: ${inviteAccess.reason}`}
+                  </span>
+                  {isSuggestMode ? (
+                    <>
+                      <span className="lash-doc-meta-dot" aria-hidden="true" />
+                      <span
+                        style={{
+                          color: 'var(--color-coral-600)',
+                          fontWeight: 600,
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: 4,
+                        }}
+                      >
+                        <Icon name="pencil" width={12} height={12} /> Suggesting
+                      </span>
+                    </>
+                  ) : null}
                 </div>
+                {realtimePresence}
+              </header>
+
+              {isEditorReady && activeTableCell && !isFocusMode ? (
+                <TableCellPanel
+                  active={activeTableCell}
+                  onSetCellType={handleSetTableCellType}
+                  onSetValue={handleSetTableCellValue}
+                  onCycle={handleCycleTableCellOption}
+                />
               ) : null}
-              {!isMounted || !isEditorReady ? (
-                <div className="editor-loading">Preparing your editor…</div>
-              ) : (
-                <div className="lash-editor-with-blame" data-blame-on="true">
-                  <div
-                    className="lash-blame-gutter"
-                    data-testid="blame-gutter"
-                    aria-label="Blame gutter"
-                  >
-                    {blameLines.length ? (
-                      blameLines.map((line) => (
-                        <button
-                          key={line.line}
-                          type="button"
-                          className="lash-blame-line"
-                          data-testid="blame-line"
-                          data-author-id={line.authorId ?? ''}
-                          title={
-                            line.authorId
-                              ? `Line ${line.line}: ${line.authorId}`
-                              : `Line ${line.line}: unattributed`
-                          }
-                          onClick={() => handleBlameLineClick(line.authorId)}
-                        >
-                          {line.authorId ?? '·'}
-                        </button>
-                      ))
-                    ) : (
-                      <span className="lash-blame-empty">·</span>
-                    )}
+
+              <div
+                className="lash-editor-content-wrapper"
+                role="region"
+                aria-label="Document editor"
+              >
+                {remoteCursorMarkers.length ? (
+                  <div className="lash-remote-cursor-layer" aria-label="Remote cursors">
+                    {remoteCursorMarkers}
                   </div>
-                  <EditorContent
-                    editor={editor}
-                    data-testid="lash-editor-content"
-                    className="lash-editor-content"
-                  />
-                </div>
-              )}
-            </div>
-          </article>
+                ) : null}
+                {!isMounted || !isEditorReady ? (
+                  <div className="editor-loading">Preparing your editor…</div>
+                ) : (
+                  <div className="lash-editor-with-blame" data-blame-on="true">
+                    <div
+                      className="lash-blame-gutter"
+                      data-testid="blame-gutter"
+                      aria-label="Blame gutter"
+                    >
+                      {blameLines.length ? (
+                        blameLines.map((line) => (
+                          <button
+                            key={line.line}
+                            type="button"
+                            className="lash-blame-line"
+                            data-testid="blame-line"
+                            data-author-id={line.authorId ?? ''}
+                            title={
+                              line.authorId
+                                ? `Line ${line.line}: ${line.authorId}`
+                                : `Line ${line.line}: unattributed`
+                            }
+                            onClick={() => handleBlameLineClick(line.authorId)}
+                          >
+                            {line.authorId ?? '·'}
+                          </button>
+                        ))
+                      ) : (
+                        <span className="lash-blame-empty">·</span>
+                      )}
+                    </div>
+                    <EditorContent
+                      editor={editor}
+                      data-testid="lash-editor-content"
+                      className="lash-editor-content"
+                    />
+                  </div>
+                )}
+              </div>
+            </article>
+
+            {!isFocusMode ? (
+              <div className="lash-document-outline" data-testid="lash-document-outline">
+                <OutlinePanel
+                  items={outlineItems}
+                  onToggle={handleToggleHeading}
+                  onFocus={handleFocusHeading}
+                  onExpandAll={handleExpandAll}
+                />
+              </div>
+            ) : null}
+          </div>
         </div>
       </AppShell>
     </div>

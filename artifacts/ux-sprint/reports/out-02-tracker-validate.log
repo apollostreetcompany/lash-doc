@@ -1,0 +1,5 @@
+csv_data_rows 201
+summary_states 201
+fix_status {"none":140,"fixed":37,"spec-corrected":4,"deferred":19,"partial":1}
+retest_status {"pending":140,"pass":37,"n/a":23,"partial":1}
+OK

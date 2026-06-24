@@ -1,0 +1,74 @@
+
+> lash-doc@ test:e2e /Users/borker/dev/lash-doc-delight-followup
+> NEXT_PUBLIC_LASH_TEST_HOOKS=true pnpm --filter @lash/web build && playwright test "--" "--project=chromium" "apps/web/e2e/sidebar/sidebar-regression.spec.ts" "apps/web/e2e/outline/outline-collapse-basic.spec.ts" "apps/web/e2e/outline/outline-persist.spec.ts" "apps/web/e2e/outline/outline-caret-move.spec.ts" "apps/web/e2e/a11y/sr-headings.spec.ts" "apps/web/e2e/focus-mode/focus-mode-ui.spec.ts"
+
+
+> @lash/web@0.1.0 build /Users/borker/dev/lash-doc-delight-followup/apps/web
+> next build
+
+  ▲ Next.js 14.2.5
+  - Experiments (use with caution):
+    · typedRoutes
+
+   Creating an optimized production build ...
+ ✓ Compiled successfully
+   Linting and checking validity of types ...
+   Collecting page data ...
+   Generating static pages (0/4) ...
+   Generating static pages (1/4)
+   Generating static pages (2/4)
+   Generating static pages (3/4)
+ ✓ Generating static pages (4/4)
+   Finalizing page optimization ...
+   Collecting build traces ...
+
+Route (app)                              Size     First Load JS
+┌ ○ /                                    148 B           328 kB
+├ ○ /_not-found                          870 B            88 kB
+└ ƒ /doc/[id]                            148 B           328 kB
++ First Load JS shared by all            87.1 kB
+  ├ chunks/247-2f6bf97138bdf827.js       31.5 kB
+  ├ chunks/c4040940-1fe014dc614768de.js  53.6 kB
+  └ other shared chunks (total)          1.97 kB
+
+
+○  (Static)   prerendered as static content
+ƒ  (Dynamic)  server-rendered on demand
+
+[2m[WebServer] [22m(node:41371) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+[2m[WebServer] [22m(Use `node --trace-warnings ...` to show where the warning was created)
+[2m[WebServer] [22m(node:41385) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+[2m[WebServer] [22m(Use `node --trace-warnings ...` to show where the warning was created)
+
+Running 8 tests using 5 workers
+
+(node:41395) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:41392) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:41394) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:41393) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:41391) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:41394) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:41392) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:41391) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:41393) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:41395) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ✓  5 [chromium] › apps/web/e2e/a11y/sr-headings.spec.ts:44:5 › sr-headings (1.3s)
+  ✓  3 [chromium] › apps/web/e2e/outline/outline-caret-move.spec.ts:32:7 › outline-caret-move › moves selection to next visible heading when collapsing (1.4s)
+  ✓  4 [chromium] › apps/web/e2e/outline/outline-collapse-basic.spec.ts:43:7 › outline-collapse-basic › collapses descendants and updates outline state (1.4s)
+  ✓  2 [chromium] › apps/web/e2e/focus-mode/focus-mode-ui.spec.ts:57:7 › focus-mode-ui › hides the active TableCellPanel when focus mode is on (1.6s)
+  ✓  1 [chromium] › apps/web/e2e/focus-mode/focus-mode-ui.spec.ts:4:7 › focus-mode-ui › toggles chrome visibility and preserves editor usability (2.0s)
+  ✓  7 [chromium] › apps/web/e2e/sidebar/sidebar-regression.spec.ts:50:7 › sidebar regression › keeps document outline reachable with collapsed desktop sidebar and focuses clicked heading (1.1s)
+  ✓  6 [chromium] › apps/web/e2e/outline/outline-persist.spec.ts:42:7 › outline-persist › restores collapsed headings from local storage (1.6s)
+  ✓  8 [chromium] › apps/web/e2e/sidebar/sidebar-regression.spec.ts:81:7 › sidebar regression › mobile drawer closes from its visible close button and restores focus (1.7s)
+
+  8 passed (4.9s)

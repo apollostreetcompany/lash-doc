@@ -89,6 +89,8 @@ Success criteria:
 64. INF-01 adds a Render Blueprint and preflight for a dynamic Next.js web runtime: `render.yaml` defines `lash-doc-web`, `make verify-render` builds without `LASH_STATIC_EXPORT`, proves `/doc/[id]` is server-rendered on demand, and starts Next with `next start -H 0.0.0.0 -p $PORT`. Render CLI auth works and no existing Lash service was found, but this CLI has no service-create/Blueprint-apply command and no `RENDER_API_KEY` is present, so live Render service creation remains a Dashboard/API apply step.
 65. TRK-01 reconciles the feature tracker summary to the canonical CSV: `STORIES.csv` has 201 rows across 26 clusters, C26 has 9 insight-routing/writing-place stories, and `STORIES_SUMMARY.md` now records the current implementation/test/fix/retest counts plus delight sprint overlay status. Validation lives at `artifacts/ux-sprint/reports/trk-01-validate.log`.
 66. Final local review for the delight sprint found no merge blockers after lint, typecheck, unit tests, production build, and bead-specific receipts. RepoPrompt oracle review was attempted but blocked by a configured API-key 401, so the committed final review uses primary-agent review plus local/CI gates and explicitly carries forward the Render live-service, realtime-secret, outline, and comment-anchoring concerns.
+67. PR #32 merged the delight sprint into `main` as `11ff925ad4e07d0df5b5a1698ad69cc41b76fc26`; PR CI run `28105284971` and post-merge main CI run `28105654731` both passed `build-and-test`. The follow-up OUT-01 bead starts from that merge in worktree `/Users/borker/dev/lash-doc-delight-followup` on branch `codex/ux/delightful-writing-followup`.
+68. OUT-01 follow-up makes the document-side outline the primary desktop outline: the global sidebar defaults to collapsed icon rail, the canonical `lash-outline-panel` renders beside the document at wide desktop widths, sidebar outline fallback uses sidebar-specific IDs to avoid duplicate landmarks, and the mobile drawer retains outline access. Validation receipts live under `artifacts/ux-sprint/reports/out-02-*`.
 
 ## State
 
@@ -159,21 +161,23 @@ Success criteria:
 - [x] Delight sprint INF-01 - Render dynamic runtime Blueprint/preflight added; live service creation remains Dashboard/API apply.
 - [x] Delight sprint TRK-01 - Feature tracker summary reconciled to 201 canonical CSV rows.
 - [x] Delight sprint final local review - no merge blockers; residual concerns documented.
+- [x] Delight sprint PR #32 merged to remote `main` as `11ff925ad4e07d0df5b5a1698ad69cc41b76fc26`; post-merge `main` CI run `28105654731` passed.
+- [x] OUT-01 follow-up - document-side desktop outline, collapsed icon rail, mobile fallback, canonical tracker update, visual proof, and focused e2e coverage.
 
 ### Now
 
-- Delight sprint final review, PR, and merge.
+- OUT-01 follow-up review, PR, and merge.
 
 ### Next
 
 - Production web hosting strategy for dynamic `/doc/[id]` routes and any future Riddle integration remain separate workstreams.
 - Decide whether to turn the 19 deferred feature-audit scaffold items into a new bead stack.
-- Open PR for `codex/ux/delightful-writing-sprint`, run required CI, merge through protected `main`, and verify post-merge state.
+- Open PR for `codex/ux/delightful-writing-followup`, run required CI, merge through protected `main`, and verify post-merge state.
 
 ## Open Questions
 
 - UNCONFIRMED: Whether retrospective review for M1/B1 and M1/B3 is still required before later post-v1 work.
-- UNCONFIRMED: Production web hosting strategy for arbitrary `/doc/[id]` Next routes; current static Pages export remains blocked on this branch.
+- UNCONFIRMED: Production web hosting strategy for arbitrary `/doc/[id]` Next routes; Render Blueprint/preflight exists but live service creation remains Dashboard/API apply.
 
 ## Working Set
 
@@ -238,6 +242,9 @@ Success criteria:
 - `packages/realtime-worker/src/access.ts`
 - `packages/realtime-worker/src/persistence.ts`
 - `packages/realtime-worker/src/room.ts`
+- `/Users/borker/dev/lash-doc-delight-followup`
+- `artifacts/ux-sprint/reports/out-02-document-outline-proof.md`
+- `artifacts/ux-sprint/lash/followup-outline/`
 - `packages/realtime-worker/src/routing.ts`
 - `packages/realtime-worker/wrangler.jsonc`
 - `packages/testing/unit/realtime-runtime/realtime-access-boundary.test.ts`
