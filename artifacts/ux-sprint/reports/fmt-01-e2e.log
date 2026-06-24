@@ -1,0 +1,58 @@
+
+> lash-doc@ test:e2e /Users/borker/dev/lash-doc-delight-sprint
+> NEXT_PUBLIC_LASH_TEST_HOOKS=true pnpm --filter @lash/web build && playwright test "--" "--project=chromium" "apps/web/e2e/performance/large-doc-typing.spec.ts"
+
+
+> @lash/web@0.1.0 build /Users/borker/dev/lash-doc-delight-sprint/apps/web
+> next build
+
+  ▲ Next.js 14.2.5
+  - Experiments (use with caution):
+    · typedRoutes
+
+   Creating an optimized production build ...
+ ✓ Compiled successfully
+   Linting and checking validity of types ...
+   Collecting page data ...
+   Generating static pages (0/4) ...
+   Generating static pages (1/4) 
+   Generating static pages (2/4) 
+   Generating static pages (3/4) 
+ ✓ Generating static pages (4/4)
+   Finalizing page optimization ...
+   Collecting build traces ...
+
+Route (app)                              Size     First Load JS
+┌ ○ /                                    148 B           328 kB
+├ ○ /_not-found                          870 B            88 kB
+└ ƒ /doc/[id]                            147 B           328 kB
++ First Load JS shared by all            87.1 kB
+  ├ chunks/247-2f6bf97138bdf827.js       31.5 kB
+  ├ chunks/c4040940-1fe014dc614768de.js  53.6 kB
+  └ other shared chunks (total)          1.97 kB
+
+
+○  (Static)   prerendered as static content
+ƒ  (Dynamic)  server-rendered on demand
+
+[2m[WebServer] [22m(node:56632) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+[2m[WebServer] [22m(Use `node --trace-warnings ...` to show where the warning was created)
+[2m[WebServer] [22m(node:56646) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+[2m[WebServer] [22m(Use `node --trace-warnings ...` to show where the warning was created)
+
+Running 2 tests using 2 workers
+
+(node:56652) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:56653) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:56652) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:56653) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+large-doc-typing metrics {"label":"10k-word document","eventSampleCount":87,"eventWorkP95Ms":2.400000035762787,"eventWorkMaxMs":5,"longTasks":1,"typedTextPresent":true,"p95BudgetMs":8}
+  ✓  2 [chromium] › apps/web/e2e/performance/large-doc-typing.spec.ts:162:9 › large document typing performance › 10k-word document stays under the typing budget (1.7s)
+large-doc-typing metrics {"label":"50k-word document","eventSampleCount":87,"eventWorkP95Ms":5.399999976158142,"eventWorkMaxMs":8.299999952316284,"longTasks":29,"typedTextPresent":true,"p95BudgetMs":8}
+  ✓  1 [chromium] › apps/web/e2e/performance/large-doc-typing.spec.ts:162:9 › large document typing performance › 50k-word document stays under the typing budget (3.2s)
+
+  2 passed (4.9s)

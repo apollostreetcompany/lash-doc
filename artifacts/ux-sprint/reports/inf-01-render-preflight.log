@@ -1,0 +1,66 @@
+pnpm run build
+
+> lash-doc@ build /Users/borker/dev/lash-doc-delight-sprint
+> pnpm run typecheck && pnpm --filter @lash/web build
+
+
+> lash-doc@ typecheck /Users/borker/dev/lash-doc-delight-sprint
+> tsc -p tsconfig.json --noEmit
+
+
+> @lash/web@0.1.0 build /Users/borker/dev/lash-doc-delight-sprint/apps/web
+> next build
+
+  ▲ Next.js 14.2.5
+  - Experiments (use with caution):
+    · typedRoutes
+
+   Creating an optimized production build ...
+Browserslist: caniuse-lite is outdated. Please run:
+  npx update-browserslist-db@latest
+  Why you should do it regularly: https://github.com/browserslist/update-db#readme
+Browserslist: caniuse-lite is outdated. Please run:
+  npx update-browserslist-db@latest
+  Why you should do it regularly: https://github.com/browserslist/update-db#readme
+ ✓ Compiled successfully
+   Linting and checking validity of types ...
+   Collecting page data ...
+   Generating static pages (0/4) ...
+   Generating static pages (1/4)
+   Generating static pages (2/4)
+   Generating static pages (3/4)
+ ✓ Generating static pages (4/4)
+   Finalizing page optimization ...
+   Collecting build traces ...
+
+Route (app)                              Size     First Load JS
+┌ ○ /                                    147 B           328 kB
+├ ○ /_not-found                          873 B            88 kB
+└ ƒ /doc/[id]                            147 B           328 kB
++ First Load JS shared by all            87.1 kB
+  ├ chunks/247-2f6bf97138bdf827.js       31.5 kB
+  ├ chunks/c4040940-1fe014dc614768de.js  53.7 kB
+  └ other shared chunks (total)          1.95 kB
+
+
+○  (Static)   prerendered as static content
+ƒ  (Dynamic)  server-rendered on demand
+
+PORT="3100" node scripts/verify-render-runtime.mjs
+{
+  "ok": true,
+  "baseUrl": "http://127.0.0.1:3100",
+  "command": "pnpm --filter @lash/web exec next start -H 0.0.0.0 -p 3100",
+  "checks": [
+    {
+      "pathname": "/",
+      "status": 200,
+      "contentType": "text/html; charset=utf-8"
+    },
+    {
+      "pathname": "/doc/render-smoke",
+      "status": 200,
+      "contentType": "text/html; charset=utf-8"
+    }
+  ]
+}

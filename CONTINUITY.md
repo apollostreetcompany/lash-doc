@@ -80,6 +80,15 @@ Success criteria:
 55. Bead 37 packages the feature-audit metadata and insight-router hardening: `FEATURE_AUDIT/STORIES.csv` is the canonical 201-story tracker, `.understand-anything/knowledge-graph.json` is the current architecture graph, and `@lash/insight-router` provides fail-loud routing placeholders for Persephone, Hermes, and Garden writing places.
 56. Bead 37 validation fixed four branch-surfaced UX/test issues before PR: route-title hydration now runs before interaction on document switches, the outline expand-all control meets mobile touch-target minimums, solo documents keep collaborator chrome honest without placeholder peers, and the natural-date mention e2e uses a fixed browser clock and timezone.
 57. Bead 37 merged through PR #30 as `02e03c4dcc860bc760f7d6a5dd6ae1cabf849d9d`; required PR CI run `28008919283` and post-merge `main` CI run `28009206138` both passed `build-and-test`.
+58. The delight sprint starts from `main` commit `358be3a` in worktree `/Users/borker/dev/lash-doc-delight-sprint` on branch `codex/ux/delightful-writing-sprint`; the validated release-feedback packet is `docs/plans/lash-delight-quip-feedback-packet.md` with feedback IDs VIS-01, CAN-01, OUT-01, COM-01, FMT-01, MOB-01, INF-01, INF-02, ROU-01, and TRK-01.
+59. VIS-01 establishes the delight sprint's evidence baseline: `scripts/visual-snap.mjs` now emits `desktop-1440-outline.png`, baseline screenshots live under `artifacts/ux-sprint/lash/baseline/`, and `artifacts/ux-sprint/reports/vis-01-visual-proof.md` records Quip-reference gap notes. The main observed gaps are dashboard-like chrome around the document, outline buried in app navigation, right rail/admin weight, and mobile topbar clipping.
+60. ROU-01 confirms there is no current `apps/web` UI host for insight routing; the sprint hardens router reliability with library-level tests and records the UI integration as a later product-host decision instead of forcing it into Bead-2-owned editor files.
+61. Product Delight Wave 1 closes the concrete 375px mobile clipping defect and calms the desktop writing surface by flattening the document paper and reducing right-rail card weight. The pass is intentionally partial for OUT-01/COM-01: outline still belongs visually to the dark global sidebar, and comments still need stronger document-range anchoring in a later UX bead.
+62. INF-02 surfaced and fixes the realtime deploy Makefile command: package scripts with names that collide with pnpm built-ins must be invoked with `pnpm --filter <pkg> run <script>`, so `deploy-realtime-cloudflare` now calls `run deploy` and `realtime-dry-run` calls `run deploy:dry-run`.
+63. INF-02 deployed the Cloudflare realtime Worker to `https://lash-realtime.ryan-borker.workers.dev` as version `06150817-80d3-4c52-b86d-cbfd2ac92f4f`. Public service health passes and unauthenticated/non-invite session minting returns 403; `wrangler secret list` is empty, so production document sessions intentionally remain closed until the dynamic web runtime has shared production invite/session secrets.
+64. INF-01 adds a Render Blueprint and preflight for a dynamic Next.js web runtime: `render.yaml` defines `lash-doc-web`, `make verify-render` builds without `LASH_STATIC_EXPORT`, proves `/doc/[id]` is server-rendered on demand, and starts Next with `next start -H 0.0.0.0 -p $PORT`. Render CLI auth works and no existing Lash service was found, but this CLI has no service-create/Blueprint-apply command and no `RENDER_API_KEY` is present, so live Render service creation remains a Dashboard/API apply step.
+65. TRK-01 reconciles the feature tracker summary to the canonical CSV: `STORIES.csv` has 201 rows across 26 clusters, C26 has 9 insight-routing/writing-place stories, and `STORIES_SUMMARY.md` now records the current implementation/test/fix/retest counts plus delight sprint overlay status. Validation lives at `artifacts/ux-sprint/reports/trk-01-validate.log`.
+66. Final local review for the delight sprint found no merge blockers after lint, typecheck, unit tests, production build, and bead-specific receipts. RepoPrompt oracle review was attempted but blocked by a configured API-key 401, so the committed final review uses primary-agent review plus local/CI gates and explicitly carries forward the Render live-service, realtime-secret, outline, and comment-anchoring concerns.
 
 ## State
 
@@ -143,15 +152,23 @@ Success criteria:
 - [x] Final Beads 23-36 protected `main` CI passed: run `26914289177`, workflow `CI`, job `build-and-test`.
 - [x] Superseded stacked PRs #15-#27 were closed after the integrated merge.
 - [x] Bead 37 - Feature audit metadata, understand graph, and insight-router hardening merged through PR #30.
+- [x] Delight sprint VIS-01 - Quip-vs-Lash visual baseline and outline screenshot capture.
+- [x] Delight sprint ROU-01 - Insight-router reliability coverage and UI-host decision record.
+- [x] Delight sprint Product Delight Wave 1 - CAN-01/MOB-01 improved, OUT-01/COM-01/FMT-01 guarded with residual UX gaps documented.
+- [x] Delight sprint INF-02 - Cloudflare realtime Worker deployed and verified with sessions intentionally locked.
+- [x] Delight sprint INF-01 - Render dynamic runtime Blueprint/preflight added; live service creation remains Dashboard/API apply.
+- [x] Delight sprint TRK-01 - Feature tracker summary reconciled to 201 canonical CSV rows.
+- [x] Delight sprint final local review - no merge blockers; residual concerns documented.
 
 ### Now
 
-- Bead 37 is merged to `main`; current focus is product readiness assessment and next-stack selection.
+- Delight sprint final review, PR, and merge.
 
 ### Next
 
 - Production web hosting strategy for dynamic `/doc/[id]` routes and any future Riddle integration remain separate workstreams.
 - Decide whether to turn the 19 deferred feature-audit scaffold items into a new bead stack.
+- Open PR for `codex/ux/delightful-writing-sprint`, run required CI, merge through protected `main`, and verify post-merge state.
 
 ## Open Questions
 
@@ -239,6 +256,8 @@ Success criteria:
 - `FEATURE_AUDIT/STORIES.csv`
 - `FEATURE_AUDIT/ERRORS.md`
 - `FEATURE_AUDIT/REVIEW.md`
+- `docs/plans/lash-delight-quip-feedback-packet.md`
+- `artifacts/ux-sprint/`
 - `.understand-anything/knowledge-graph.json`
 - `.understand-anything/meta.json`
 - `.understand-anything/fingerprints.json`

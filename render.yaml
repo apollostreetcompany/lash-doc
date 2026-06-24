@@ -1,0 +1,22 @@
+services:
+  - type: web
+    name: lash-doc-web
+    runtime: node
+    plan: free
+    region: oregon
+    repo: https://github.com/apollostreetcompany/lash-doc
+    branch: main
+    autoDeploy: true
+    buildCommand: corepack enable && corepack prepare pnpm@8.10.0 --activate && pnpm install --frozen-lockfile && pnpm run build
+    startCommand: pnpm --filter @lash/web exec next start -H 0.0.0.0 -p $PORT
+    healthCheckPath: /
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
+      - key: NEXT_TELEMETRY_DISABLED
+        value: "1"
+      # Enable only after the dynamic web runtime and Cloudflare Worker share
+      # production invite/session secrets; otherwise realtime session minting
+      # is correctly denied by the Worker.
+      # - key: NEXT_PUBLIC_LASH_REALTIME_URL
+      #   value: wss://lash-realtime.ryan-borker.workers.dev

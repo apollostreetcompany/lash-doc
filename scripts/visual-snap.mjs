@@ -7,7 +7,6 @@
 import { mkdir } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-
 import { chromium } from 'playwright';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -53,6 +52,42 @@ const SEED_BLOCKS = [
     text:
       "The blocker is integration with the existing identity service. Will revisit after Friday's review.",
   },
+];
+
+const OUTLINE_SEED_BLOCKS = [
+  { kind: 'heading', level: 1, text: 'Long-form product memo' },
+  {
+    kind: 'paragraph',
+    text:
+      'A deliberately long memo for capturing the default sidebar outline beside a mid-scrolled writing canvas.',
+  },
+  ...[
+    'Context and audience',
+    'Core narrative',
+    'Launch milestones',
+    'Decision log',
+    'Open questions',
+    'Risks and mitigations',
+    'Appendix notes',
+  ].flatMap((section, sectionIndex) => [
+    { kind: 'heading', level: 2, text: section },
+    {
+      kind: 'paragraph',
+      text: `Section ${sectionIndex + 1} frames the writing flow, collaboration state, outline affordances, and review notes for the sprint evidence baseline.`,
+    },
+    { kind: 'heading', level: 3, text: `${section} detail A` },
+    {
+      kind: 'paragraph',
+      text:
+        'The body stays intentionally plain so the capture emphasizes document structure, side navigation, and calm reading rhythm rather than custom product hooks.',
+    },
+    { kind: 'heading', level: 3, text: `${section} detail B` },
+    {
+      kind: 'paragraph',
+      text:
+        'Additional text creates enough vertical depth for a mid-document scroll position while keeping the outline panel fully default-rendered.',
+    },
+  ]),
 ];
 
 function seedBlocks(blocks) {
@@ -125,6 +160,45 @@ try {
     await page.waitForTimeout(900);
     await page.screenshot({
       path: join(outDir, `${viewport.name}.png`),
+      fullPage: false,
+    });
+    await context.close();
+  }
+
+  // Desktop 1440 - default rendered outline over a long, mid-scrolled document
+  {
+    const context = await browser.newContext({
+      viewport: { width: 1440, height: 900 },
+      deviceScaleFactor: 2,
+    });
+    const page = await context.newPage();
+    console.log('-> desktop-1440-outline');
+    await page.goto(baseUrl, { waitUntil: 'domcontentloaded' });
+    await page.waitForSelector('[data-testid="lash-editor-content"]', { timeout: 15000 });
+    await page.waitForFunction(() => Boolean(window.__lashEditor), null, { timeout: 15000 });
+    await page.evaluate(seedBlocks, OUTLINE_SEED_BLOCKS);
+    await page.waitForFunction(
+      () => document.querySelectorAll('.outline-entry').length >= 12,
+      null,
+      { timeout: 5000 },
+    );
+    await page.waitForFunction(
+      () => {
+        const canvas = document.querySelector('.lash-canvas');
+        const page = document.scrollingElement;
+        return Boolean(
+          (canvas && canvas.scrollHeight > canvas.clientHeight + 300) ||
+            (page && page.scrollHeight > page.clientHeight + 300),
+        );
+      },
+      null,
+      { timeout: 5000 },
+    );
+    await page.locator('.lash-canvas').hover();
+    await page.mouse.wheel(0, 520);
+    await page.waitForTimeout(500);
+    await page.screenshot({
+      path: join(outDir, 'desktop-1440-outline.png'),
       fullPage: false,
     });
     await context.close();

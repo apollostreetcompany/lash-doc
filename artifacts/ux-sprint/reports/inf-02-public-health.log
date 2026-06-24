@@ -1,0 +1,1 @@
+{"ok":true,"runtime":{"provider":"cloudflare","coordination":"durable-object-room","transport":"websocket"},"service":"lash-realtime"}

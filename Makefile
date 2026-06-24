@@ -1,8 +1,9 @@
 CLOUDFLARE_PAGES_PROJECT ?= lash
 CLOUDFLARE_BRANCH ?= main
 LASH_REALTIME_PORT ?= 8787
+RENDER_VERIFY_PORT ?= 3100
 
-.PHONY: validate lint typecheck test-unit test-e2e build build-static format check-port serve stop status realtime-dev realtime-dry-run verify-realtime-runtime deploy-realtime-cloudflare deploy-cloudflare verify-cloudflare
+.PHONY: validate lint typecheck test-unit test-e2e build build-static format check-port serve stop status realtime-dev realtime-dry-run verify-realtime-runtime deploy-realtime-cloudflare verify-render deploy-cloudflare verify-cloudflare
 
 validate: lint typecheck test-unit test-e2e build
 
@@ -44,13 +45,16 @@ realtime-dev:
 	pnpm exec wrangler dev --config packages/realtime-worker/wrangler.jsonc --local --port "$(LASH_REALTIME_PORT)"
 
 realtime-dry-run:
-	pnpm --filter @lash/realtime-worker deploy:dry-run
+	pnpm --filter @lash/realtime-worker run deploy:dry-run
 
 verify-realtime-runtime:
 	LASH_REALTIME_PORT="$(LASH_REALTIME_PORT)" pnpm run verify:realtime
 
 deploy-realtime-cloudflare: realtime-dry-run
-	pnpm --filter @lash/realtime-worker deploy
+	pnpm --filter @lash/realtime-worker run deploy
+
+verify-render: build
+	PORT="$(RENDER_VERIFY_PORT)" node scripts/verify-render-runtime.mjs
 
 deploy-cloudflare: build-static
 	npx wrangler pages deploy apps/web/out --project-name "$(CLOUDFLARE_PAGES_PROJECT)" --branch "$(CLOUDFLARE_BRANCH)" --commit-hash "$$(git rev-parse HEAD)" --commit-message "$$(git log -1 --pretty=%s)"
