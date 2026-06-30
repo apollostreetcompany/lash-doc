@@ -2,14 +2,14 @@
 
 ## Goal (incl. success criteria)
 
-Complete Beads 23-36: close the public-test regressions for title, @mentions, and sidebar, then implement the true responsive online typing track through document identity, realtime runtime, CRDT binding, actor/access boundaries, durable persistence, large-doc performance, presence/sync state, invite/access UX, durable comments/suggestions, and collaboration delight. Riddle is optional/deferred; no Lash-Riddle code integration until Riddle stabilizes as its own product.
+Prepare the next milestone for taking Lash from the current Quip-like local/realtime prototype toward 80-90% real collaborative daily driving and 99% daily personal idea writing. The next agent should start from `docs/plans/lash-next-milestone-2026-06-30.md`, keep the canonical feature tracker current, and continue through protected PRs only. Riddle remains optional/deferred; no Lash-Riddle code integration until Riddle stabilizes as its own product.
 
 Success criteria:
 
-- Every scoped bead has fail-first test evidence before implementation.
-- Every scoped bead passes its targeted tests plus appropriate lint, typecheck, unit, build, e2e, and deployment gates for its risk class.
-- True online typing is proven by real two-client browser tests, not local-only mocks.
-- `subreview` and a fresh-eyes review pass over the completed scoped bead set.
+- Next milestone plan exists in-repo and gives the next agent a clear startup workflow, bead order, acceptance gates, and known blockers.
+- Dynamic web runtime and production realtime secret wiring are treated as the first collaboration blockers, not deferred behind more UI polish.
+- Daily idea-writing trust work is explicit: local body persistence, recovery/export, quick capture/recents, and mobile hardening.
+- True collaborative daily driving remains unclaimed until deployed two-collaborator smoke passes on a live URL.
 - Riddle remains planning-only in Lash.
 
 ## Constraints/Assumptions
@@ -95,6 +95,8 @@ Success criteria:
 70. COM-01 starts from final `main` commit `01d08124373df396a38b14773707577765ae2919` in worktree `/Users/borker/dev/lash-doc-com-01` on branch `codex/ux/com-01-comment-rail`. The bead target is to make comments/chat feel document-anchored and Quip-like while preserving writing focus, accessibility, and existing durable thread behavior.
 71. COM-01 local implementation adds a derived document-side comment marker, compact current-target row, and Show-in-document action for mapped chat threads without changing storage/Yjs contracts. Validation receipts are `artifacts/ux-sprint/reports/com-01-*`; duplicate identical text remains a known anchor-model caveat, and test-seeded reloads correctly show orphan handling when the document body is gone.
 72. PR #35 merged COM-01 to remote `main` as `d3ff1ea4cc9958ee283a5cbbf6e69917475c88d1`; PR CI run `28112567847` passed `build-and-test` in 6m03s, post-merge `main` CI run `28112972711` passed `build-and-test` in 5m47s, and remote branch `codex/ux/com-01-comment-rail` was deleted.
+73. PR #36 merged COM-01 closeout metadata to remote `main` as `818d3b0f17870e29805032594a60f33ce4b5e1e7`; post-merge `main` CI run `28113800701` passed `build-and-test` in 5m38s.
+74. The next milestone plan is `docs/plans/lash-next-milestone-2026-06-30.md`: it sequences live dynamic web runtime, production realtime secrets, deployed two-collaborator smoke, position-native comment anchors, local document body persistence/recovery, daily idea-writing flow, export/import escape hatch, mobile hardening, and dogfood/release readiness.
 
 ## State
 
@@ -170,21 +172,27 @@ Success criteria:
 - [x] OUT-01 follow-up PR #33 merged to remote `main` as `e5ab31e8a9875b5c625d783206e5c57749769710`; post-merge `main` CI run `28108304331` passed.
 - [x] COM-01 local implementation - document-side comment marker, compact target row, Show-in-document action, focused e2e/a11y, tracker update, and visual proof.
 - [x] COM-01 PR #35 merged to remote `main` as `d3ff1ea4cc9958ee283a5cbbf6e69917475c88d1`; post-merge `main` CI run `28112972711` passed.
+- [x] COM-01 closeout PR #36 merged to remote `main` as `818d3b0f17870e29805032594a60f33ce4b5e1e7`; post-merge `main` CI run `28113800701` passed.
+- [x] Next milestone plan drafted for the next agent in `docs/plans/lash-next-milestone-2026-06-30.md`.
 
 ### Now
 
-- COM-01 merge closeout metadata branch `codex/docs/com-01-merge-closeout`.
+- Ready for the next milestone agent to start from `main` using `docs/plans/lash-next-milestone-2026-06-30.md`.
 
 ### Next
 
-- Production web hosting strategy for dynamic `/doc/[id]` routes and any future Riddle integration remain separate workstreams.
-- Decide whether to turn the 19 deferred feature-audit scaffold items into a new bead stack.
-- Plan the next writing-experience bead. Likely candidates: duplicate-precise comment anchors, document-body persistence for local reloads, or first-run daily-writing polish.
+- NM-01: apply a live dynamic web runtime for `/doc/[id]`.
+- NM-02: wire production realtime secrets between the web runtime and Cloudflare Worker.
+- NM-03: prove deployed two-collaborator smoke.
+- NM-04/NM-05: fix position-native comment anchors and local document body persistence/recovery.
+- NM-06/NM-08: polish daily idea-writing flow and mobile/tablet trust.
+- NM-09: close with dogfood evidence, tracker updates, and go/no-go assessment.
 
 ## Open Questions
 
 - UNCONFIRMED: Whether retrospective review for M1/B1 and M1/B3 is still required before later post-v1 work.
-- UNCONFIRMED: Production web hosting strategy for arbitrary `/doc/[id]` Next routes; Render Blueprint/preflight exists but live service creation remains Dashboard/API apply.
+- UNCONFIRMED: Render live service creation remains Dashboard/API apply unless an API key or equivalent service-create path is provided.
+- UNCONFIRMED: Cloudflare realtime production secrets are not known to be configured; Worker public health is green but document sessions intentionally remain closed without shared secrets.
 
 ## Working Set
 
@@ -274,6 +282,7 @@ Success criteria:
 - `FEATURE_AUDIT/ERRORS.md`
 - `FEATURE_AUDIT/REVIEW.md`
 - `docs/plans/lash-delight-quip-feedback-packet.md`
+- `docs/plans/lash-next-milestone-2026-06-30.md`
 - `artifacts/ux-sprint/`
 - `.understand-anything/knowledge-graph.json`
 - `.understand-anything/meta.json`
