@@ -3,7 +3,7 @@
 ## Current State
 
 - Active branch: `codex/ux/bead-38-stranger-45-sprint` from baseline `002333017fe2bca4ec589f8d157c1aa21a4b77da`; never commit this work directly to `main`.
-- Bead 38 freezes the blind-stranger qualification contract in `docs/plans/lash-stranger-test-45-criteria.md`, the source-faithful queue in `docs/plans/lash-stranger-45-feedback-packet.md`, and the baseline audit under `docs/reviews/lash-stranger-fresh-eyes-audit-2026-07-18.md` plus `artifacts/stranger-test/baseline/`.
+- Bead 38 commit `ac047b0c5ad852967f4ec6250519ab0e8a8f6789` freezes the blind-stranger qualification contract in `docs/plans/lash-stranger-test-45-criteria.md`, the source-faithful queue in `docs/plans/lash-stranger-45-feedback-packet.md`, and the baseline audit under `docs/reviews/lash-stranger-fresh-eyes-audit-2026-07-18.md` plus `artifacts/stranger-test/baseline/`.
 - The current 4.5/5 gate is red: local body text is erased after a false saved confirmation, local-only edit invites open blank documents in clean contexts, and mobile Focus Mode can blank the viewport and strand its exit.
 - Bead 39 is the active High-risk product bead. `docs/reviews/bead-38-local-body-persistence-architecture.md` approves a versioned local primary/last-good design with mandatory lifecycle, recovery, cross-tab, storage-failure, safety, and realtime-isolation gates.
 - Default branch: `main`.
