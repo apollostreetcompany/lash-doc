@@ -2,6 +2,10 @@
 
 ## Current State
 
+- Active branch: `codex/ux/bead-38-stranger-45-sprint` from baseline `002333017fe2bca4ec589f8d157c1aa21a4b77da`; never commit this work directly to `main`.
+- Bead 38 freezes the blind-stranger qualification contract in `docs/plans/lash-stranger-test-45-criteria.md`, the source-faithful queue in `docs/plans/lash-stranger-45-feedback-packet.md`, and the baseline audit under `docs/reviews/lash-stranger-fresh-eyes-audit-2026-07-18.md` plus `artifacts/stranger-test/baseline/`.
+- The current 4.5/5 gate is red: local body text is erased after a false saved confirmation, local-only edit invites open blank documents in clean contexts, and mobile Focus Mode can blank the viewport and strand its exit.
+- Bead 39 is the active High-risk product bead. `docs/reviews/bead-38-local-body-persistence-architecture.md` approves a versioned local primary/last-good design with mandatory lifecycle, recovery, cross-tab, storage-failure, safety, and realtime-isolation gates.
 - Default branch: `main`.
 - Expected checkout after shutdown: `main`.
 - Product release commit on `main`: `7bf032debe1931d068f009ee735b95bd5c43b5c1` (`Release Lash v1 collaborative editor gates`).
@@ -87,9 +91,13 @@
 - Bead 34 - Invite + Access UX.
 - Bead 35 - Durable Comments/Suggestions.
 - Bead 36 - Collaboration Delight Layer.
+- Bead 38 - Stranger quality gate, governance repair, fresh-eyes audit, writing-trust investigation, feedback packet, and persistence architecture sign-off.
 
 ## Release Evidence
 
+- Bead 38 evidence: 15 fresh-eyes screenshots were inspected at desktop `1440x900` and mobile `375x812`; the local production server was stopped and ports `3000`/`8787` were free afterward.
+- Bead 38 packet validation: `validate_feedback_packet.py --phase plan docs/plans/lash-stranger-45-feedback-packet.md` passed for `FLOW-01` through `FLOW-06` and `VIS-01` through `VIS-02`.
+- Bead 38 independent review: GPT-5.6 Sol XHigh architecture verdict is “approve implementation with mandatory conditions”; it is not merge approval.
 - `pnpm run lint` - pass.
 - `pnpm run typecheck` - pass.
 - `pnpm run test:unit` - pass, 73 passed.
@@ -201,6 +209,9 @@
 
 ## Open Items
 
+- Execute Bead 39 test-first. Do not mount local body autosave before schema/safety-validated hydration; do not silently promote recovered data; do not write local body keys in realtime mode.
+- Follow the evidence-ranked rapid queue after Bead 39: mobile Focus (`STR-FLOW-03`), honest local-only Share (`STR-FLOW-02`), empty-document entry (`STR-VIS-01`), stable named shell chrome, and burst-input causality.
+- A real 4.5/5 claim still requires a fixed public HTTPS build, deployed realtime sessions, five fresh participant pairs, complete receipts, no hard fail, and the exact conjunctive criteria result. Local automation cannot substitute.
 - User-reported regressions: none currently open.
 - Online typing red gate: Bead 26 online typing tests now pass after Bead 31; Bead 32 adds large-document typing performance coverage and removes the measured normal-editing per-keystroke hot paths. The 50k-word gate still logs non-input rendering long tasks, so deeper document virtualization remains a future performance hardening opportunity.
 - Invite/access UX: Bead 34 provides local/static invite links, collaborator rows, expiry/revoke UI, invited editor capability gating, and signed invite-token realtime session exchange. Post-subreview Bead 36 hardening allows view invitees to hydrate realtime rooms while keeping Yjs mutation persistence edit-gated. DO-backed global invite issuance, revocation, audit, real profiles, and server-side fine-grained comment/suggest mutation validation remain follow-up work.

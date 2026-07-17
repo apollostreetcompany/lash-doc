@@ -2,14 +2,15 @@
 
 ## Goal (incl. success criteria)
 
-Prepare the next milestone for taking Lash from the current Quip-like local/realtime prototype toward 80-90% real collaborative daily driving and 99% daily personal idea writing. The next agent should start from `docs/plans/lash-next-milestone-2026-06-30.md`, keep the canonical feature tracker current, and continue through protected PRs only. Riddle remains optional/deferred; no Lash-Riddle code integration until Riddle stabilizes as its own product.
+Raise Lash toward a blind-stranger 4.5/5 experience for normal collaborative document work through evidence-backed, rapid product iterations. The active sprint must define a falsifiable stranger task suite, preserve the detailed product contract while repairing agent governance, and improve the experienced product rather than treating test coverage or local scaffolding as success. Continue through protected PRs only. Riddle remains optional/deferred; no Lash-Riddle code integration until Riddle stabilizes as its own product.
 
 Success criteria:
 
-- Next milestone plan exists in-repo and gives the next agent a clear startup workflow, bead order, acceptance gates, and known blockers.
-- Dynamic web runtime and production realtime secret wiring are treated as the first collaboration blockers, not deferred behind more UI polish.
-- Daily idea-writing trust work is explicit: local body persistence, recovery/export, quick capture/recents, and mobile hardening.
+- A durable stranger-test rubric defines tasks, scoring anchors, hard-fail conditions, evidence, and the threshold for a 4.5/5 result.
+- At least one high-leverage product bead materially improves smoothness, performance, trust, or delight for ordinary writing/collaboration.
+- Product changes have targeted deterministic tests plus a human-visible browser proof at the affected boundary.
 - True collaborative daily driving remains unclaimed until deployed two-collaborator smoke passes on a live URL.
+- `AGENTS.md`, `CONTINUITY.md`, bead evidence, and the feature tracker accurately distinguish shipped product behavior from local scaffolding.
 - Riddle remains planning-only in Lash.
 
 ## Constraints/Assumptions
@@ -20,6 +21,7 @@ Success criteria:
 - Branch protection on `main` requires strict `build-and-test`, enforces admins, and disallows force-push/delete.
 - Riddle integration is planning-only; do not touch `/Users/borker/dev/riddle`.
 - Cloudflare Pages hosts the current static public test site; future realtime infra should prefer Cloudflare Workers/Durable Objects first, then Render only if Cloudflare is insufficient.
+- Active sprint branch is `codex/ux/bead-38-stranger-45-sprint` from baseline `002333017fe2bca4ec589f8d157c1aa21a4b77da`; no direct commits to `main`.
 
 ## Key Decisions
 
@@ -97,6 +99,9 @@ Success criteria:
 72. PR #35 merged COM-01 to remote `main` as `d3ff1ea4cc9958ee283a5cbbf6e69917475c88d1`; PR CI run `28112567847` passed `build-and-test` in 6m03s, post-merge `main` CI run `28112972711` passed `build-and-test` in 5m47s, and remote branch `codex/ux/com-01-comment-rail` was deleted.
 73. PR #36 merged COM-01 closeout metadata to remote `main` as `818d3b0f17870e29805032594a60f33ce4b5e1e7`; post-merge `main` CI run `28113800701` passed `build-and-test` in 5m38s.
 74. The next milestone plan is `docs/plans/lash-next-milestone-2026-06-30.md`: it sequences live dynamic web runtime, production realtime secrets, deployed two-collaborator smoke, position-native comment anchors, local document body persistence/recovery, daily idea-writing flow, export/import escape hatch, mobile hardening, and dogfood/release readiness.
+75. The active Bead 38 sprint uses a blind-stranger 4.5/5 outcome gate. Release-feedback-reactor evidence contracts, RepoPrompt investigation, independent agents, deterministic tests, and browser-visible proof will select and validate rapid product iterations; documentation or green local scaffolding alone cannot satisfy the product goal.
+76. Bead 38's zero-coaching audit keeps the 4.5/5 gate red. The three current hard failures are `STR-FLOW-01` (the UI reports saved and erases the local body on reload), `STR-FLOW-02` (an active edit invite opens a blank unrelated-looking document), and `STR-FLOW-03` (mobile Focus Mode becomes a blank trap with its exit off-canvas). Persistence/recovery is first because it is the highest-value trust repair; mobile Focus and collaboration honesty follow.
+77. Bead 39 is High risk under the persisted-state guardrail even though the implementation stays browser-local. GPT-5.6 Sol XHigh Architect review approved a versioned per-document primary/last-good localStorage envelope only with pre-autosave schema/safety validation, deliberate recovery promotion, teardown flush, fail-loud cross-tab conflict, truthful quota/storage errors, and strict realtime exclusion. Yjs/Durable Objects remain the sole body authority whenever realtime is enabled.
 
 ## State
 
@@ -174,19 +179,20 @@ Success criteria:
 - [x] COM-01 PR #35 merged to remote `main` as `d3ff1ea4cc9958ee283a5cbbf6e69917475c88d1`; post-merge `main` CI run `28112972711` passed.
 - [x] COM-01 closeout PR #36 merged to remote `main` as `818d3b0f17870e29805032594a60f33ce4b5e1e7`; post-merge `main` CI run `28113800701` passed.
 - [x] Next milestone plan drafted for the next agent in `docs/plans/lash-next-milestone-2026-06-30.md`.
+- [x] Bead 38 - Blind-stranger 4.5/5 gate, execution-governance repair, source-faithful feedback packet, zero-coaching desktop/mobile audit, local-writing trust investigation, and persistence architecture sign-off.
 
 ### Now
 
-- Ready for the next milestone agent to start from `main` using `docs/plans/lash-next-milestone-2026-06-30.md`.
+- Bead 39 - Implement trustworthy local body persistence and last-good recovery with fail-first tests, truthful save state, strict realtime isolation, browser proof, and independent Analyst review.
 
 ### Next
 
-- NM-01: apply a live dynamic web runtime for `/doc/[id]`.
-- NM-02: wire production realtime secrets between the web runtime and Cloudflare Worker.
-- NM-03: prove deployed two-collaborator smoke.
-- NM-04/NM-05: fix position-native comment anchors and local document body persistence/recovery.
-- NM-06/NM-08: polish daily idea-writing flow and mobile/tablet trust.
-- NM-09: close with dogfood evidence, tracker updates, and go/no-go assessment.
+- Bead 40 - Repair the blank/trapped 375 px Focus Mode path with fail-first responsive and accessibility coverage.
+- Bead 41 - Gate local-only invites honestly, then retain deployed two-clean-context hydration/convergence as the collaboration completion proof.
+- Bead 42 - Add a calm empty-document writing invitation without persisting instructional content.
+- Beads 43-44 - Stabilize named collaboration chrome/navigation/motion, then investigate burst-input ordering deterministically.
+- Run an independent product/release review and repeat bounded beads until the 4.5/5 gate is credibly met or residual blockers are explicit.
+- Preserve NM-01/NM-03 as the hard gate for any claim of production collaborative daily driving.
 
 ## Open Questions
 
@@ -283,6 +289,12 @@ Success criteria:
 - `FEATURE_AUDIT/REVIEW.md`
 - `docs/plans/lash-delight-quip-feedback-packet.md`
 - `docs/plans/lash-next-milestone-2026-06-30.md`
+- `docs/plans/lash-stranger-test-45-criteria.md`
+- `docs/plans/lash-stranger-45-feedback-packet.md`
+- `docs/reviews/lash-stranger-fresh-eyes-audit-2026-07-18.md`
+- `docs/reviews/bead-38-local-body-persistence-architecture.md`
+- `docs/analysis/lash-daily-writing-trust-investigation-2026-07-18.md`
+- `artifacts/stranger-test/`
 - `artifacts/ux-sprint/`
 - `.understand-anything/knowledge-graph.json`
 - `.understand-anything/meta.json`
