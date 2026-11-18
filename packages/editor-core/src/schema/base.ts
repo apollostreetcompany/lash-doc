@@ -34,6 +34,8 @@ import type * as Y from 'yjs';
 import { createEmptyDocumentInvitationExtensions } from '../extensions/empty-document-invitation';
 import { LashHeading } from '../extensions/heading';
 import { LashImage, type LashImageUploader } from '../extensions/image';
+import { LashListTextInput } from '../extensions/list-text-input';
+import { LashNativePasteSelection } from '../extensions/native-paste-selection';
 import {
   createLashTableExtensions,
   type LashTableOptions,
@@ -169,6 +171,8 @@ export const buildBaseExtensions = (options?: LashSchemaOptions): Extensions => 
     // dir="auto" gives headings the same per-block bidi resolution as
     // paragraphs so RTL titles display correctly (F-C22-09).
     LashHeading.configure({ levels: [1, 2, 3], HTMLAttributes: { dir: 'auto' } }),
+    LashListTextInput,
+    LashNativePasteSelection,
     OutlineManager.configure({
       documentId: outlineOptions.documentId ?? 'default',
       persistence: outlineOptions.persistence,

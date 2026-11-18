@@ -44,7 +44,10 @@ async function expectDetachedFeedback(page: Page, note: string) {
 async function expectSelectionAt(target: Locator, start: number, text: string) {
   await expect
     .poll(() =>
-      target.evaluate((element) => {
+      target.evaluate(async (element) => {
+        await new Promise<void>((resolve) => {
+          requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+        });
         const selection = window.getSelection();
         if (!selection?.rangeCount) return null;
         const selected = selection.getRangeAt(0);
@@ -99,6 +102,9 @@ async function showFeedbackTarget(page: Page, note: string) {
   await feedback
     .getByRole('button', { name: `Show document target for thread on ${repeatedPhrase}` })
     .click();
+  await expect(page.getByTestId('chat-anchor-jump-status')).toHaveText(
+    `Selected ${repeatedPhrase} in the document.`,
+  );
 }
 
 async function expectOriginalTargetAfterPaste(page: Page) {
@@ -108,6 +114,7 @@ async function expectOriginalTargetAfterPaste(page: Page) {
   );
   for (const note of [reviewComment, suggestionNote]) {
     await showFeedbackTarget(page, note);
+    await expect(editor(page)).toBeFocused();
     await expectSelectionAt(paragraph(page), duplicatePrefix.length, repeatedPhrase);
   }
 }
@@ -275,8 +282,26 @@ test('a named Comment reviewer proposes an exact edit without edit or History ac
       await owner.evaluate((text) => navigator.clipboard.writeText(text), pastedCopy);
       await showFeedbackTarget(owner, reviewComment);
       await expectSelectionAt(paragraph(owner), originalTargetStart, repeatedPhrase);
-      await owner.keyboard.press('ArrowLeft');
-      await expectSelectionAt(paragraph(owner), originalTargetStart, '');
+      const target = paragraph(owner);
+      await target.scrollIntoViewIfNeeded();
+      const position = await target.evaluate((element, start) => {
+        const text = element.firstChild;
+        if (!(text instanceof Text) || text.length <= start) {
+          throw new Error('Expected a visible glyph at the start of the original quote.');
+        }
+        const glyph = document.createRange();
+        glyph.setStart(text, start);
+        glyph.setEnd(text, start + 1);
+        const rect = glyph.getBoundingClientRect();
+        const bounds = element.getBoundingClientRect();
+        return {
+          x: rect.left - bounds.left + Math.min(1, rect.width / 4),
+          y: rect.top - bounds.top + rect.height / 2,
+        };
+      }, originalTargetStart);
+      await target.click({ position });
+      await expect(editor(owner)).toBeFocused();
+      await expectSelectionAt(target, originalTargetStart, '');
       await owner.keyboard.press('ControlOrMeta+v');
       await expect(paragraph(owner)).toHaveText(afterPaste);
       await expect(paragraph(reviewer)).toHaveText(afterPaste);
@@ -295,6 +320,7 @@ test('a named Comment reviewer proposes an exact edit without edit or History ac
         await selectDiscussionTab(page, 'chat');
         await expectOriginalTargetAfterPaste(page);
       }
+      await expect(editor(reviewer)).not.toBeEditable();
       await paragraph(reviewer).evaluate((target) => target.scrollIntoView({ block: 'center' }));
       await reviewer.screenshot({
         path: testInfo.outputPath('reviewer-shows-original-after-reload.png'),

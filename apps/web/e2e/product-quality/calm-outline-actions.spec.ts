@@ -93,6 +93,30 @@ test('returns focus to the heading for immediate typing after keyboard activatio
   await expect(heading).toHaveAttribute('aria-pressed', 'true');
 });
 
+test('keeps the first typed text in one bullet after applying the list format', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto('/doc/toolbar-first-bullet');
+  const editor = page.getByRole('textbox', { name: 'Document editor' });
+  await expect(editor).toHaveAttribute('contenteditable', 'true');
+  await expect(page.locator('.lash-app')).not.toHaveAttribute('data-entrance', 'true');
+  await editor.click();
+  await page.getByRole('button', { name: 'Heading 1', exact: true }).click();
+  await page.keyboard.insertText('Launch plan');
+  await page.keyboard.press('Enter');
+  await page.keyboard.insertText('We will publish the beta on Tuesday.');
+  await page.keyboard.press('Enter');
+
+  await page.getByRole('button', { name: 'Bullet List', exact: true }).click();
+  await page.keyboard.insertText('Draft');
+  await page.keyboard.type(' announcement');
+
+  await expect(editor.locator(':scope > h1')).toHaveText('Launch plan');
+  await expect(editor.locator(':scope > p')).toHaveText('We will publish the beta on Tuesday.');
+  await expect(editor.locator(':scope > ul > li')).toHaveText(['Draft announcement']);
+});
+
 test('keeps an empty mobile Outline focused on document context', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto('/doc/prod-j16-empty-outline-mobile');

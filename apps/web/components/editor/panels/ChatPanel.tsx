@@ -143,6 +143,48 @@ const scrollSelectionIntoView = () => {
   element?.scrollIntoView({ block: 'center', inline: 'nearest' });
 };
 
+const selectReadOnlyDocumentTarget = (editor: Editor, range: { from: number; to: number }) => {
+  const { view } = editor;
+  const { dom } = view;
+  const document = dom.ownerDocument;
+  const selection = document.getSelection();
+  if (!selection || !editor.commands.setTextSelection(range)) return false;
+
+  // ProseMirror does not focus a read-only editor when its model selection changes.
+  // Show still needs a native selection so readers can see the targeted text.
+  const previousFocus = document.activeElement;
+  let selected = false;
+  let applied = false;
+  try {
+    dom.focus({ preventScroll: true });
+    if (document.activeElement !== dom) return false;
+    const start = view.domAtPos(range.from, 1);
+    const end = view.domAtPos(range.to, -1);
+    if (!dom.contains(start.node) || !dom.contains(end.node)) return false;
+    const target = document.createRange();
+    target.setStart(start.node, start.offset);
+    target.setEnd(end.node, end.offset);
+    if (target.collapsed) return false;
+    selection.removeAllRanges();
+    selection.addRange(target);
+    applied = true;
+    const observed = selection.rangeCount === 1 ? selection.getRangeAt(0) : null;
+    selected =
+      !!observed &&
+      !observed.collapsed &&
+      view.posAtDOM(observed.startContainer, observed.startOffset) === range.from &&
+      view.posAtDOM(observed.endContainer, observed.endOffset) === range.to;
+    return selected;
+  } catch {
+    return false;
+  } finally {
+    if (!selected && applied) selection.removeAllRanges();
+    if (!selected && previousFocus instanceof HTMLElement && previousFocus.isConnected) {
+      previousFocus.focus({ preventScroll: true });
+    }
+  }
+};
+
 const sameThreads = (left: LocalThread[], right: LocalThread[]) =>
   JSON.stringify(left) === JSON.stringify(right);
 
@@ -561,7 +603,12 @@ export function ChatPanel({
         baseVersion,
       );
       const range = !liveAnchor.orphaned && documentText.toEditorRange(liveAnchor);
-      if (!range || !editor.chain().focus().setTextSelection(range).run()) {
+      const selected =
+        range &&
+        (editor.isEditable
+          ? editor.chain().focus().setTextSelection(range).run()
+          : selectReadOnlyDocumentTarget(editor, range));
+      if (!selected) {
         setAnchorJumpStatus(`Document target for ${thread.anchor.token.text} is unavailable.`);
         return;
       }
