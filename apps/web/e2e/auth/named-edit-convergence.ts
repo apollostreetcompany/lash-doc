@@ -193,8 +193,8 @@ export async function appendBrowserParagraph(page: Page, text: string) {
   const originalCount = await paragraphs.count();
   const originalTail = paragraphs.nth(originalCount - 1);
   const originalText = await originalTail.textContent();
-  const caretAtEnd = (paragraph: Locator) =>
-    paragraph.evaluate(async (element) => {
+  const settledCaret = (paragraph: Locator, atEnd: boolean) =>
+    paragraph.evaluate(async (element, requireEnd) => {
       // The editor reconciles the DOM selection on animation frames after focus or navigation.
       await new Promise<void>((resolve) => {
         requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
@@ -208,29 +208,54 @@ export async function appendBrowserParagraph(page: Page, text: string) {
       ) {
         return false;
       }
+      if (!requireEnd) return true;
       const remainder = document.createRange();
       remainder.setStart(selection.anchorNode, selection.anchorOffset);
       remainder.setEnd(element, element.childNodes.length);
       const content = remainder.cloneContents();
       content.querySelectorAll('.ProseMirror-widget').forEach((widget) => widget.remove());
       return content.textContent === '';
-    });
+    }, atEnd);
 
   await expect(body).toBeEditable();
-  await expect(originalTail).toBeVisible();
-  await body.focus();
-  const documentEnd = await page.evaluate(() =>
-    navigator.platform.startsWith('Mac') ? 'Meta+ArrowDown' : 'Control+End',
+  await originalTail.scrollIntoViewIfNeeded();
+  const position = await originalTail.evaluate((paragraph) => {
+    const walker = document.createTreeWalker(paragraph, NodeFilter.SHOW_TEXT);
+    let tail: Text | null = null;
+    for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+      if (
+        node instanceof Text &&
+        node.length &&
+        !node.parentElement?.closest('.ProseMirror-widget')
+      ) {
+        tail = node;
+      }
+    }
+    if (!tail) throw new Error('Expected a populated last paragraph.');
+    const range = document.createRange();
+    range.setStart(tail, tail.length - 1);
+    range.setEnd(tail, tail.length);
+    const glyph = range.getBoundingClientRect();
+    const bounds = paragraph.getBoundingClientRect();
+    return {
+      x: glyph.right - bounds.left - Math.min(1, glyph.width / 4),
+      y: glyph.top - bounds.top + glyph.height / 2,
+    };
+  });
+  await originalTail.click({ position });
+  await expect.poll(() => settledCaret(originalTail, false)).toBe(true);
+  const lineEnd = await page.evaluate(() =>
+    navigator.platform.startsWith('Mac') ? 'Meta+ArrowRight' : 'End',
   );
-  await page.keyboard.press(documentEnd);
-  await expect.poll(() => caretAtEnd(originalTail)).toBe(true);
+  await page.keyboard.press(lineEnd);
+  await expect.poll(() => settledCaret(originalTail, true)).toBe(true);
 
   await page.keyboard.press('Enter');
   const newParagraph = paragraphs.nth(originalCount);
   await expect(paragraphs).toHaveCount(originalCount + 1);
   await expect(originalTail).toHaveText(originalText ?? '');
   await expect(newParagraph).toHaveText('');
-  await expect.poll(() => caretAtEnd(newParagraph)).toBe(true);
+  await expect.poll(() => settledCaret(newParagraph, true)).toBe(true);
   await page.keyboard.insertText(text);
   await expect(newParagraph).toHaveText(text);
 }

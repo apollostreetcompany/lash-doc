@@ -134,6 +134,10 @@ export function EditorToolbar({
                   // not announced as toggles.
                   aria-pressed={isToggle ? (active ? 'true' : 'false') : undefined}
                   disabled={!ready || disabled}
+                  onMouseDown={(event) => {
+                    // Keep the editor's native selection during pointer formatting.
+                    if (event.button === 0 && editor?.view.hasFocus()) event.preventDefault();
+                  }}
                   onClick={() => onClick(item)}
                 >
                   {iconName ? <Icon name={iconName} /> : <span>{item.icon}</span>}

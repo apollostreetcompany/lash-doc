@@ -24,9 +24,23 @@ test('reveals the desktop Outline when a heading is added without shifting the p
   const writingColumn = await paper.boundingBox();
   expect(writingColumn).not.toBeNull();
   await editor.click();
+  const focusDuringFormatting = await editor.evaluateHandle((element) => {
+    const observed = { blurred: false };
+    element.addEventListener(
+      'blur',
+      () => {
+        observed.blurred = true;
+      },
+      { once: true },
+    );
+    return observed;
+  });
   await page.getByRole('button', { name: 'Heading 1' }).click();
   await page.keyboard.insertText('Launch plan');
 
+  expect(await focusDuringFormatting.jsonValue()).toEqual({ blurred: false });
+  await expect(editor.locator(':scope > *')).toHaveCount(1);
+  await expect(editor.locator('h1')).toHaveText('Launch plan');
   await expect(outline).toBeVisible();
   await expect(outline.getByRole('button', { name: 'Jump to Launch plan' })).toBeVisible();
   const withOutline = await paper.boundingBox();
@@ -39,6 +53,44 @@ test('reveals the desktop Outline when a heading is added without shifting the p
   expect(Math.abs(afterRemoval!.x - writingColumn!.x)).toBeLessThan(0.5);
   expect(Math.abs(afterRemoval!.width - writingColumn!.width)).toBeLessThan(0.5);
   await expectNoHorizontalOverflow(page);
+});
+
+test('returns focus to the heading for immediate typing after keyboard activation', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto('/doc/keyboard-format-heading');
+  const editor = page.getByRole('textbox', { name: 'Document editor' });
+  await expect(editor).toHaveAttribute('contenteditable', 'true');
+  await expect(page.locator('.lash-app')).not.toHaveAttribute('data-entrance', 'true');
+  await editor.click();
+
+  const toolbar = page.getByRole('toolbar', { name: 'Editor toolbar' });
+  const heading = toolbar.getByRole('button', { name: 'Heading 1' });
+  await toolbar.getByRole('button', { name: 'Link', exact: true }).focus();
+  await page.keyboard.press('Tab');
+  await expect(heading).toBeFocused();
+  const focusAtActivation = await heading.evaluateHandle((button) => {
+    const doc = button.ownerDocument;
+    const observed = { editorFocused: false };
+    doc.addEventListener(
+      'click',
+      () => {
+        observed.editorFocused =
+          doc.activeElement?.getAttribute('aria-label') === 'Document editor';
+      },
+      { once: true },
+    );
+    return observed;
+  });
+  await page.keyboard.press('Enter');
+  await page.keyboard.insertText('Launch plan');
+
+  expect(await focusAtActivation.jsonValue()).toEqual({ editorFocused: true });
+  await expect(editor).toBeFocused();
+  await expect(editor.locator(':scope > *')).toHaveCount(1);
+  await expect(editor.locator('h1')).toHaveText('Launch plan');
+  await expect(heading).toHaveAttribute('aria-pressed', 'true');
 });
 
 test('keeps an empty mobile Outline focused on document context', async ({ page }) => {
