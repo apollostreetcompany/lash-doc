@@ -55,7 +55,9 @@ describe('named editor account session', () => {
             socketProtocol: 'lash-realtime-v5',
             ticketProtocol: `lash-named-ticket.${'f'.repeat(43)}`,
             expiresAt: new Date(Date.now() + 20_000).toISOString(),
-            socketUrl: `wss://worker.test/api/realtime/rooms/${unexpectedRoom}/socket?protocolVersion=5&actorId=${actorId}&token=unexpected`,
+            socketUrl: `wss://worker.test/api/realtime/rooms/${unexpectedRoom}/socket?protocolVersion=5&actorId=${actorId}${
+              unexpectedRoom === roomId ? '&token=unexpected' : ''
+            }`,
           },
         }),
       );

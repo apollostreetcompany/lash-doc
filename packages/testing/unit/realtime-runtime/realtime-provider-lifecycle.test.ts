@@ -1418,6 +1418,42 @@ describe('authorized realtime provider lifecycle', () => {
     }
   });
 
+  it('ends named retries when a valid-looking renewal changes the authenticated actor', async () => {
+    vi.useFakeTimers();
+    const socket = new FakeSocket();
+    const doc = createRealtimeDocument();
+    const initial = namedSession('original-principal');
+    const otherActor = `named-${'c'.repeat(32)}`;
+    const replacement = namedSession('other-principal');
+    const refreshOwnerSession = vi.fn().mockResolvedValue({
+      ...replacement,
+      actorId: otherActor,
+      socketUrl: replacement.socketUrl.replace(namedActorId, otherActor),
+    });
+    const createSocket = vi.fn(() => socket);
+    const provider = new LashRealtimeYjsProvider({
+      createSocket,
+      doc,
+      refreshOwnerSession,
+      session: initial,
+    });
+    try {
+      const starting = provider.start();
+      hydrateSocket(socket, namedRoomId, 5);
+      await starting;
+      socket.emit('close', { code: 1006 });
+      await vi.advanceTimersByTimeAsync(30_000);
+      expect(provider.getTerminalReason()).toBe('protocol-error');
+      expect(provider.getSnapshot().canWrite).toBe(false);
+      expect(createSocket).toHaveBeenCalledTimes(1);
+      expect(refreshOwnerSession).toHaveBeenCalledTimes(1);
+    } finally {
+      provider.destroy();
+      doc.destroy();
+      vi.useRealTimers();
+    }
+  });
+
   it.each([
     ['authorization', 'scope-mismatch'],
     ['protocol', 'protocol-error'],

@@ -115,7 +115,17 @@ describe('named edit browser and Worker contract', () => {
       .mockResolvedValueOnce(Response.json({
         ok: true,
         version: 1,
-        session: { roomId: `doc-v1-${'b'.repeat(64)}`, ticketProtocol: 'synthetic-opaque-value' },
+        session: {
+          roomId: `doc-v1-${'b'.repeat(64)}`,
+          actorId,
+          source: 'named',
+          role: 'edit',
+          protocolVersion: 5,
+          capabilities: ['doc.read', 'doc.edit'],
+          socketProtocol: 'lash-realtime-v5',
+          ticketProtocol: `lash-named-ticket.${'t'.repeat(43)}`,
+          expiresAt: new Date(Date.now() + 60_000).toISOString(),
+        },
       }))
       .mockResolvedValueOnce(new Response('unexpected upstream payload', { status: 200 }))
       .mockResolvedValueOnce(namedEditResponse(namedEditFailure('unauthorized')))
