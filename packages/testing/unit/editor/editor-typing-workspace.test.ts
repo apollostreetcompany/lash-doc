@@ -31,7 +31,7 @@ const testWindow = window as Window & { __lashEditor?: Editor };
 let root: Root;
 let container: HTMLDivElement;
 
-beforeEach(async () => {
+beforeEach(() => {
   vi.stubGlobal('crypto', webcrypto);
   Object.defineProperties(Range.prototype, {
     getClientRects: { value: () => [], configurable: true },
@@ -45,19 +45,6 @@ beforeEach(async () => {
   container = document.createElement('div');
   document.body.append(container);
   root = createRoot(container);
-  await React.act(async () => {
-    root.render(
-      React.createElement(
-        AppRouterContext.Provider,
-        { value: router },
-        React.createElement(
-          PathnameContext.Provider,
-          { value: '/doc/typing-workspace' },
-          React.createElement(EditorWorkspace, { documentId: 'typing-workspace' }),
-        ),
-      ),
-    );
-  });
 });
 
 afterEach(async () => {
@@ -76,7 +63,38 @@ function findButton(testId: string) {
   return button;
 }
 
+function holdAnimationFrames() {
+  const frames = new Map<number, FrameRequestCallback>();
+  let frameId = 0;
+  vi.spyOn(window, 'requestAnimationFrame').mockImplementation((callback) => {
+    frames.set(++frameId, callback);
+    return frameId;
+  });
+  vi.spyOn(window, 'cancelAnimationFrame').mockImplementation((id) => {
+    frames.delete(id);
+  });
+  return async () => {
+    const callbacks = [...frames.values()];
+    expect(callbacks.length).toBeGreaterThan(0);
+    frames.clear();
+    await React.act(async () => callbacks.forEach((callback) => callback(0)));
+  };
+}
+
 async function getReadyEditor() {
+  await React.act(async () => {
+    root.render(
+      React.createElement(
+        AppRouterContext.Provider,
+        { value: router },
+        React.createElement(
+          PathnameContext.Provider,
+          { value: '/doc/typing-workspace' },
+          React.createElement(EditorWorkspace, { documentId: 'typing-workspace' }),
+        ),
+      ),
+    );
+  });
   await vi.waitFor(async () => {
     await React.act(async () => {});
     expect(testWindow.__lashEditor?.isEditable, container.textContent ?? undefined).toBe(true);
@@ -101,15 +119,30 @@ describe('editor workspace typing', () => {
     expect(serialize).not.toHaveBeenCalled();
   });
 
+  it('focuses the untouched editor when its startup frame runs', async () => {
+    const paint = holdAnimationFrames();
+    const editor = await getReadyEditor();
+    expect(document.activeElement).toBe(document.body);
+
+    await paint();
+
+    expect(document.activeElement).toBe(editor.view.dom);
+  });
+
   it('updates active formatting and the open comment control on selection-only transactions', async () => {
+    const paint = holdAnimationFrames();
     const editor = await getReadyEditor();
     await React.act(async () => {
       editor.commands.setContent('<p>Plain <strong>bold</strong></p>');
       editor.commands.setTextSelection(2);
       findButton('topbar-discussion-button').click();
     });
+    expect(document.activeElement).toBe(document.body);
+    await paint();
 
     expect(findButton('toolbar-btn-bold').getAttribute('aria-pressed')).toBe('false');
+    expect(editor.state.selection.from).toBe(2);
+    expect(document.activeElement).toBe(document.body);
     expect(findButton('chat-select-document-text')).toBeTruthy();
 
     await React.act(async () => {

@@ -1485,13 +1485,15 @@ function ResolvedDocumentWorkspace({
     }
     if (initialFocusEditorRef.current === editor) return;
 
+    const { doc, selection } = editor.state;
     const frame = window.requestAnimationFrame(() => {
       if (editor.isDestroyed || !editor.isEditable || !editor.view.dom.isConnected) return;
       initialFocusEditorRef.current = editor;
       const { view } = editor;
       const ownerDocument = view.dom.ownerDocument;
-      // The title or another control can acquire focus before this frame runs.
+      // A control can acquire focus or a transaction can move the editor before this frame runs.
       if (ownerDocument.activeElement !== ownerDocument.body) return;
+      if (view.state.doc !== doc || view.state.selection !== selection) return;
       view.focus();
       view.dispatch(view.state.tr.setSelection(Selection.atEnd(view.state.doc)).scrollIntoView());
     });
