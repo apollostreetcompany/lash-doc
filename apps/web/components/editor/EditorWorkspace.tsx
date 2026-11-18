@@ -43,7 +43,7 @@ import {
 } from '@lash/types';
 import { Extension, type Editor, type EditorEvents } from '@tiptap/core';
 import type { Node as EditorNode } from '@tiptap/pm/model';
-import { Plugin, PluginKey } from '@tiptap/pm/state';
+import { Plugin, PluginKey, Selection } from '@tiptap/pm/state';
 import { EditorContent, useEditor, useEditorState } from '@tiptap/react';
 import type { Route } from 'next';
 import { usePathname, useRouter } from 'next/navigation';
@@ -874,6 +874,7 @@ function ResolvedDocumentWorkspace({
     recoveryToken: Readonly<LocalBodyRecoveryToken>;
   } | null>(null);
   const localRecoveryFocusDocumentRef = useRef<string | null>(null);
+  const initialFocusEditorRef = useRef<Editor | null>(null);
   const hydratedLocalEditorRef = useRef<Editor | null>(null);
   const localBodyMutationsAllowedRef = useRef(realtimeEnabled);
   const localBodySavingUnavailable = !realtimeEnabled && localBodyState === 'unavailable';
@@ -1337,7 +1338,7 @@ function ResolvedDocumentWorkspace({
   const editor = useEditor(
     {
       extensions,
-      autofocus: namedComment ? false : 'end',
+      autofocus: false,
       editable: !namedComment,
       immediatelyRender: false,
       shouldRerenderOnTransaction: false,
@@ -1474,11 +1475,27 @@ function ResolvedDocumentWorkspace({
   useEffect(() => {
     if (!editor || editor.isDestroyed) return;
     editor.setEditable(!documentMutationLocked);
-    if (!documentMutationLocked && localRecoveryFocusDocumentRef.current === activeDocumentId) {
+    if (documentMutationLocked) return;
+    if (localRecoveryFocusDocumentRef.current === activeDocumentId) {
       localRecoveryFocusDocumentRef.current = null;
+      initialFocusEditorRef.current = editor;
       const ownerDocument = editor.view.dom.ownerDocument;
       if (ownerDocument.activeElement === ownerDocument.body) editor.view.focus();
+      return;
     }
+    if (initialFocusEditorRef.current === editor) return;
+
+    const frame = window.requestAnimationFrame(() => {
+      if (editor.isDestroyed || !editor.isEditable || !editor.view.dom.isConnected) return;
+      initialFocusEditorRef.current = editor;
+      const { view } = editor;
+      const ownerDocument = view.dom.ownerDocument;
+      // The title or another control can acquire focus before this frame runs.
+      if (ownerDocument.activeElement !== ownerDocument.body) return;
+      view.focus();
+      view.dispatch(view.state.tr.setSelection(Selection.atEnd(view.state.doc)).scrollIntoView());
+    });
+    return () => window.cancelAnimationFrame(frame);
   }, [activeDocumentId, documentMutationLocked, editor]);
 
   useEffect(() => {
