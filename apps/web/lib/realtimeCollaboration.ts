@@ -1863,6 +1863,10 @@ export class LashRealtimeYjsProvider {
   private handleTransientSocketFailure(epoch: number) {
     if (this.destroyed || this.lifecycleState !== 'active' || epoch !== this.socketEpoch) return;
     if (this.canRetryOpenAccountSession()) {
+      if (this.networkEventTarget?.navigator?.onLine === false) {
+        this.setConnectionState('offline');
+        return;
+      }
       this.scheduleReconnect(
         ACCOUNT_RECONNECT_DELAYS_MS[this.connectionAttempt] ?? ACCOUNT_RECONNECT_MAX_DELAY_MS,
       );

@@ -1319,7 +1319,8 @@ describe('authorized realtime provider lifecycle', () => {
 
   it('closes a socket still marked open on browser offline and wakes with a fresh ticket', async () => {
     vi.useFakeTimers();
-    const browserEvents = new EventTarget();
+    const navigator = { onLine: true };
+    const browserEvents = Object.assign(new EventTarget(), { navigator });
     const remove = vi.spyOn(browserEvents, 'removeEventListener');
     vi.stubGlobal('window', browserEvents);
     const first = new FakeSocket();
@@ -1343,14 +1344,20 @@ describe('authorized realtime provider lifecycle', () => {
       const original = first.sent.map((frame) => JSON.parse(frame))
         .find((frame) => frame.type === 'yjs-update');
 
+      navigator.onLine = false;
       browserEvents.dispatchEvent(new Event('offline'));
       expect(first.readyState).toBe(3);
       expect(provider.getSnapshot()).toMatchObject({
-        syncState: 'reconnecting',
+        syncState: 'offline',
         pendingUpdateCount: 0,
         queuedUpdateCount: 1,
       });
 
+      await vi.advanceTimersByTimeAsync(15_000);
+      expect(refreshOwnerSession).not.toHaveBeenCalled();
+      expect(createSocket).toHaveBeenCalledTimes(1);
+
+      navigator.onLine = true;
       browserEvents.dispatchEvent(new Event('online'));
       await vi.advanceTimersByTimeAsync(0);
       expect(createSocket).toHaveBeenCalledTimes(2);
