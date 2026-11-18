@@ -60,9 +60,15 @@ test('prioritizes structure before file transport in the phone toolbar', async (
   await expect.poll(() => toolbar.evaluate((element) => element.scrollLeft)).toBeGreaterThan(0);
 
   const scrolledToolbar = await rectFor(toolbar);
+  await expect
+    .poll(async () => (await rectFor(importMarkdown)).right)
+    .toBeLessThanOrEqual(scrolledToolbar.right);
   expectFullyInside(await rectFor(importMarkdown), scrolledToolbar);
   await page.keyboard.press('Tab');
   await expect(exportMarkdown).toBeFocused();
+  await expect
+    .poll(async () => (await rectFor(exportMarkdown)).right)
+    .toBeLessThanOrEqual(scrolledToolbar.right);
   expectFullyInside(await rectFor(exportMarkdown), scrolledToolbar);
 
   const widths = await page.evaluate(() => ({

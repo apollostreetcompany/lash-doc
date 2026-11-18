@@ -4,6 +4,20 @@ import { createDocument, documentEditor, openSource } from '../chips/document-ch
 
 test.use({ timezoneId: 'America/Los_Angeles', locale: 'ja-JP' });
 
+test('keeps synthetic identities out of the normal mention picker and Discussion', async ({
+  page,
+}) => {
+  await openSource(page);
+  await page.keyboard.type('@Ada');
+  await expect(documentEditor(page)).toHaveText('@Ada');
+  await expect(page.getByRole('listbox', { name: 'Insert a reference' })).toHaveCount(0);
+
+  await page.getByTestId('topbar-discussion-button').click();
+  await expect(page.getByRole('tab', { name: 'Chat' })).toBeVisible();
+  await expect(page.getByRole('tab', { name: 'Activity (test fixture)' })).toHaveCount(0);
+  await expect(page.getByTestId('synthetic-mention-fixture')).toHaveCount(0);
+});
+
 test('inserts a date at the actual caret using the local calendar date and locale', async ({
   page,
 }) => {
@@ -60,18 +74,22 @@ test('chooses a real browser document with keyboard navigation', async ({ page }
   await expect(page.getByTestId('lash-chip')).toHaveAttribute('href', target);
 });
 
-test('picks a document on a phone without changing unrelated writing', async ({ page }) => {
-  await page.setViewportSize({ width: 390, height: 844 });
-  const target = await createDocument(page, 'Mobile outline');
-  await openSource(page);
-  await page.keyboard.type('See @Mobile');
-  const option = page.getByRole('option', { name: /Mobile outline/ });
-  await expect(option).toBeVisible();
-  const box = await option.boundingBox();
-  expect(box?.height).toBeGreaterThanOrEqual(44);
-  expect(box?.x).toBeGreaterThanOrEqual(0);
-  expect((box?.x ?? 0) + (box?.width ?? 0)).toBeLessThanOrEqual(390);
-  await option.click();
-  await expect(documentEditor(page)).toContainText('See');
-  await expect(page.getByTestId('lash-chip')).toHaveAttribute('href', target);
+test.describe('mobile reference picker', () => {
+  test.use({ hasTouch: true, isMobile: true, viewport: { width: 390, height: 844 } });
+
+  test('picks a document on a phone without changing unrelated writing', async ({ page }) => {
+    const target = await createDocument(page, 'Mobile outline');
+    await openSource(page);
+    await page.keyboard.type('See @Mobile');
+    const picker = page.getByRole('listbox', { name: 'Insert a reference' });
+    const option = picker.getByRole('option', { name: /Mobile outline/ });
+    await expect(option).toBeVisible();
+    const box = await option.boundingBox();
+    expect(box?.height).toBeGreaterThanOrEqual(44);
+    expect(box?.x).toBeGreaterThanOrEqual(0);
+    expect((box?.x ?? 0) + (box?.width ?? 0)).toBeLessThanOrEqual(390);
+    await option.tap();
+    await expect(documentEditor(page)).toContainText('See');
+    await expect(page.getByTestId('lash-chip')).toHaveAttribute('href', target);
+  });
 });

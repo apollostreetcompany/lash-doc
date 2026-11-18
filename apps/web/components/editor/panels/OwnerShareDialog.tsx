@@ -93,10 +93,10 @@ export function OwnerShareDialog({
             adjuncts.suggestions === 1 ? 'suggestion' : 'suggestions'
           }. Account saving for those items isn’t ready yet, so nothing was moved.`
         : phase === 'retryable'
-          ? (detail ?? 'Couldn’t save to your account. Your document is still on this device.')
+          ? detail || 'Couldn’t save to your account. Your document is still on this device.'
           : phase === 'unavailable'
-            ? (detail ??
-              'Account saving is unavailable right now. Your document is still on this device.')
+            ? detail ||
+              'Account saving is unavailable right now. Your document is still on this device.'
             : phase === 'signed-out'
               ? 'Sign in to save this document to your account. Signing in does not move it by itself.'
               : phase === 'checking-account'

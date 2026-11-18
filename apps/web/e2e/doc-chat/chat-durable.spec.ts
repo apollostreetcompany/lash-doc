@@ -1,8 +1,7 @@
-import { expect, test, type Browser, type BrowserContext, type Page } from '@playwright/test';
+import { expect, type Page } from '@playwright/test';
 import type { Editor } from '@tiptap/core';
-import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
-import { once } from 'node:events';
 
+import { enableDevelopmentLoopback, test } from '../development-loopback-worker';
 import { selectDiscussionTab } from '../discussion-tabs';
 
 type LashTestWindow = Window & {
@@ -10,11 +9,6 @@ type LashTestWindow = Window & {
 };
 
 const EMPTY_DOC = '<p></p>';
-const REALTIME_PORT = 8787;
-const REALTIME_HEALTH_URL = `http://127.0.0.1:${REALTIME_PORT}/api/realtime/health`;
-
-let realtimeWorker: ChildProcess | null = null;
-
 const waitForEditor = async (page: Page) => {
   await page.waitForFunction(() => Boolean((window as LashTestWindow).__lashEditor));
   await expect(page.locator('.ProseMirror')).toBeVisible();
@@ -94,93 +88,6 @@ const expectAnchorJumpSelects = async (page: Page, needle: string) => {
   await expect.poll(() => selectedEditorText(page)).toBe(needle);
 };
 
-const assertRealtimePortFree = () => {
-  const result = spawnSync('lsof', ['-n', '-P', `-iTCP:${REALTIME_PORT}`, '-sTCP:LISTEN'], {
-    encoding: 'utf8',
-  });
-  if (result.status === 0) {
-    throw new Error(`Realtime test port ${REALTIME_PORT} is already in use:\n${result.stdout}`);
-  }
-};
-
-const waitForRealtimeWorker = async () => {
-  const deadline = Date.now() + 30_000;
-  let lastError = '';
-  while (Date.now() < deadline) {
-    try {
-      const response = await fetch(REALTIME_HEALTH_URL);
-      if (response.ok) return;
-      lastError = `${response.status} ${response.statusText}`;
-    } catch (error) {
-      lastError = error instanceof Error ? error.message : String(error);
-    }
-    await new Promise((resolve) => setTimeout(resolve, 500));
-  }
-  throw new Error(`Realtime worker did not become ready: ${lastError}`);
-};
-
-const startRealtimeWorker = async () => {
-  assertRealtimePortFree();
-  realtimeWorker = spawn(
-    'pnpm',
-    [
-      'exec',
-      'wrangler',
-      'dev',
-      '--config',
-      'packages/realtime-worker/wrangler.jsonc',
-      '--local',
-      '--port',
-      String(REALTIME_PORT),
-      '--log-level',
-      'error',
-    ],
-    {
-      cwd: process.cwd(),
-      env: { ...process.env, NO_COLOR: '1' },
-      stdio: ['ignore', 'ignore', 'pipe'],
-    },
-  );
-  realtimeWorker.stderr?.on('data', (chunk) => process.stderr.write(chunk));
-  await waitForRealtimeWorker();
-};
-
-const stopRealtimeWorker = async () => {
-  const worker = realtimeWorker;
-  realtimeWorker = null;
-  if (!worker || worker.exitCode !== null || worker.signalCode !== null) return;
-  worker.kill('SIGTERM');
-  const timeout = setTimeout(() => worker.kill('SIGKILL'), 5_000);
-  await once(worker, 'exit').catch(() => undefined);
-  clearTimeout(timeout);
-};
-
-const enableLocalRealtime = (context: BrowserContext, actorId: string) =>
-  context.addInitScript((nextActorId) => {
-    window.localStorage.setItem('lash:realtime-enabled', 'true');
-    window.localStorage.setItem('lash:actor-id', nextActorId);
-  }, actorId);
-
-const openTwoRealtimeClients = async (browser: Browser, documentId: string) => {
-  const contextA = await browser.newContext();
-  const contextB = await browser.newContext();
-  await Promise.all([
-    enableLocalRealtime(contextA, 'comment-author'),
-    enableLocalRealtime(contextB, 'comment-reviewer'),
-  ]);
-  const pageA = await contextA.newPage();
-  const pageB = await contextB.newPage();
-  await Promise.all([pageA.goto(`/doc/${documentId}`), pageB.goto(`/doc/${documentId}`)]);
-  await Promise.all([seedEmptyDoc(pageA), seedEmptyDoc(pageB)]);
-  return {
-    pageA,
-    pageB,
-    close: async () => {
-      await Promise.all([contextA.close(), contextB.close()]);
-    },
-  };
-};
-
 test.describe('durable comments', () => {
   test('threads, replies, resolve, and reopen survive reload', async ({ page }) => {
     const docId = `bead-35-chat-local-${Date.now()}`;
@@ -215,35 +122,22 @@ test.describe('durable comments', () => {
     await expect(page.getByTestId('chat-thread-status')).toContainText('Open');
   });
 
-  test('realtime comments sync and remain anchored across remote edits', async ({ browser }) => {
-    await startRealtimeWorker();
-    const clients = await openTwoRealtimeClients(browser, `bead-35-chat-sync-${Date.now()}`);
-    try {
-      await typeIntoEditor(clients.pageA, 'Shared target section');
-      await expect.poll(() => editorText(clients.pageB)).toContain('Shared target section');
+  test('development loopback can edit the body but cannot post private shared comments', async ({
+    page,
+    developmentLoopbackWorker: worker,
+  }) => {
+    await enableDevelopmentLoopback(page, worker, 'comment-fixture-owner');
+    await page.goto(`/doc/bead-35-chat-loopback-${Date.now()}`);
+    await seedEmptyDoc(page);
+    await typeIntoEditor(page, 'Shared target section');
+    await expect(page.getByTestId('realtime-sync-state')).toHaveText('Saved');
 
-      await selectDiscussionTab(clients.pageA, 'chat');
-      await selectText(clients.pageA, 'target');
-      await createThreadWithReply(clients.pageA, 'Remote reviewer can see this');
-
-      await selectDiscussionTab(clients.pageB, 'chat');
-      await expect(clients.pageB.getByTestId('chat-thread')).toHaveCount(1);
-      await expect(clients.pageB.getByTestId('chat-anchor-row')).toBeVisible();
-      await expect(clients.pageB.getByTestId('chat-current-target')).toContainText('target');
-      await expect(clients.pageB.getByTestId('chat-document-anchor-marker')).toBeVisible();
-      await expect(
-        clients.pageB
-          .getByTestId('chat-message')
-          .filter({ hasText: 'Remote reviewer can see this' }),
-      ).toBeVisible();
-
-      await typeIntoEditor(clients.pageB, ' after remote edit');
-      await expect(clients.pageA.getByTestId('chat-anchor-status')).toContainText('Anchored');
-      await expect(clients.pageA.getByTestId('chat-current-target')).toContainText('target');
-      await expect(clients.pageA.getByTestId('chat-current-context')).toContainText('target');
-    } finally {
-      await clients.close();
-      await stopRealtimeWorker();
-    }
+    await selectDiscussionTab(page, 'chat');
+    await selectText(page, 'target');
+    await expect(page.getByTestId('chat-connection-unavailable')).toHaveText(
+      'Shared discussion is unavailable on this connection.',
+    );
+    await expect(page.getByTestId('chat-create-thread')).toBeDisabled();
+    await expect(page.getByTestId('chat-thread')).toHaveCount(0);
   });
 });

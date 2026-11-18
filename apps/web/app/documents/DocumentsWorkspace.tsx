@@ -7,9 +7,9 @@ import { useEffect, useRef, useState, useTransition } from 'react';
 
 import styles from './page.module.css';
 import { Icon } from '../../components/shell/Icon';
+import { documentWorkspacePath } from '../../lib/documentNavigation';
 import {
   createNewDocumentId,
-  documentPath,
   DOCUMENT_REGISTRY_STORAGE_KEY,
   listDocuments,
   upsertDocument,
@@ -20,7 +20,7 @@ const formatDate = new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', tim
 const searchText = (value: string) => value.trim().replace(/\s+/g, ' ').toLocaleLowerCase();
 const activityTime = (value: string) => Date.parse(value) || 0;
 
-export function DocumentsWorkspace() {
+export function DocumentsWorkspace({ staticPreview = false }: { staticPreview?: boolean }) {
   const router = useRouter();
   const searchInput = useRef<HTMLInputElement>(null);
   const [registry, setRegistry] = useState<LashDocumentRecord[] | 'unavailable' | null>(null);
@@ -69,7 +69,11 @@ export function DocumentsWorkspace() {
       return;
     }
     setCreateError(false);
-    startNavigation(() => router.push(documentPath(id) as Route));
+    const path = documentWorkspacePath(id, staticPreview);
+    startNavigation(() => {
+      if (staticPreview) window.location.assign(path);
+      else router.push(path as Route);
+    });
   };
 
   const normalizedQuery = searchText(query);
@@ -161,7 +165,7 @@ export function DocumentsWorkspace() {
                   <li key={id}>
                     <Link
                       className={styles.document}
-                      href={documentPath(id) as Route}
+                      href={documentWorkspacePath(id, staticPreview) as Route}
                       prefetch={false}
                     >
                       <Icon name="document" className={styles.documentIcon} />

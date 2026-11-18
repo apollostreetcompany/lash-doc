@@ -1,9 +1,10 @@
-import { expect, test } from '@playwright/test';
+import { expect, test } from './development-loopback-fixture';
 
-import { openDevelopmentLoopbackShareFixture } from './development-loopback-fixture';
-
-test('share-comment-scope development fixture maps comment capabilities', async ({ page }) => {
-  await openDevelopmentLoopbackShareFixture(page);
+test('share-comment-scope development fixture maps comment capabilities', async ({
+  page,
+  openDevelopmentLoopbackShareFixture,
+}) => {
+  await openDevelopmentLoopbackShareFixture();
   await page.getByTestId('share-create-comment').click();
 
   await expect(page.getByTestId('share-validation')).toContainText('Access granted: comment');

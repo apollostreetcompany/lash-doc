@@ -13,15 +13,10 @@
 
 import type { Extensions } from '@tiptap/core';
 
-import { LashChip, type ChipResolveResult } from '../extensions/chip';
+import { LashChip, type LashChipNodeOptions } from '../extensions/chip';
 
-export interface LashChipOptions {
-  /** Resolve metadata the current viewer can see without storing it in the document. */
-  resolveDocChip?: (docId: string) => ChipResolveResult | null;
-}
+export type LashChipOptions = LashChipNodeOptions;
 
 export const buildChipExtensions = (options?: LashChipOptions): Extensions => [
-  LashChip.configure({
-    resolveDocChip: options?.resolveDocChip,
-  }),
+  LashChip.configure(options),
 ];

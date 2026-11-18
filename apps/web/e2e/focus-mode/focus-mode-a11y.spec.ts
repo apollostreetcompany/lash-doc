@@ -21,16 +21,22 @@ test.describe('focus-mode-a11y', () => {
     await page.goto('/');
 
     const heading = page.getByRole('heading', { level: 1, name: 'Lash Collaborative Editor' });
+    const outline = page.getByRole('navigation', { name: 'Outline' });
+    const editor = page.getByRole('textbox', { name: 'Document editor' });
+    await expect(editor).toHaveAttribute('contenteditable', 'true');
+    await editor.click();
+    await page.keyboard.press('ControlOrMeta+Alt+2');
+    await page.keyboard.insertText('Focus outline');
     await expect(heading).toBeVisible();
     await expect(page.getByTestId('lash-toolbar')).toBeVisible();
-    await expect(page.locator('[data-testid="lash-outline-panel"]')).toHaveCount(1);
+    await expect(outline).toBeVisible();
 
     const toggle = page.getByTestId('focus-mode-toggle');
     await toggle.click();
     await expect(toggle).toHaveAttribute('aria-pressed', 'true');
 
     await expect(page.getByTestId('lash-toolbar')).toBeHidden();
-    await expect(page.locator('[data-testid="lash-outline-panel"]')).toHaveCount(0);
+    await expect(outline).toBeHidden();
     await expect(heading).toBeVisible();
     await expect(page.getByRole('main')).toBeVisible();
   });

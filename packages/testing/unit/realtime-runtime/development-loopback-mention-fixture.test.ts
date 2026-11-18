@@ -2,16 +2,16 @@ import { EventEmitter } from 'node:events';
 import { describe, expect, it, vi } from 'vitest';
 
 import {
-  createSyntheticMentionDocumentId,
-  waitForSyntheticMentionWorker,
-  type SyntheticMentionWorkerLifecycle,
-} from '../../../../apps/web/e2e/mentions/development-loopback-mention-fixture';
+  waitForDevelopmentLoopbackWorker,
+  type DevelopmentLoopbackWorkerLifecycle,
+} from '../../../../apps/web/e2e/development-loopback-worker';
+import { createSyntheticMentionDocumentId } from '../../../../apps/web/e2e/mentions/development-loopback-mention-fixture';
 
 class FakeWorker extends EventEmitter {
   exitCode: number | null = null;
   signalCode: NodeJS.Signals | null = null;
 
-  asLifecycle(): SyntheticMentionWorkerLifecycle {
+  asLifecycle(): DevelopmentLoopbackWorkerLifecycle {
     return this;
   }
 }
@@ -50,7 +50,7 @@ describe('synthetic mention loopback fixture', () => {
         }),
       );
 
-    await waitForSyntheticMentionWorker(worker.asLifecycle(), 'http://127.0.0.1/health', {
+    await waitForDevelopmentLoopbackWorker(worker.asLifecycle(), 'http://127.0.0.1/health', {
       fetchFn,
       pollIntervalMs: 0,
       sleepFn: immediateSleep,
@@ -64,10 +64,14 @@ describe('synthetic mention loopback fixture', () => {
 
   it('fails immediately when the child exits before a hanging health request completes', async () => {
     const worker = new FakeWorker();
-    const waiting = waitForSyntheticMentionWorker(worker.asLifecycle(), 'http://127.0.0.1/health', {
-      fetchFn: vi.fn<typeof fetch>(() => new Promise<Response>(() => undefined)),
-      timeoutMs: 30_000,
-    });
+    const waiting = waitForDevelopmentLoopbackWorker(
+      worker.asLifecycle(),
+      'http://127.0.0.1/health',
+      {
+        fetchFn: vi.fn<typeof fetch>(() => new Promise<Response>(() => undefined)),
+        timeoutMs: 30_000,
+      },
+    );
 
     worker.exitCode = 17;
     worker.emit('exit', 17, null);
@@ -79,10 +83,14 @@ describe('synthetic mention loopback fixture', () => {
 
   it('fails immediately when the child emits a startup error', async () => {
     const worker = new FakeWorker();
-    const waiting = waitForSyntheticMentionWorker(worker.asLifecycle(), 'http://127.0.0.1/health', {
-      fetchFn: vi.fn<typeof fetch>(() => new Promise<Response>(() => undefined)),
-      timeoutMs: 30_000,
-    });
+    const waiting = waitForDevelopmentLoopbackWorker(
+      worker.asLifecycle(),
+      'http://127.0.0.1/health',
+      {
+        fetchFn: vi.fn<typeof fetch>(() => new Promise<Response>(() => undefined)),
+        timeoutMs: 30_000,
+      },
+    );
 
     worker.emit('error', new Error('spawn failed'));
 

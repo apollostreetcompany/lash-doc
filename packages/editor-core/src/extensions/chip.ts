@@ -7,10 +7,14 @@ import type { NodeView } from '@tiptap/pm/view';
 export interface ChipResolveResult {
   title: string;
   lastEditor?: string;
+  navigationHref?: string;
 }
 
 export interface LashChipNodeOptions {
+  /** Resolve metadata the current viewer can see without storing it in the document. */
   resolveDocChip?: (docId: string) => ChipResolveResult | null;
+  /** Translate a host-specific document address to the canonical stored reference. */
+  matchAlternateDocUrl?: (text: string, origin: string) => ChipReference | null;
 }
 
 interface ChipReference {
@@ -111,7 +115,7 @@ class LashChipNodeView implements NodeView {
     const reference = matchInternalDocUrl(href, window.location.origin);
     const metadata = reference ? this.resolveDocChip?.(reference.refId) : null;
 
-    if (href) this.link.setAttribute('href', href);
+    if (href) this.link.setAttribute('href', metadata?.navigationHref ?? href);
     else this.link.removeAttribute('href');
     this.label.textContent = metadata?.title || href || 'Document link';
     this.link.className = metadata ? 'lash-chip' : '';
@@ -247,7 +251,10 @@ export const LashChip = Node.create<LashChipNodeOptions>({
                 text.trim()
             )
               return false;
-            const reference = matchInternalDocUrl(text, window.location.origin);
+            const origin = window.location.origin;
+            const reference =
+              matchInternalDocUrl(text, origin) ??
+              this.options.matchAlternateDocUrl?.(text, origin);
             if (!reference || !this.options.resolveDocChip?.(reference.refId)) return false;
 
             const { state } = view;

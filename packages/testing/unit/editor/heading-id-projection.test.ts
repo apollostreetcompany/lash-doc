@@ -309,6 +309,41 @@ describe('projectDocumentHeadingIds', () => {
     editor.destroy();
   });
 
+  it('advances the caret on first input after a heading or paragraph split', () => {
+    const editor = new Editor({
+      extensions: createLashEditorExtensions(),
+      content: { type: 'doc', content: [heading(1, 'Chapter One', 'chapter')] },
+    });
+    try {
+      const end = () => editor.state.doc.content.size - 1;
+      editor.commands.setTextSelection(end());
+      expect(editor.commands.splitBlock()).toBe(true);
+      expect(headingInputStabilityKey.getState(editor.state)).toBe(true);
+      const position = editor.state.selection.from;
+      expect(
+        editor.view.someProp('handleTextInput', (insert) =>
+          insert(editor.view, position, position, 'O', () =>
+            editor.state.tr.insertText('O', position),
+          ),
+        ),
+      ).toBe(true);
+      expect(editor.state.selection.from).toBe(position + 1);
+      expect(editor.state.doc.lastChild?.textContent).toBe('O');
+      expect(headingEntries(editor.state.doc)).toEqual([
+        { pos: 0, headingId: 'chapter', level: 1, text: 'Chapter One' },
+      ]);
+      expect(headingInputStabilityKey.getState(editor.state)).toBe(false);
+
+      editor.commands.setTextSelection(end());
+      expect(editor.commands.splitBlock()).toBe(true);
+      expect(headingInputStabilityKey.getState(editor.state)).toBe(true);
+      editor.commands.setTextSelection(1);
+      expect(headingInputStabilityKey.getState(editor.state)).toBe(false);
+    } finally {
+      editor.destroy();
+    }
+  });
+
   it('throws for a heading schema that cannot represent the required id', () => {
     const incompatibleSchema = new Schema({
       nodes: {

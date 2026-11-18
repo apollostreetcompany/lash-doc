@@ -1,5 +1,7 @@
 import { expect, type Page, type TestInfo } from '@playwright/test';
 
+import { appendBrowserParagraph } from './named-edit-convergence';
+
 const editor = (page: Page) =>
   page.getByRole('region', { name: 'Writing canvas' }).locator('.tiptap');
 const suggest = (page: Page) => page.getByRole('button', { name: 'Suggest wording', exact: true });
@@ -13,13 +15,8 @@ async function postSuggestion(
   replacement: string,
   note: string,
 ) {
-  await member.bringToFront();
+  await appendBrowserParagraph(member, paragraph);
   const last = editor(member).locator('p').last();
-  await last.click();
-  await member.keyboard.press('End');
-  await member.keyboard.press('Enter');
-  await member.keyboard.insertText(paragraph);
-  await expect(editor(member).locator('p').last()).toHaveText(paragraph);
   await last.scrollIntoViewIfNeeded();
   const positions = await last.evaluate((element, quote) => {
     const text = element.firstChild;

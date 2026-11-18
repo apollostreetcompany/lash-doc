@@ -1,19 +1,21 @@
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test } from '@playwright/test';
 
-const ready = async (page: Page) =>
-  page.waitForFunction(() =>
-    Boolean((window as unknown as { __lashEditor?: unknown }).__lashEditor),
-  );
+import { selectDiscussionTab } from '../discussion-tabs';
 
 test('sr-diff-announce', async ({ page }) => {
   await page.goto('/');
-  await ready(page);
 
-  await page.getByTestId('lash-editor-content').click();
-  await page.keyboard.type('Alpha');
-  await expect(page.getByTestId('history-version')).toHaveCount(1, { timeout: 5000 });
+  const editor = page.getByRole('textbox', { name: 'Document editor' });
+  await expect(editor).toHaveAttribute('contenteditable', 'true');
+  await editor.click();
+  await page.keyboard.insertText('Alpha');
+  await selectDiscussionTab(page, 'history');
+  await expect(page.getByTestId('history-version')).toHaveCount(1);
 
-  await page.keyboard.type(' beta');
+  await editor.click();
+  await page.keyboard.press('End');
+  await page.keyboard.insertText(' beta');
+  await expect(page.getByTestId('history-version')).toHaveCount(2);
 
   const diff = page.getByTestId('history-diff');
   await expect(diff).toBeVisible();

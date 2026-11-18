@@ -53,6 +53,15 @@ const createLegacyLocalInviteLink = async (origin: string, docId: string) => {
   return `${origin}/doc/${encodeURIComponent(docId)}#invite=${encodeURIComponent(invite.token)}`;
 };
 
+const openLocalShareDialog = async (page: Page) => {
+  const trigger = page.getByRole('button', { name: 'Share document', exact: true });
+  await trigger.click();
+  const dialog = page.getByRole('dialog', { name: /^Share “/u });
+  await expect(dialog).toBeVisible();
+  await expect(dialog).toHaveAttribute('data-phase', /^(signed-out|unavailable)$/u);
+  return dialog;
+};
+
 test.describe('invite access UX', () => {
   test('normal product omits synthetic Activity identities', async ({ page }) => {
     await page.goto(`/doc/bead-43-normal-mentions-${Date.now()}`);
@@ -70,26 +79,19 @@ test.describe('invite access UX', () => {
     await expect(page.getByText('Ada Lovelace', { exact: true })).toHaveCount(0);
   });
 
-  test('unavailable Share copy reflects whether transport is configured', async ({ page }) => {
-    const configured = Boolean(process.env.NEXT_PUBLIC_LASH_REALTIME_URL?.trim());
+  test('Share explains what a browser-only document needs before sharing', async ({ page }) => {
     await page.goto(`/doc/bead-41-copy-${Date.now()}`);
     await expect(page.getByTestId('lash-doc-title-input')).toBeVisible();
-    const shareTrigger = page.getByTestId('topbar-share-button');
-    await expect(shareTrigger).toHaveAccessibleName('Share document');
-    await shareTrigger.click();
+    const dialog = await openLocalShareDialog(page);
 
-    if (configured) {
-      await expect(page.getByTestId('share-runtime-label')).toHaveText('Transport configured');
-      await expect(page.getByTestId('share-unavailable-detail')).toContainText(
-        'collaboration transport is configured',
+    if ((await dialog.getAttribute('data-phase')) === 'signed-out') {
+      await expect(dialog.getByRole('status')).toHaveText(
+        'Sign in to save this document to your account. Signing in does not move it by itself.',
       );
-      await expect(page.getByTestId('share-unavailable-detail')).toContainText(
-        'authoritative invite service',
-      );
+      await expect(dialog.getByRole('link', { name: 'Sign in to continue' })).toBeVisible();
     } else {
-      await expect(page.getByTestId('share-runtime-label')).toHaveText('Local only');
-      await expect(page.getByTestId('share-unavailable-detail')).toContainText(
-        'stored in this browser profile',
+      await expect(dialog.getByRole('alert')).toHaveText(
+        'Account saving is unavailable right now. Your document is still on this device.',
       );
     }
 
@@ -106,7 +108,7 @@ test.describe('invite access UX', () => {
   test('local-only sharing and legacy invite consumption fail closed in two clean contexts', async ({
     browser,
     baseURL,
-  }) => {
+  }, testInfo) => {
     const docId = `bead-41-local-share-${Date.now()}`;
     const title = 'Shared launch brief';
     const body = 'Maya owns the launch checklist and the Friday review.';
@@ -123,13 +125,8 @@ test.describe('invite access UX', () => {
       await typeIntoEditor(ownerPage, body);
       await ownerPage.evaluate(() => navigator.clipboard.writeText('clipboard unchanged'));
 
-      await ownerPage.getByTestId('topbar-share-button').click();
-      await expect(ownerPage.getByTestId('share-unavailable-heading')).toContainText(
-        'Sharing is not available on this build',
-      );
-      await expect(ownerPage.getByTestId('share-unavailable-detail')).toContainText(
-        'stored in this browser profile',
-      );
+      const dialog = await openLocalShareDialog(ownerPage);
+      await expect(ownerPage.getByTestId('invite-access-status')).toHaveText('On this device');
 
       await expect(ownerPage.getByTestId('invite-controls')).toHaveCount(0);
       await expect(ownerPage.getByTestId('invite-create')).toHaveCount(0);
@@ -155,9 +152,11 @@ test.describe('invite access UX', () => {
       await expect(ownerPage.locator('.ProseMirror')).toContainText(body);
       await expect(ownerPage.locator('.ProseMirror')).toHaveAttribute('contenteditable', 'true');
       await ownerPage.screenshot({
-        path: 'artifacts/stranger-test/final/FLOW-02-share-gate.png',
+        path: testInfo.outputPath('share-gate.png'),
         animations: 'disabled',
       });
+      await dialog.getByRole('button', { name: 'Close sharing', exact: true }).click();
+      await expect(dialog).toBeHidden();
 
       const recipientContext = await browser.newContext();
       const recipientPage = await recipientContext.newPage();
@@ -275,19 +274,20 @@ test.describe('invite access UX', () => {
     }
   });
 
-  test('mobile topbar Share jumps directly to the explanation and Escape restores focus', async ({
+  test('mobile Share opens an accessible dialog and Escape restores focus', async ({
     page,
-  }) => {
+  }, testInfo) => {
     await page.setViewportSize({ width: 375, height: 812 });
     await page.emulateMedia({ reducedMotion: 'reduce' });
     await page.goto(`/doc/bead-41-mobile-share-${Date.now()}`);
     await expect(page.getByTestId('lash-doc-title-input')).toBeVisible();
 
     const shareTrigger = page.getByTestId('topbar-share-button');
-    await shareTrigger.click();
-    const heading = page.getByTestId('share-unavailable-heading');
+    const dialog = await openLocalShareDialog(page);
+    const heading = dialog.getByRole('heading', { name: /^Share “/u });
     await expect(heading).toBeVisible();
-    await expect(page.getByTestId('rail-tab-share')).toHaveAttribute('aria-selected', 'true');
+    await expect(dialog.getByRole('button', { name: 'Close sharing', exact: true })).toBeVisible();
+    await expect(dialog.locator(':focus')).toHaveCount(1);
     await expect
       .poll(async () => {
         const box = await heading.boundingBox();
@@ -296,10 +296,12 @@ test.describe('invite access UX', () => {
       .toBe(true);
 
     await page.screenshot({
-      path: 'artifacts/stranger-test/final/FLOW-02-mobile-share-gate.png',
+      path: testInfo.outputPath('mobile-share-gate.png'),
       animations: 'disabled',
     });
     await page.keyboard.press('Escape');
+    await expect(dialog).toBeHidden();
+    await expect(shareTrigger).toHaveAttribute('aria-expanded', 'false');
     await expect(shareTrigger).toBeFocused();
   });
 });

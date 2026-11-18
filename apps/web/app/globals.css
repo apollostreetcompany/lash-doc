@@ -1444,6 +1444,10 @@ main[data-testid='lash-home'] > section {
   display: none;
 }
 
+.lash-toolbar button {
+  scroll-margin-inline: 4px;
+}
+
 .lash-toolbar [data-toolbar-group] {
   display: inline-flex;
   align-items: center;
@@ -2160,6 +2164,20 @@ main[data-testid='lash-home'] > section {
   min-width: max-content;
 }
 
+@media screen {
+  .lash-editor-content table:has(> colgroup > col:nth-child(5)) {
+    display: block;
+    max-width: 100%;
+    /* TipTap emits the aggregate column minimum as an inline table style. */
+    min-width: 0 !important;
+    overflow-x: auto;
+  }
+
+  .lash-editor-content table:has(> colgroup > col:nth-child(5)) > colgroup > col {
+    width: 8rem;
+  }
+}
+
 .lash-editor-content th,
 .lash-editor-content td {
   border-right: 1px solid var(--color-border);
@@ -2230,6 +2248,10 @@ main[data-testid='lash-home'] > section {
   display: inline-flex;
   align-items: center;
   transition: filter var(--transition-fast);
+}
+
+.lash-table-cell-control[hidden] {
+  display: none;
 }
 
 .lash-table-cell-control:hover,
@@ -3404,16 +3426,25 @@ li[data-type='taskItem'] > div p {
 }
 
 .chat-document-anchor-marker:hover,
-.chat-document-anchor-marker:focus-visible,
 .chat-document-anchor-marker[data-active='true'] {
   background: var(--color-coral-50);
   border-color: var(--color-coral-600);
   box-shadow: 0 0 0 3px var(--color-coral-50);
-  outline: 0;
+}
+
+.chat-document-anchor-marker:focus-visible {
+  outline: 2px solid var(--color-coral-600);
+  outline-offset: 2px;
 }
 
 .chat-document-anchor-marker:active {
   transform: translateY(1px);
+}
+
+@media (max-width: 767px) {
+  .chat-document-anchor-marker {
+    display: none;
+  }
 }
 
 .chat-anchor-row {
@@ -4303,6 +4334,10 @@ li[data-type='taskItem'] > div p {
   .lash-markdown-action {
     min-height: 44px;
     padding-inline: 9px;
+  }
+
+  .lash-toolbar button:focus-visible {
+    outline-offset: -3px;
   }
 
   .lash-sidebar-item {
@@ -5227,6 +5262,7 @@ li[data-type='taskItem'] > div p {
   .lash-sidebar,
   .lash-rail,
   .lash-rail-tabs,
+  .lash-document-outline,
   .lash-toolbar-bar,
   .lash-app-backdrop,
   .lash-table-panel,

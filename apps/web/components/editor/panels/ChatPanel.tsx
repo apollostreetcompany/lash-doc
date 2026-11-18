@@ -303,6 +303,7 @@ export function ChatPanel({
     let frame: number | null = null;
     const updateMarkers = () => {
       if (editor.isDestroyed || editor.state.doc !== editorDoc) return;
+      const gutterLeft = editor.view.dom.getBoundingClientRect().right + 6;
       const nextMarkers = threadViews.flatMap(({ thread, mappedAnchor }) => {
         if (mappedAnchor.orphaned) return [];
         const range = projection.toEditorRange(mappedAnchor);
@@ -313,7 +314,7 @@ export function ChatPanel({
             {
               threadId: thread.id,
               top: coords.top - 2,
-              left: Math.max(8, coords.left - 34),
+              left: gutterLeft,
               label: thread.anchor.token.text,
             },
           ];
@@ -321,6 +322,12 @@ export function ChatPanel({
           return [];
         }
       });
+      nextMarkers.sort((first, second) => first.top - second.top);
+      for (let index = 1; index < nextMarkers.length; index += 1) {
+        const marker = nextMarkers[index];
+        const previous = nextMarkers[index - 1];
+        if (marker && previous) marker.top = Math.max(marker.top, previous.top + 28);
+      }
       setAnchorMarkers(nextMarkers);
     };
     const scheduleUpdate = () => {
@@ -329,12 +336,16 @@ export function ChatPanel({
       }
       frame = window.requestAnimationFrame(updateMarkers);
     };
+    const resize =
+      typeof ResizeObserver === 'function' ? new ResizeObserver(scheduleUpdate) : null;
+    resize?.observe(editor.view.dom);
     scheduleUpdate();
     window.addEventListener('scroll', scheduleUpdate, true);
     window.addEventListener('resize', scheduleUpdate);
     editor.on('transaction', scheduleUpdate);
     editor.on('selectionUpdate', scheduleUpdate);
     return () => {
+      resize?.disconnect();
       if (frame !== null) {
         window.cancelAnimationFrame(frame);
       }

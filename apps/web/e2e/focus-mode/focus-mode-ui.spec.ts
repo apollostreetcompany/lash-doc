@@ -1,5 +1,7 @@
 import { expect, test, type Page } from '@playwright/test';
 
+import { selectDiscussionTab } from '../discussion-tabs';
+
 type LashTestWindow = Window & {
   __lashEditor?: import('@tiptap/core').Editor;
 };
@@ -18,7 +20,10 @@ const TOUCH_TARGET_MIN = 43.5;
 
 const waitForEditor = async (page: Page) => {
   await page.waitForFunction(() => Boolean((window as LashTestWindow).__lashEditor));
-  await expect(page.locator('.ProseMirror')).toBeVisible();
+  await expect(page.getByRole('textbox', { name: 'Document editor' })).toHaveAttribute(
+    'contenteditable',
+    'true',
+  );
   await expect(page.locator('.lash-app')).toHaveAttribute('data-entrance', 'false');
 };
 
@@ -112,19 +117,24 @@ test.describe('focus-mode-ui', () => {
 
     const toggle = page.getByTestId('focus-mode-toggle');
     const toolbar = page.getByTestId('lash-toolbar');
-    const outline = page.locator('[data-testid="lash-outline-panel"]');
+    const outline = page.getByRole('navigation', { name: 'Outline' });
     const shell = page.getByTestId('lash-editor-shell');
+    const editor = page.getByRole('textbox', { name: 'Document editor' });
 
     // Wait for editor to be ready before assertions.
-    await page.waitForFunction(() =>
-      Boolean((window as unknown as { __lashEditor?: unknown }).__lashEditor),
-    );
+    await waitForEditor(page);
 
     // Initial state — chrome visible, button shows "Enter Focus Mode".
     await expect(toggle).toHaveText('Enter Focus Mode');
     await expect(toggle).toHaveAttribute('aria-pressed', 'false');
     await expect(toolbar).toBeVisible();
-    await expect(outline).toHaveCount(1);
+    await editor.click();
+    await page.keyboard.press('ControlOrMeta+Alt+2');
+    await page.keyboard.insertText('Focus outline');
+    await page.keyboard.press('Enter');
+    await expect(outline).toBeVisible();
+    await selectDiscussionTab(page, 'chat');
+    const discussion = page.getByRole('tablist', { name: 'Discussion sections' });
     await expect(shell).toHaveAttribute('data-focus-mode', 'false');
 
     // Toggle ON — chrome hides, button label flips.
@@ -132,11 +142,11 @@ test.describe('focus-mode-ui', () => {
     await expect(toggle).toHaveText('Exit Focus Mode');
     await expect(toggle).toHaveAttribute('aria-pressed', 'true');
     await expect(toolbar).toBeHidden();
-    await expect(outline).toHaveCount(0);
+    await expect(outline).toBeHidden();
+    await expect(discussion).toBeHidden();
     await expect(shell).toHaveAttribute('data-focus-mode', 'true');
 
     // Editor still visible and editable in focus mode.
-    const editor = page.locator('.ProseMirror');
     await expect(editor).toBeVisible();
     await editor.click();
     await page.keyboard.type('Focus mode keeps typing alive.');
@@ -147,7 +157,7 @@ test.describe('focus-mode-ui', () => {
     await expect(toggle).toHaveText('Enter Focus Mode');
     await expect(toggle).toHaveAttribute('aria-pressed', 'false');
     await expect(toolbar).toBeVisible();
-    await expect(outline).toHaveCount(1);
+    await expect(outline).toBeVisible();
     await expect(shell).toHaveAttribute('data-focus-mode', 'false');
 
     // Keyboard shortcut (agents.md keymap: Cmd/Ctrl+Shift+F) toggles focus mode.
@@ -162,19 +172,11 @@ test.describe('focus-mode-ui', () => {
 
   test('hides the active TableCellPanel when focus mode is on', async ({ page }) => {
     await page.goto('/');
-    await page.waitForFunction(() =>
-      Boolean((window as unknown as { __lashEditor?: unknown }).__lashEditor),
-    );
-
-    // Insert a table and select a cell so TableCellPanel mounts.
-    await page.evaluate(() => {
-      const win = window as unknown as {
-        __lashInsertTable?: (rows?: number, cols?: number) => void;
-        __lashSelectTableCells?: (anchorRow: number, anchorCol: number) => boolean;
-      };
-      win.__lashInsertTable?.(2, 2);
-      win.__lashSelectTableCells?.(0, 0);
-    });
+    const editor = page.getByRole('textbox', { name: 'Document editor' });
+    await expect(editor).toHaveAttribute('contenteditable', 'true');
+    await editor.click();
+    await page.getByRole('button', { name: 'Insert Table' }).click();
+    await editor.getByRole('cell').first().click();
 
     const tableCellPanel = page.locator('.lash-table-panel');
     await expect(tableCellPanel).toBeVisible();
@@ -201,7 +203,7 @@ test.describe('focus-mode-ui mobile', () => {
 
   test('keeps the title, editor, and exit path on-screen without moving the document', async ({
     page,
-  }) => {
+  }, testInfo) => {
     await page.goto('/');
     await waitForEditor(page);
 
@@ -220,7 +222,7 @@ test.describe('focus-mode-ui mobile', () => {
     await expect(toggle).toBeVisible();
     await expect(toggle).toHaveAccessibleName('Exit focus mode');
     await expect(page.getByTestId('lash-toolbar')).toBeHidden();
-    await expect(page.locator('[data-testid="lash-outline-panel"]')).toHaveCount(0);
+    await expect(page.getByRole('navigation', { name: 'Outline' })).toBeHidden();
     await expect(title).toBeVisible();
     await expect(editor).toBeVisible();
     await expect(editor).toBeInViewport();
@@ -251,7 +253,7 @@ test.describe('focus-mode-ui mobile', () => {
     });
 
     expect(boundary.viewport).toEqual(MOBILE_VIEWPORT);
-    for (const surface of [boundary.editor]) {
+    for (const surface of [boundary.title, boundary.editor]) {
       expect(surface.width).toBeGreaterThan(0);
       expect(surface.height).toBeGreaterThan(0);
       expect(surface.right).toBeGreaterThan(0);
@@ -270,19 +272,18 @@ test.describe('focus-mode-ui mobile', () => {
     expectSnapshotPreserved(before, await readFocusSnapshot(page, before.scroll.target));
 
     await page.screenshot({
-      path: 'artifacts/stranger-test/final/FLOW-03-mobile-focus.png',
+      path: testInfo.outputPath('FLOW-03-mobile-focus.png'),
     });
 
-    // Keyboard exit and entry use the same native button; touch exit then proves
-    // both input paths remain operable in both directions.
+    // Verify keyboard exit and re-entry through the mobile tools, then touch exit.
     await toggle.focus();
     await expect(toggle).toBeFocused();
     await page.keyboard.press('Enter');
     await expect(shell).toHaveAttribute('data-focus-mode', 'false');
     expectSnapshotPreserved(before, await readFocusSnapshot(page, before.scroll.target));
 
-    await toggle.focus();
-    await page.keyboard.press('Enter');
+    await page.getByRole('button', { name: 'More document tools' }).press('Enter');
+    await page.getByTestId('mobile-focus-mode-toggle').press('Enter');
     await expect(shell).toHaveAttribute('data-focus-mode', 'true');
     expectSnapshotPreserved(before, await readFocusSnapshot(page, before.scroll.target));
 

@@ -93,6 +93,22 @@ export function EditorToolbar({
         aria-label="Editor toolbar"
         data-testid="lash-toolbar"
         className="lash-toolbar"
+        onFocusCapture={(event) => {
+          const button = event.target;
+          const toolbar = event.currentTarget;
+          if (
+            !(button instanceof HTMLButtonElement) ||
+            !button.matches(':focus-visible') ||
+            toolbar.scrollWidth <= toolbar.clientWidth
+          )
+            return;
+
+          requestAnimationFrame(() => {
+            if (document.activeElement === button) {
+              button.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+            }
+          });
+        }}
       >
         {groups.map(({ label, items }) => (
           <div key={label} role="group" aria-label={label} data-toolbar-group>

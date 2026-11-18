@@ -1,4 +1,3 @@
-
 import {
   EMPTY_HISTORY_DOC,
   createHistoryStore,
@@ -10,8 +9,9 @@ import {
   type HistoryPersistenceCommitResult,
 } from '@lash/history';
 import { createDocumentId } from '@lash/types';
-import { readFile } from 'node:fs/promises';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
+
+import { imageWithCaption } from '../../fixtures/image-with-caption';
 
 class MemoryHistoryPersistence implements HistoryPersistenceAdapter {
   primary = new Map<string, string>();
@@ -72,19 +72,39 @@ describe('durable local history projection', () => {
   it('keeps structured versions with embedded image bytes through 101 edits, reload, and restore', async () => {
     const persistence = new MemoryHistoryPersistence();
     const documentId = createDocumentId('history-rich-media');
-    const media = (await readFile(new URL('../../../../artifacts/stranger-test/baseline/desktop-formatting-success.png', import.meta.url))).toString('base64');
-    const image = { type: 'image', attrs: { src: `data:image/png;base64,${media}`, alt: 'Fixture image' } };
+    const media = imageWithCaption(112 * 1024);
+    const image = {
+      type: 'image',
+      attrs: { src: `data:image/png;base64,${media}`, alt: 'Fixture image' },
+    };
     const historicalBody = (index: number) => ({
       type: 'doc',
       content: [
-        { type: 'heading', attrs: { level: 2, headingId: 'fixture' }, content: [{ type: 'text', text: 'Agenda' }] },
+        {
+          type: 'heading',
+          attrs: { level: 2, headingId: 'fixture' },
+          content: [{ type: 'text', text: 'Agenda' }],
+        },
         image,
-        { type: 'paragraph', content: [{ type: 'text', text: `Revision ${index}`, marks: [{ type: 'bold' }] }] },
-        { type: 'bulletList', content: [{ type: 'listItem', content: [{ type: 'paragraph', content: [{ type: 'text', text: 'List item' }] }] }] },
+        {
+          type: 'paragraph',
+          content: [{ type: 'text', text: `Revision ${index}`, marks: [{ type: 'bold' }] }],
+        },
+        {
+          type: 'bulletList',
+          content: [
+            {
+              type: 'listItem',
+              content: [{ type: 'paragraph', content: [{ type: 'text', text: 'List item' }] }],
+            },
+          ],
+        },
       ],
     });
     const snapshot = (index: number): HistoryDocumentState => ({
-      type: 'doc', text: `Agenda\nRevision ${index}\nList item`, body: historicalBody(index),
+      type: 'doc',
+      text: `Agenda\nRevision ${index}\nList item`,
+      body: historicalBody(index),
     });
     const options = { snapshotInterval: 48, persistence };
     const store = createHistoryStore(options);
@@ -98,14 +118,21 @@ describe('durable local history projection', () => {
     for (let index = 1; index <= 101; index += 1) {
       const before = snapshot(index - 1);
       const after = snapshot(index);
-      const result = await store.append({
-        docId: documentId, actor, expectedParentSha: current, schemaVersion: 'lash-schema-v1',
-        ops: [
-          { op: 'replace_text', from: 0, to: before.text.length, text: after.text },
-          historyBodySnapshotOp(after, before.body),
-        ],
-        intent: 'edit', audit,
-      }, guard);
+      const result = await store.append(
+        {
+          docId: documentId,
+          actor,
+          expectedParentSha: current,
+          schemaVersion: 'lash-schema-v1',
+          ops: [
+            { op: 'replace_text', from: 0, to: before.text.length, text: after.text },
+            historyBodySnapshotOp(after, before.body),
+          ],
+          intent: 'edit',
+          audit,
+        },
+        guard,
+      );
       if (!result.ok) throw new Error(result.reason);
       expect(entryHasHistoryBody(result.entry)).toBe(true);
       expect(JSON.stringify(result.entry)).not.toContain(media);
@@ -115,15 +142,24 @@ describe('durable local history projection', () => {
     const raw = persistence.primary.get(String(documentId))!;
     expect(raw.split(media)).toHaveLength(4); // baseline and two retained checkpoints
     const reopened = createHistoryStore(options);
-    await expect(reopened.hydrate(documentId)).resolves.toMatchObject({ state: 'ready', entryCount: 101, head: current });
+    await expect(reopened.hydrate(documentId)).resolves.toMatchObject({
+      state: 'ready',
+      entryCount: 101,
+      head: current,
+    });
     await expect(reopened.loadAt(documentId, historical)).resolves.toEqual(snapshot(5));
     await expect(reopened.diff(documentId, historical, current)).resolves.toMatchObject({
       spans: expect.arrayContaining([expect.objectContaining({ kind: 'inserted', text: '101' })]),
     });
     const restore = await reopened.restore(documentId, historical, actor, audit, guard);
-    expect(restore).toMatchObject({ ok: true, entry: { seq: 102, parentSha: current, restoredFromVersion: historical } });
+    expect(restore).toMatchObject({
+      ok: true,
+      entry: { seq: 102, parentSha: current, restoredFromVersion: historical },
+    });
     if (!restore.ok) throw new Error(restore.reason);
-    await expect(reopened.loadAt(documentId, restore.entry.resultSha)).resolves.toEqual(snapshot(5));
+    await expect(reopened.loadAt(documentId, restore.entry.resultSha)).resolves.toEqual(
+      snapshot(5),
+    );
     await expect(reopened.loadAt(documentId, current)).resolves.toEqual(snapshot(101));
   }, 30_000);
 
@@ -219,6 +255,83 @@ describe('durable local history projection', () => {
       entryCount: 1,
     });
     expect(await reloaded.list(documentId)).toEqual([]);
+  });
+
+  it('rejects a valid but stale readback and preserves the previous live and cold head', async () => {
+    const persistence = new MemoryHistoryPersistence();
+    const documentId = createDocumentId('history-wrong-readback');
+    const store = createHistoryStore({ persistence });
+    const baseline = await store.hydrate(documentId);
+    if (baseline.state !== 'empty-baseline') throw new Error('expected baseline');
+    const first = await appendText(store, documentId, baseline.head, '', 'First');
+    if (!first.ok) throw new Error(first.reason);
+    const primary = persistence.primary.get(String(documentId));
+    if (!primary) throw new Error('expected persisted first version');
+
+    vi.spyOn(persistence, 'commit').mockResolvedValueOnce({ ok: true, primaryRaw: primary });
+    await expect(appendText(store, documentId, first.entry.resultSha, 'First', 'Second'))
+      .resolves.toMatchObject({ ok: false, reason: 'commit-uncertain' });
+    await expect(store.list(documentId)).resolves.toEqual([first.entry]);
+    await expect(store.hydrate(documentId)).resolves.toMatchObject({ head: first.entry.resultSha, entryCount: 1 });
+    await expect(createHistoryStore({ persistence }).hydrate(documentId)).resolves.toMatchObject({
+      state: 'ready', head: first.entry.resultSha, entryCount: 1,
+    });
+  });
+
+  it('validates new metadata before writing and keeps the cached projection private', async () => {
+    const persistence = new MemoryHistoryPersistence();
+    const documentId = createDocumentId('history-metadata-and-cache');
+    const now = vi.fn().mockReturnValueOnce('invalid').mockReturnValue('2026-07-30T00:00:00.000Z');
+    const store = createHistoryStore({ persistence, now, snapshotInterval: 20 });
+    const baseline = await store.hydrate(documentId);
+    if (baseline.state !== 'empty-baseline') throw new Error('expected baseline');
+    const commit = vi.spyOn(persistence, 'commit');
+
+    await expect(appendText(store, documentId, baseline.head, '', 'Invalid timestamp'))
+      .resolves.toMatchObject({ ok: false, reason: 'schema-invalid' });
+    expect(commit).not.toHaveBeenCalled();
+
+    const first = await appendText(store, documentId, baseline.head, '', 'First');
+    if (!first.ok) throw new Error(first.reason);
+    const fromList = (await store.list(documentId))[0];
+    const resultSha = first.entry.resultSha;
+    first.entry.actor.id = 'mutated result';
+    first.entry.ops.length = 0;
+    fromList.actor.id = 'mutated list';
+    fromList.ops.length = 0;
+    await expect(store.loadAt(documentId, resultSha)).resolves.toMatchObject({ text: 'First' });
+    await expect(store.list(documentId)).resolves.toMatchObject([{ actor: { id: 'local-user' } }]);
+
+    const second = await appendText(store, documentId, resultSha, 'First', 'Second');
+    if (!second.ok) throw new Error(second.reason);
+    const cold = createHistoryStore({ persistence, snapshotInterval: 20 });
+    await expect(cold.hydrate(documentId)).resolves.toMatchObject({ state: 'ready', entryCount: 2 });
+    await expect(cold.loadAt(documentId, second.entry.resultSha)).resolves.toMatchObject({ text: 'Second' });
+  });
+
+  it('rejects a replacement whose document tag would differ between replay and its checkpoint', async () => {
+    const persistence = new MemoryHistoryPersistence();
+    const documentId = createDocumentId('history-checkpoint-shape');
+    const store = createHistoryStore({ persistence, snapshotInterval: 1 });
+    const baseline = await store.hydrate(documentId);
+    if (baseline.state !== 'empty-baseline') throw new Error('expected baseline');
+    const result = await store.append(
+      {
+        docId: documentId,
+        actor: { type: 'user', id: 'local-user' },
+        expectedParentSha: baseline.head,
+        schemaVersion: 'lash-schema-v1',
+        intent: 'edit',
+        audit: { ua: 'history-persistence-test' },
+        ops: [{ op: 'pm_step', step: { type: 'lash_replace_doc', doc: { type: 'paragraph', text: 'Invalid' } } }],
+      },
+      { commitGuard: () => true },
+    );
+
+    expect(result).toMatchObject({ ok: false, reason: 'schema-invalid' });
+    await expect(persistence.read(String(documentId))).resolves.toMatchObject({ primaryRaw: null });
+    await expect(store.hydrate(documentId)).resolves.toEqual(baseline);
+    await expect(createHistoryStore({ persistence }).hydrate(documentId)).resolves.toEqual(baseline);
   });
 
   it('lets one same-parent writer win the durable CAS and rejects the stale writer', async () => {

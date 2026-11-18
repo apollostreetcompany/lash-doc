@@ -14,6 +14,7 @@ export type HistoryAvailabilityState =
   | 'ready'
   | 'empty-baseline'
   | 'capacity-reached'
+  | 'body-saving-unavailable'
   | 'recovery-available'
   | 'unavailable'
   | 'corrupt'
@@ -201,6 +202,9 @@ export function HistoryPanel({
         <p className="history-empty" role="status">
           Version history is full. You can keep editing and saving this document.
         </p>
+      ) : null}
+      {availability === 'body-saving-unavailable' ? (
+        <p className="history-empty">Version history is paused while local saving is unavailable.</p>
       ) : null}
       <div className="history-panel-header">
         <div className="history-panel-header-actions">

@@ -32,7 +32,6 @@ const clearLocalState = async (page: Page) => {
 };
 
 const waitForEditableDocument = async (page: Page) => {
-  await page.waitForFunction(() => Boolean((window as LashTestWindow).__lashEditor));
   const editable = page.getByRole('textbox', { name: 'Document editor' });
   await expect(editable).toHaveAttribute('contenteditable', 'true');
   return editable;
@@ -107,6 +106,7 @@ test.describe('stranger-visible document entry', () => {
     await expect(editable).toHaveAttribute('aria-placeholder', INVITATION);
     await expect(emptyParagraph).toHaveCount(1);
 
+    await expect(page.locator('.lash-app')).toHaveAttribute('data-entrance', 'false');
     const before = await editable.boundingBox();
     expect(before?.height ?? 0).toBeGreaterThanOrEqual(224);
     await editable.click({ position: { x: 72, y: Math.min(180, (before?.height ?? 224) - 16) } });
@@ -118,12 +118,10 @@ test.describe('stranger-visible document entry', () => {
 
     const after = await editable.boundingBox();
     expect(Math.abs((after?.height ?? 0) - (before?.height ?? 0))).toBeLessThanOrEqual(1);
-    const serialized = await page.evaluate(() => {
-      const editor = (window as LashTestWindow).__lashEditor;
-      if (!editor) throw new Error('Lash editor test hook is unavailable');
-      return JSON.stringify(editor.getJSON());
-    });
-    expect(serialized).not.toContain(INVITATION);
+    const storedBody = () =>
+      page.evaluate(() => localStorage.getItem('lash:body:stranger-entry-desktop'));
+    await expect.poll(storedBody).toContain('A clear first thought.');
+    expect(await storedBody()).not.toContain(INVITATION);
   });
 
   test('mobile empty paper preserves the same invitation, focus target, and typing behavior', async ({
@@ -155,6 +153,7 @@ test.describe('stranger-visible document entry', () => {
       .toBe('none');
     await page.emulateMedia({ media: 'screen' });
 
+    await page.waitForFunction(() => Boolean((window as LashTestWindow).__lashEditor));
     await page.evaluate(() => {
       const editor = (window as LashTestWindow).__lashEditor;
       if (!editor) throw new Error('Lash editor test hook is unavailable');

@@ -1,23 +1,8 @@
 import { expect, test, type Page } from '@playwright/test';
 
-type LashTestWindow = Window & {
-  __lashEditor?: {
-    getText: (options?: { blockSeparator?: string }) => string;
-  };
-  __lashOffline?: unknown;
-};
-
 const route = (documentId: string) => `/doc/${documentId}`;
 
-const waitForEditor = async (page: Page) => {
-  await page.waitForFunction(() => Boolean((window as LashTestWindow).__lashEditor));
-  await expect(page.locator('.ProseMirror')).toBeVisible();
-};
-
-const editorText = (page: Page) =>
-  page.evaluate(
-    () => (window as LashTestWindow).__lashEditor?.getText({ blockSeparator: '\n' }) ?? '',
-  );
+const documentEditor = (page: Page) => page.getByRole('textbox', { name: 'Document editor' });
 
 const expectNoSimulatedCollaboration = async (page: Page) => {
   await expect(page.getByTestId('offline-panel')).toHaveCount(0);
@@ -36,7 +21,8 @@ test.describe('local durability truth', () => {
     const durableText = 'Local durability comes from verified browser storage.';
 
     await page.goto(route(documentId));
-    await waitForEditor(page);
+    const editor = documentEditor(page);
+    await expect(editor).toHaveAttribute('contenteditable', 'true');
     await expect(page.getByTestId('realtime-presence-bar')).toHaveAttribute(
       'data-enabled',
       'false',
@@ -44,26 +30,27 @@ test.describe('local durability truth', () => {
     await expect(page.getByTestId('realtime-presence-bar')).toHaveText('On this device');
     await expect(page.getByTestId('remote-collaborator')).toHaveCount(0);
 
-    await page.locator('.ProseMirror').click();
+    await editor.click();
     await page.keyboard.type(durableText);
-    await expect.poll(() => editorText(page)).toBe(durableText);
+    await expect(editor).toHaveText(durableText);
     await expect(page.getByTestId('autosave-indicator')).toHaveAttribute('data-status', 'saved', {
       timeout: 2_500,
     });
 
     await expect(page.getByTestId('rail-tab-activity')).toHaveCount(0);
     const desktopShare = page.getByTestId('topbar-share-button');
-    await expect(desktopShare).toHaveAttribute('aria-expanded', 'true');
-    await page.keyboard.press('Control+/');
     await expect(desktopShare).toHaveAttribute('aria-expanded', 'false');
     await desktopShare.click();
     await expect(desktopShare).toHaveAttribute('aria-expanded', 'true');
-    await expect(page.getByTestId('rail-tab-share')).toHaveAttribute('aria-selected', 'true');
+    const share = page.getByRole('dialog', { name: /^Share/ });
+    await expect(share).toBeVisible();
     await expectNoSimulatedCollaboration(page);
+    await page.keyboard.press('Escape');
+    await expect(share).toBeHidden();
+    await expect(desktopShare).toBeFocused();
 
     await page.reload();
-    await waitForEditor(page);
-    await expect.poll(() => editorText(page)).toBe(durableText);
+    await expect(editor).toHaveText(durableText);
     await expectNoSimulatedCollaboration(page);
   });
 
@@ -101,35 +88,40 @@ test.describe('local durability truth', () => {
 
     await expect(page.getByTestId('local-body-notice')).toHaveAttribute('data-kind', 'recovered');
     await expect(page.getByTestId('autosave-indicator')).toHaveCount(0);
-    await expect(page.locator('.ProseMirror')).toHaveAttribute('contenteditable', 'false');
-    await expect(page.locator('.ProseMirror')).toContainText('Verified recovery copy');
+    await expect(documentEditor(page)).toHaveAttribute('contenteditable', 'false');
+    await expect(documentEditor(page)).toContainText('Verified recovery copy');
     await expectNoSimulatedCollaboration(page);
   });
+});
+
+test.describe('local durability truth on a phone', () => {
+  test.use({ viewport: { width: 375, height: 812 }, hasTouch: true });
 
   test('mobile Share navigation keeps a reachable close path and restores focus', async ({
     page,
   }) => {
-    await page.setViewportSize({ width: 375, height: 812 });
     await page.goto(route(`bead-43-mobile-truth-${Date.now()}`));
-    await waitForEditor(page);
+    await expect(documentEditor(page)).toBeVisible();
 
     const shareTrigger = page.getByTestId('topbar-share-button');
+    const share = page.getByRole('dialog', { name: /^Share/ });
+    const close = share.getByRole('button', { name: 'Close sharing' });
     await expect(shareTrigger).toHaveAttribute('aria-expanded', 'false');
-    await shareTrigger.click();
+    await shareTrigger.tap();
     await expect(shareTrigger).toHaveAttribute('aria-expanded', 'true');
-    await expect(page.locator('.lash-app')).toHaveAttribute('data-rail-mobile', 'true');
+    await expect(share).toBeVisible();
+    await expect(share).toHaveAttribute('aria-modal', 'true');
+    await expect(page.locator('.lash-app')).toHaveAttribute('data-rail-mobile', 'false');
     await expect(page.getByTestId('rail-tab-activity')).toHaveCount(0);
-    await expect(page.getByTestId('rail-tab-share')).toHaveAttribute('aria-selected', 'true');
     await expectNoSimulatedCollaboration(page);
 
-    await page.getByRole('button', { name: 'Close activity panel' }).click();
-    await expect(page.locator('.lash-app')).toHaveAttribute('data-rail-mobile', 'false');
+    await close.tap();
+    await expect(share).toBeHidden();
     await expect(shareTrigger).toHaveAttribute('aria-expanded', 'false');
     await expect(shareTrigger).toBeFocused();
 
-    await shareTrigger.click();
+    await shareTrigger.tap();
     await expect(shareTrigger).toHaveAttribute('aria-expanded', 'true');
-    const close = page.getByRole('button', { name: 'Close activity panel' });
     await expect(close).toBeVisible();
     const closeBox = await close.boundingBox();
     expect(closeBox?.width ?? 0).toBeGreaterThanOrEqual(44);
@@ -145,8 +137,8 @@ test.describe('local durability truth', () => {
       })),
     ).toEqual({ documentWidth: 375, viewportWidth: 375 });
 
-    await close.click();
-    await expect(page.locator('.lash-app')).toHaveAttribute('data-rail-mobile', 'false');
+    await close.tap({ position: { x: 38, y: 6 } });
+    await expect(share).toBeHidden();
     await expect(shareTrigger).toHaveAttribute('aria-expanded', 'false');
     await expect(shareTrigger).toBeFocused();
   });

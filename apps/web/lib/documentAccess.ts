@@ -896,6 +896,16 @@ class BrowserDocumentAccessController implements DocumentAccessController {
       return this.startPromise;
     }
     if (recovery === 'unavailable') {
+      // A browser without local storage may still offer an unsaved writing
+      // surface when there is no possible realtime authority for this route.
+      const runtime =
+        this.dependencies.recoveryJournal === null &&
+        this.fragmentDecision?.state === 'absent'
+          ? this.dependencies.readRuntime()
+          : null;
+      if (runtime?.mode === 'disabled' && this.dependencies.readStoredCredential(this.documentId) === null) {
+        return this.beginAuthorization(runtime);
+      }
       this.authority.revoke();
       this.failUnavailable('recovery-storage-unavailable', true);
       this.startPromise = Promise.resolve();
@@ -1021,11 +1031,11 @@ class BrowserDocumentAccessController implements DocumentAccessController {
     return result;
   }
 
-  private beginAuthorization() {
+  private beginAuthorization(runtime?: RealtimeRuntimeSelection) {
     const epoch = ++this.generation;
     const abortController = new AbortController();
     this.abortController = abortController;
-    const promise = this.runAuthorization(epoch, abortController.signal).catch((error) => {
+    const promise = this.runAuthorization(epoch, abortController.signal, runtime).catch((error) => {
       if (this.isCurrent(epoch, abortController.signal) && !isAbortError(error)) {
         if (this.snapshot.phase === 'denied') return;
         const hadResources = this.resources !== null;
@@ -1043,8 +1053,11 @@ class BrowserDocumentAccessController implements DocumentAccessController {
     return promise;
   }
 
-  private async runAuthorization(epoch: number, signal: AbortSignal) {
-    const runtime = this.dependencies.readRuntime();
+  private async runAuthorization(
+    epoch: number,
+    signal: AbortSignal,
+    runtime = this.dependencies.readRuntime(),
+  ) {
     if (NAMED_EDIT_ROOM_ID.test(this.documentId)) {
       await this.runNamedAuthorization(runtime, epoch, signal);
       return;
@@ -2129,12 +2142,20 @@ export const createDocumentAccessController = (
 export const createBrowserDocumentAccessController = (input: {
   documentId: string;
   navigateHome: () => void;
+  staticPreview?: boolean;
 }): DocumentAccessController => {
   const retained = retainedBlockedRecoveryControllers.get(input.documentId);
   const oldestRetained = retained?.values().next().value;
-  if (oldestRetained && !NAMED_EDIT_ROOM_ID.test(input.documentId)) return oldestRetained;
-  return createDocumentAccessController(
-    { documentId: input.documentId },
-    createBrowserDocumentAccessDependencies(input.navigateHome),
-  );
+  if (!input.staticPreview && oldestRetained && !NAMED_EDIT_ROOM_ID.test(input.documentId)) {
+    return oldestRetained;
+  }
+  const dependencies = createBrowserDocumentAccessDependencies(input.navigateHome);
+  if (input.staticPreview) {
+    dependencies.readRuntime = () => ({
+      invitationMode: 'unavailable',
+      mode: 'disabled',
+      socketBaseUrl: null,
+    });
+  }
+  return createDocumentAccessController({ documentId: input.documentId }, dependencies);
 };

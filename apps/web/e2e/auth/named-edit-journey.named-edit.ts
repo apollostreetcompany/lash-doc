@@ -1,6 +1,13 @@
 import { expect, test, type Page, type TestInfo } from '@playwright/test';
 
 import { latestSignInLink } from './mailpit';
+import {
+  exerciseBrowserNetworkRecovery,
+  exerciseOverlappingEdits,
+  exerciseRealWorkerRestart,
+  expectConvergedRichBody,
+  observeRoomWire,
+} from './named-edit-convergence';
 import { exerciseSharedSuggestions } from './named-edit-suggestions';
 import { verifySharedHistory } from './verify-shared-history';
 import { selectDiscussionTab } from '../discussion-tabs';
@@ -146,6 +153,8 @@ test('owner and named account edit the same document, then revocation closes acc
   page: owner,
   baseURL,
 }, testInfo) => {
+  const restartProof = process.env.LASH_COLLAB_WORKER_RESTART_PROOF === '1';
+  if (restartProof) test.setTimeout(300_000);
   if (!baseURL) throw new Error('This journey requires the configured local Lash stack.');
   const origin = new URL(baseURL).origin;
   const marker = crypto.randomUUID().slice(0, 8);
@@ -161,6 +170,7 @@ test('owner and named account edit the same document, then revocation closes acc
   const unrelatedContext = await browser.newContext({ baseURL });
 
   try {
+    const ownerWire = observeRoomWire(owner);
     await owner.context().grantPermissions(['clipboard-read', 'clipboard-write'], { origin });
     await owner.goto('/');
     await owner.getByRole('button', { name: 'New document', exact: true }).click();
@@ -230,6 +240,7 @@ test('owner and named account edit the same document, then revocation closes acc
     await expectUnavailable(recipient, originalText);
     await recipient.getByRole('link', { name: 'Sign in to accept' }).click();
     const member = await memberContext.newPage();
+    const memberWire = observeRoomWire(member);
     await signIn(recipient, recipientEmail, origin, member);
     await waitForPath(member, documentPath);
     await expect(title(member)).toHaveValue(originalTitle);
@@ -248,6 +259,18 @@ test('owner and named account edit the same document, then revocation closes acc
     await expect(title(owner)).toHaveValue(revisedTitle);
     await expect(member.getByTestId('realtime-sync-state')).toHaveAttribute('data-state', 'saved');
     await member.screenshot({ path: testInfo.outputPath('named-editor.png') });
+    const converged = restartProof
+      ? null
+      : await test.step('Overlap independent edits with existing rich text', () =>
+          exerciseOverlappingEdits({
+            owner,
+            member,
+            ownerWire,
+            memberWire,
+            ownerLine: ownerEdit,
+            memberLine: memberEdit,
+            testInfo,
+          }));
 
     await test.step('Anchor, reply to, and resolve a shared comment', () =>
       exerciseSharedChat(owner, member, testInfo));
@@ -259,14 +282,33 @@ test('owner and named account edit the same document, then revocation closes acc
       await expect(editor(page)).toContainText(originalText);
       await expect(editor(page)).toContainText(ownerEdit);
       await expect(editor(page)).toContainText(memberEdit);
+      if (converged !== null) await expectConvergedRichBody(page, converged);
       await expectSharedChatRestored(page);
     }
 
     await member.screenshot({ path: testInfo.outputPath('shared-chat-after-reload.png') });
+    const browserNetworkCheck = () =>
+      test.step('Interrupt one browser connection and verify recovery', () =>
+        exerciseBrowserNetworkRecovery({ owner, member, memberWire, testInfo }));
+
+    if (restartProof) {
+      await test.step('Recover both clients through an actual local Worker restart', () =>
+        exerciseRealWorkerRestart({ owner, member, ownerWire, memberWire, testInfo }));
+    }
+
     await test.step('Accept and reject shared suggestions', () =>
       exerciseSharedSuggestions(owner, member, testInfo));
     await test.step('Restore and compare shared versions', () =>
       verifySharedHistory({ owner, member, originalText, ownerEdit, memberEdit, testInfo }));
+
+    if (!restartProof) await browserNetworkCheck();
+    for (const page of [owner, member]) {
+      await expectSharedChatRestored(page);
+      await expect(
+        page.getByTestId('suggestion-status').filter({ hasText: 'Suggestion accepted' }),
+      ).toHaveCount(1);
+      await expect(title(page)).toHaveValue(revisedTitle);
+    }
 
     await share(owner).click();
     const memberRow = access.getByRole('listitem').filter({ hasText: recipientEmail });

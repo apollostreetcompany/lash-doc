@@ -56,6 +56,7 @@ for (const viewport of [
     await expect(editable).toHaveAttribute('aria-placeholder', INVITATION);
     await expect(paragraph).toHaveCount(1);
 
+    await expect(page.locator('.lash-app')).toHaveAttribute('data-entrance', 'false');
     const boxBefore = await editable.boundingBox();
     expect(boxBefore?.height ?? 0).toBeGreaterThanOrEqual(224);
 

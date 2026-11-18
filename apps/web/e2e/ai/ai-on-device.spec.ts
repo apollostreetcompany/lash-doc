@@ -46,50 +46,49 @@ test('reviews and applies a browser model revision without flattening the docume
     });
   });
   await page.goto('/');
-  await page.waitForFunction(() =>
-    Boolean((window as unknown as { __lashEditor?: unknown }).__lashEditor),
-  );
-  await expect(page.getByTestId('lash-editor-content')).toHaveAttribute('contenteditable', 'true');
-  await page.evaluate(() => {
-    const editor = (window as unknown as { __lashEditor: import('@tiptap/core').Editor })
-      .__lashEditor;
-    editor.commands.setContent(
+  const draft = page.getByRole('textbox', { name: 'Document editor' });
+  const planParagraph = draft.locator(':scope > p');
+  const expectRichDraft = async (plan: string) => {
+    await expect(draft.locator('h2[data-heading-id="outline"]')).toHaveText('Outline');
+    await expect(planParagraph.locator('strong')).toHaveText('Review');
+    await expect(draft.locator('ul em')).toHaveText('Next steps');
+    await expect(planParagraph).toHaveText(`Review ${plan}.`);
+  };
+
+  await expect(draft).toHaveAttribute('contenteditable', 'true');
+  await draft.click();
+  await draft.evaluate((element) => {
+    const clipboardData = new DataTransfer();
+    clipboardData.setData(
+      'text/html',
       '<h2 data-heading-id="outline">Outline</h2><p><strong>Review</strong> the rough plan.</p><ul><li><p><em>Next steps</em></p></li></ul>',
     );
+    element.dispatchEvent(
+      new ClipboardEvent('paste', { bubbles: true, cancelable: true, clipboardData }),
+    );
   });
+  await expectRichDraft('the rough plan');
+  await expect(page.getByTestId('autosave-indicator')).toHaveAttribute('data-status', 'saved');
   await selectDiscussionTab(page, 'history');
-  await expect(page.getByTestId('history-version')).toHaveCount(1, { timeout: 5000 });
+  await expect(page.getByTestId('history-version')).toHaveCount(1);
   await selectDiscussionTab(page, 'ai');
-  await page.evaluate(() => {
-    const editor = (window as unknown as { __lashEditor: import('@tiptap/core').Editor })
-      .__lashEditor;
-    editor.state.doc.descendants((node, position) => {
-      const needle = 'the rough plan';
-      const start = node.text?.indexOf(needle) ?? -1;
-      if (start >= 0)
-        editor.commands.setTextSelection({
-          from: position + start,
-          to: position + start + needle.length,
-        });
-    });
-  });
+  await planParagraph.click();
+  await page.keyboard.press('End');
+  await page.keyboard.press('ArrowLeft');
+  for (const _ of 'the rough plan') await page.keyboard.press('Shift+ArrowLeft');
+  await expect
+    .poll(() => page.evaluate(() => window.getSelection()?.toString()))
+    .toBe('the rough plan');
 
-  const draft = page.getByTestId('lash-editor-content');
   await page.getByRole('button', { name: 'Improve writing' }).click();
   await expect(page.getByTestId('ai-original')).toHaveText('the rough plan');
   await expect(page.getByTestId('ai-revision')).toHaveText('the tentative plan');
   await expect(page.getByTestId('ai-patch-json')).toHaveCount(0);
-  await expect(draft).toContainText('Review the rough plan.');
+  await expectRichDraft('the rough plan');
 
   await page.getByRole('button', { name: 'Apply revision' }).click();
   await expect(page.getByTestId('ai-status')).toHaveText('Revision applied.');
-  const expectRichRevision = async () => {
-    await expect(draft.locator('h2[data-heading-id="outline"]')).toHaveText('Outline');
-    await expect(draft.locator('p > strong')).toHaveText('Review');
-    await expect(draft.locator('ul em')).toHaveText('Next steps');
-    await expect(draft).toContainText('Review the tentative plan.');
-  };
-  await expectRichRevision();
+  await expectRichDraft('the tentative plan');
   await selectDiscussionTab(page, 'history');
   await expect(page.getByTestId('history-diff-insert')).toHaveAttribute(
     'data-author-id',
@@ -98,5 +97,5 @@ test('reviews and applies a browser model revision without flattening the docume
   await expect(page.getByTestId('history-diff-insert')).toHaveAttribute('data-intent', 'ai');
   await expect(page.getByTestId('autosave-indicator')).toHaveAttribute('data-status', 'saved');
   await page.reload();
-  await expectRichRevision();
+  await expectRichDraft('the tentative plan');
 });

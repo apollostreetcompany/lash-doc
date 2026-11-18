@@ -11,7 +11,7 @@ const nextConfig = {
   ...(staticExport
     ? {
         output: 'export',
-        pageExtensions: ['static.tsx'],
+        pageExtensions: ['static.tsx', 'static.ts'],
         trailingSlash: true,
       }
     : {}),

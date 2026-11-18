@@ -99,6 +99,7 @@ import {
   type DocumentAccessSnapshot,
 } from '../../lib/documentAccess';
 import { allowsDocumentBodyTransaction } from '../../lib/documentMutationAuthority';
+import { documentWorkspacePath, matchPreviewDocumentUrl } from '../../lib/documentNavigation';
 import {
   createBrowserDocumentPromotionAttempt,
   type BrowserDocumentPromotionAttempt,
@@ -421,9 +422,13 @@ const copyToClipboard = async (text: string): Promise<boolean> => {
 
 export interface EditorWorkspaceProps {
   documentId?: string;
+  staticPreview?: boolean;
 }
 
-export function EditorWorkspace({ documentId = DEFAULT_DOCUMENT_ID }: EditorWorkspaceProps) {
+export function EditorWorkspace({
+  documentId = DEFAULT_DOCUMENT_ID,
+  staticPreview = false,
+}: EditorWorkspaceProps) {
   const router = useRouter();
   const activeDocumentId = useMemo(() => normalizeDocumentId(documentId), [documentId]);
   const controllerRef = useRef<DocumentAccessController | null>(null);
@@ -439,6 +444,7 @@ export function EditorWorkspace({ documentId = DEFAULT_DOCUMENT_ID }: EditorWork
     const controller = createBrowserDocumentAccessController({
       documentId: activeDocumentId,
       navigateHome: () => router.replace(toRoute('/')),
+      staticPreview,
     });
     controllerRef.current = controller;
     controllerDocumentIdRef.current = activeDocumentId;
@@ -460,7 +466,7 @@ export function EditorWorkspace({ documentId = DEFAULT_DOCUMENT_ID }: EditorWork
         controllerDocumentIdRef.current = null;
       }
     };
-  }, [activeDocumentId, router]);
+  }, [activeDocumentId, router, staticPreview]);
 
   useEffect(() => {
     if (typeof document === 'undefined') return;
@@ -498,6 +504,7 @@ export function EditorWorkspace({ documentId = DEFAULT_DOCUMENT_ID }: EditorWork
         documentId={activeDocumentId}
         inviteIssuanceAuthority={controllerRef.current!}
         resolution={resolvedForRoute}
+        staticPreview={staticPreview}
       />
     );
   }
@@ -690,6 +697,7 @@ function ResolvedDocumentWorkspace({
   documentId,
   inviteIssuanceAuthority,
   resolution,
+  staticPreview,
 }: {
   accessSnapshot: DocumentAccessSnapshot;
   documentId: string;
@@ -698,10 +706,18 @@ function ResolvedDocumentWorkspace({
     'allowsInviteIssuance' | 'captureInviteIssuance' | 'promoteOwnerDocument'
   >;
   resolution: DocumentAccessResolution;
+  staticPreview: boolean;
 }) {
   const router = useRouter();
   const pathname = usePathname();
   const activeDocumentId = useMemo(() => normalizeDocumentId(documentId), [documentId]);
+  const navigateDocument = useCallback(
+    (path: string) => {
+      if (staticPreview) window.location.assign(path);
+      else router.push(toRoute(path));
+    },
+    [router, staticPreview],
+  );
   const historyDocumentId = useMemo(() => createDocumentId(activeDocumentId), [activeDocumentId]);
   const [isMounted, setIsMounted] = useState(false);
   const [outlineItems, setOutlineItems] = useState<OutlineItem[]>([]);
@@ -740,7 +756,9 @@ function ResolvedDocumentWorkspace({
   const [documentSettingsOpen, setDocumentSettingsOpen] = useState(false);
   const [publicAccessState, setPublicAccessState] = useState<PublicAccessStateV1 | null>(null);
   const [documentSettingsAnnouncement, setDocumentSettingsAnnouncement] = useState('');
-  const [ownerSharePhase, setOwnerSharePhase] = useState<OwnerShareDialogPhase>('checking-account');
+  const [ownerSharePhase, setOwnerSharePhase] = useState<OwnerShareDialogPhase>(
+    staticPreview ? 'unavailable' : 'checking-account',
+  );
   const [ownerShareDetail, setOwnerShareDetail] = useState('');
   const [blameLines, setBlameLines] = useState<Array<{ line: number; authorId: string | null }>>(
     [],
@@ -847,11 +865,13 @@ function ResolvedDocumentWorkspace({
   } | null>(null);
   const hydratedLocalEditorRef = useRef<Editor | null>(null);
   const localBodyMutationsAllowedRef = useRef(realtimeEnabled);
+  const localBodySavingUnavailable = !realtimeEnabled && localBodyState === 'unavailable';
   const localBodyMutationLocked =
     !realtimeEnabled &&
     (localBodyState === 'loading' || localBodyState === 'recovered-awaiting-confirmation');
   const localHistoryMutationLocked =
     !realtimeEnabled &&
+    !localBodySavingUnavailable &&
     historyAvailability !== 'ready' &&
     historyAvailability !== 'empty-baseline' &&
     historyAvailability !== 'capacity-reached';
@@ -1276,7 +1296,15 @@ function ResolvedDocumentWorkspace({
             }
           : undefined,
         chips: {
-          resolveDocChip: referenceCatalog.resolve,
+          resolveDocChip: staticPreview
+            ? (id) => {
+                const reference = referenceCatalog.resolve(id);
+                return reference
+                  ? { ...reference, navigationHref: documentWorkspacePath(id, true) }
+                  : null;
+              }
+            : referenceCatalog.resolve,
+          matchAlternateDocUrl: staticPreview ? matchPreviewDocumentUrl : undefined,
         },
       }),
       localBodyMutationGuard,
@@ -1288,6 +1316,7 @@ function ResolvedDocumentWorkspace({
       imageUploader,
       realtimeDoc,
       referenceCatalog,
+      staticPreview,
       localBodyMutationGuard,
     ],
   );
@@ -1433,11 +1462,12 @@ function ResolvedDocumentWorkspace({
       (localBodyState === 'loading' || localBodyState === 'recovered-awaiting-confirmation');
     const localHistoryLocksEditing =
       !realtimeEnabled &&
+      !localBodySavingUnavailable &&
       historyAvailability !== 'ready' &&
       historyAvailability !== 'empty-baseline' &&
       historyAvailability !== 'capacity-reached';
     editor?.setEditable(canEditDocument && !localBodyLocksEditing && !localHistoryLocksEditing);
-  }, [editor, canEditDocument, historyAvailability, localBodyState, realtimeEnabled]);
+  }, [editor, canEditDocument, historyAvailability, localBodySavingUnavailable, localBodyState, realtimeEnabled]);
 
   useEffect(() => {
     if (!editor || !realtimeProvider) return;
@@ -1549,8 +1579,6 @@ function ResolvedDocumentWorkspace({
       setHistoryEntries([]);
       setHistoryAvailability('loading');
       setSelectedHistoryEntryId(null);
-      setHistoryAuthorFilter(null);
-      setHistoryTimeFilter(null);
       setAcceptedSuggestionIds(acceptedIdsFromResolutions(suggestionResolutionsRef.current));
       setBlameLines([]);
       commitHistoryHead(null);
@@ -1563,10 +1591,8 @@ function ResolvedDocumentWorkspace({
     let disposed = false;
     let listenerAttached = false;
     setHistoryEntries([]);
-    setHistoryAvailability(realtimeEnabled ? 'remote-disabled' : 'loading');
+    setHistoryAvailability(realtimeEnabled ? 'remote-disabled' : localBodySavingUnavailable ? 'body-saving-unavailable' : 'loading');
     setSelectedHistoryEntryId(null);
-    setHistoryAuthorFilter(null);
-    setHistoryTimeFilter(null);
     setAcceptedSuggestionIds(acceptedIdsFromResolutions(suggestionResolutionsRef.current));
     setBlameLines([]);
     commitHistoryHead(null);
@@ -1575,8 +1601,9 @@ function ResolvedDocumentWorkspace({
     historyCapacityReachedRef.current = false;
     historyQueueRef.current = Promise.resolve();
 
-    if (realtimeEnabled) {
-      // Account-backed history is loaded through its authoritative room.
+    if (realtimeEnabled || localBodySavingUnavailable) {
+      // Account-backed history is loaded through its room. Local history
+      // waits for local body storage so it cannot publish an unsaved head.
       return () => {
         disposed = true;
       };
@@ -1795,6 +1822,7 @@ function ResolvedDocumentWorkspace({
     historyDocumentId,
     commitHistoryHead,
     localBodyConsumersReady,
+    localBodySavingUnavailable,
     mutationAuthority,
     realtimeEnabled,
     validateLocalBodySchema,
@@ -2001,6 +2029,7 @@ function ResolvedDocumentWorkspace({
   }, [documentSurfaceReady, editor, exposeTestHooks, localBodyMutationLocked]);
 
   const isEditorReady = Boolean(editor && (realtimeEnabled || localBodyState !== 'loading'));
+  const canImportMarkdown = isEditorReady && localBodyState !== 'recovered-awaiting-confirmation';
 
   const handleToolbarClick = useCallback(
     (spec: ToolbarButtonSpec) => {
@@ -2119,21 +2148,19 @@ function ResolvedDocumentWorkspace({
     });
   }, [historyAuthorFilter, historyTimeFilter]);
 
-  // Hydrate history filters from a shared filter link (?historyAuthor=&historyTime=)
-  // so opening a copied link lands on the same filtered diff view. Runs once.
+  // History storage can hydrate in several stages. Filter state follows the document route.
   useEffect(() => {
-    if (typeof window === 'undefined') return;
     const params = new URL(window.location.href).searchParams;
-    const author = params.get('historyAuthor');
-    const time = params.get('historyTime');
-    if (author) setHistoryAuthorFilter(author);
-    if (time === 'last-7-days') setHistoryTimeFilter('last-7-days');
+    const requestedAuthor = params.get('historyAuthor');
+    const author = requestedAuthor?.trim() ? requestedAuthor : null;
+    const time = params.get('historyTime') === 'last-7-days' ? 'last-7-days' : null;
+    setHistoryAuthorFilter(author);
+    setHistoryTimeFilter(time);
     if (author || time) {
       setActiveTab('history');
       setRailOpen(true);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [activeDocumentId]);
 
   const recordSuggestionResolution = useCallback(
     (entry: HistoryEntry, action: SuggestionResolutionAction) => {
@@ -2627,16 +2654,20 @@ function ResolvedDocumentWorkspace({
     ],
   );
 
-  const handleImportMarkdown = useCallback((trigger: HTMLButtonElement) => {
-    markdownTriggerRef.current = trigger;
-    fileInputRef.current?.click();
-  }, []);
+  const handleImportMarkdown = useCallback(
+    (trigger: HTMLButtonElement) => {
+      if (!canImportMarkdown) return;
+      markdownTriggerRef.current = trigger;
+      fileInputRef.current?.click();
+    },
+    [canImportMarkdown],
+  );
 
   const handleMarkdownFileChange = useCallback(
     async (event: ChangeEvent<HTMLInputElement>) => {
       const file = event.target.files?.[0];
       event.target.value = '';
-      if (!file || !editor || !isEditorReady) return;
+      if (!file || !editor || !canImportMarkdown) return;
       const generation = markdownGenerationRef.current + 1;
       markdownGenerationRef.current = generation;
       setMarkdownDialogState({ kind: 'reading' });
@@ -2668,10 +2699,10 @@ function ResolvedDocumentWorkspace({
       });
     },
     [
+      canImportMarkdown,
       canonicalizeLocalBodySchema,
       editor,
       inspectCurrentMarkdownSource,
-      isEditorReady,
       validateLocalBodySchema,
     ],
   );
@@ -2803,7 +2834,7 @@ function ResolvedDocumentWorkspace({
     markdownNavigationControllerRef.current?.dispose();
     const controller = createMarkdownImportNavigationController({
       push: (targetPath) => {
-        router.push(toRoute(targetPath));
+        navigateDocument(staticPreview ? documentWorkspacePath(destination.id, true) : targetPath);
       },
       onStateChange: (navigationState) => {
         if (navigationState.status === 'created-opening') {
@@ -2828,8 +2859,9 @@ function ResolvedDocumentWorkspace({
   }, [
     activeDocumentId,
     markdownDialogState,
+    navigateDocument,
     refreshDocuments,
-    router,
+    staticPreview,
     validateLocalBodySchema,
     verifyCurrentMarkdownSource,
   ]);
@@ -3085,7 +3117,7 @@ function ResolvedDocumentWorkspace({
   }, [activeDocumentId, ownerBacked, shareDialogOpen]);
 
   useEffect(() => {
-    if (!shareDialogOpen) return;
+    if (!shareDialogOpen || staticPreview) return;
     if (ownerBacked) {
       setOwnerSharePhase('saved');
       setOwnerShareDetail('');
@@ -3126,7 +3158,7 @@ function ResolvedDocumentWorkspace({
         setOwnerSharePhase('unavailable');
       });
     return () => abortController.abort();
-  }, [ownerBacked, shareDialogOpen]);
+  }, [ownerBacked, shareDialogOpen, staticPreview]);
 
   const closeOwnerShareDialog = useCallback(() => {
     if (ownerSharePhase === 'saving') return;
@@ -3137,7 +3169,7 @@ function ResolvedDocumentWorkspace({
   }, [ownerSharePhase]);
 
   const handleOwnerPromotion = useCallback(async () => {
-    if (!editor || ownerSharePhase === 'saving' || ownerBacked) return;
+    if (staticPreview || !editor || ownerSharePhase === 'saving' || ownerBacked) return;
     if (typeof window === 'undefined' || !window.crypto?.subtle) {
       setOwnerSharePhase('unavailable');
       setOwnerShareDetail(
@@ -3199,6 +3231,7 @@ function ResolvedDocumentWorkspace({
     inviteIssuanceAuthority,
     ownerBacked,
     ownerSharePhase,
+    staticPreview,
     unresolvedSuggestionCount,
   ]);
   const syntheticMentionFixtureEnabled =
@@ -3465,14 +3498,14 @@ function ResolvedDocumentWorkspace({
       upsertDocument(storage, { id: nextDocumentId, title: DEFAULT_DOC_TITLE });
       refreshDocuments();
     }
-    router.push(toRoute(documentPath(nextDocumentId)));
-  }, [refreshDocuments, router]);
+    navigateDocument(documentWorkspacePath(nextDocumentId, staticPreview));
+  }, [navigateDocument, refreshDocuments, staticPreview]);
 
   const handleOpenDocument = useCallback(
     (event: ChangeEvent<HTMLSelectElement>) => {
-      router.push(toRoute(event.target.value));
+      navigateDocument(event.target.value);
     },
-    [router],
+    [navigateDocument],
   );
 
   const documentOptions = documents.some((record) => record.id === activeDocumentId)
@@ -3498,10 +3531,10 @@ function ResolvedDocumentWorkspace({
         className="lash-document-select"
         data-testid="document-open-select"
         onChange={handleOpenDocument}
-        value={documentPath(activeDocumentId)}
+        value={documentWorkspacePath(activeDocumentId, staticPreview)}
       >
         {documentOptions.map((record) => (
-          <option key={record.id} value={documentPath(record.id)}>
+          <option key={record.id} value={documentWorkspacePath(record.id, staticPreview)}>
             {record.title}
           </option>
         ))}
@@ -3615,7 +3648,11 @@ function ResolvedDocumentWorkspace({
       {remoteAccessEstablished ? (
         <>
           <span className="lash-document-status-item">
-            {accessSnapshot.authoritativeOwner ? 'Saved to your account' : 'Shared'}
+            {runtimeMode === 'development-loopback'
+              ? 'Development session'
+              : accessSnapshot.authoritativeOwner
+                ? 'Saved to your account'
+                : 'Shared'}
           </span>
           <span className="lash-document-status-item" data-testid="invite-access-status">
             {accessSnapshot.authoritativeOwner ? 'Owner access' : sharedAccessLabel}
@@ -3944,7 +3981,7 @@ function ResolvedDocumentWorkspace({
     const acknowledgement = acknowledgeMarkdownImportDestination({
       handoffStorage,
       documentStorage,
-      pathname,
+      pathname: staticPreview && pathname === '/' ? documentPath(activeDocumentId) : pathname,
       documentId: activeDocumentId,
       title: docTitle,
       bodyRevision: expected.revision,
@@ -3960,6 +3997,7 @@ function ResolvedDocumentWorkspace({
     localBodyState,
     pathname,
     realtimeEnabled,
+    staticPreview,
     validateLocalBodySchema,
   ]);
 
@@ -4054,7 +4092,7 @@ function ResolvedDocumentWorkspace({
                 onImportClick={handleImportMarkdown}
                 onExportClick={handleExportMarkdown}
                 onFileChange={handleMarkdownFileChange}
-                importDisabled={!isEditorReady}
+                importDisabled={!canImportMarkdown}
                 exportDisabled={!isEditorReady}
               />
             }
@@ -4196,7 +4234,9 @@ function ResolvedDocumentWorkspace({
           comments: commentThreadCount,
           suggestions: unresolvedSuggestionCount,
         }}
-        detail={ownerShareDetail}
+        detail={
+          staticPreview ? 'Account saving and sharing aren’t available in this preview.' : ownerShareDetail
+        }
         documentTitle={docTitle.trim() || DEFAULT_DOC_TITLE}
         onClose={closeOwnerShareDialog}
         onPrimary={() => void handleOwnerPromotion()}
@@ -4227,7 +4267,7 @@ function ResolvedDocumentWorkspace({
         open={documentSettingsOpen}
         ownerBacked={ownerBacked}
         returnFocusTo={documentSettingsTriggerRef.current}
-        signInHref={signInHref}
+        signInHref={staticPreview ? undefined : signInHref}
       />
       <MarkdownTransferDialog
         state={markdownDialogState}

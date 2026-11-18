@@ -192,6 +192,8 @@ const isRecord = (value: unknown): value is JsonObject =>
 
 const cloneJson = <T>(value: T): T => JSON.parse(JSON.stringify(value)) as T;
 
+const cloneCanonicalJson = <T>(value: T): T => JSON.parse(canonicalize(cloneJson(value))) as T;
+
 const toHistoryState = (doc: unknown, shareBody = false): HistoryDocumentState => {
   if (typeof doc === 'string') {
     return { type: 'doc', text: doc };
@@ -286,6 +288,43 @@ const hasExactKeys = (value: JsonObject, keys: readonly string[]) => {
   const actual = Object.keys(value).sort();
   const expected = [...keys].sort();
   return actual.length === expected.length && actual.every((key, index) => key === expected[index]);
+};
+
+const isHistoryEntryHeader = (
+  entry: unknown,
+  docId: string,
+  seq: number,
+  parentSha: string,
+): entry is JsonObject & { ops: unknown[]; resultSha: string } =>
+  isRecord(entry) &&
+  entry.docId === docId &&
+  entry.seq === seq &&
+  entry.lamport === seq &&
+  entry.parentSha === parentSha &&
+  typeof entry.resultSha === 'string' &&
+  SHA256_PATTERN.test(entry.resultSha) &&
+  typeof entry.id === 'string' &&
+  typeof entry.schemaVersion === 'string' &&
+  entry.schemaVersion.length >= 1 &&
+  typeof entry.ts === 'string' &&
+  Number.isFinite(Date.parse(entry.ts)) &&
+  Array.isArray(entry.ops);
+
+const hasValidNewEntryAttribution = (entry: HistoryEntry) => {
+  const actor: unknown = entry.actor;
+  const audit: unknown = entry.audit;
+  const { intent } = entry;
+  return (
+    isRecord(actor) &&
+    (actor.type === 'user' || actor.type === 'ai' || actor.type === 'system') &&
+    typeof actor.id === 'string' &&
+    (actor.label === undefined || (actor.type === 'ai' && typeof actor.label === 'string')) &&
+    isRecord(audit) &&
+    (typeof audit.ipHash === 'string' || typeof audit.ua === 'string') &&
+    (audit.ipHash === undefined || typeof audit.ipHash === 'string') &&
+    (audit.ua === undefined || typeof audit.ua === 'string') &&
+    (intent === 'edit' || intent === 'suggest' || intent === 'ai')
+  );
 };
 
 const validatePersistedHistory = async (
@@ -417,21 +456,7 @@ const validatePersistedHistory = async (
   const entries: HistoryEntry[] = [];
   for (let index = 0; index < normalizedPayload.entries.length; index += 1) {
     const entry = normalizedPayload.entries[index] as unknown;
-    if (
-      !isRecord(entry) ||
-      entry.docId !== expectedDocumentId ||
-      entry.seq !== index + 1 ||
-      entry.lamport !== index + 1 ||
-      entry.parentSha !== currentSha ||
-      typeof entry.resultSha !== 'string' ||
-      !SHA256_PATTERN.test(entry.resultSha) ||
-      typeof entry.id !== 'string' ||
-      typeof entry.schemaVersion !== 'string' ||
-      entry.schemaVersion.length < 1 ||
-      typeof entry.ts !== 'string' ||
-      !Number.isFinite(Date.parse(entry.ts)) ||
-      !Array.isArray(entry.ops)
-    ) {
+    if (!isHistoryEntryHeader(entry, expectedDocumentId, index + 1, currentSha)) {
       return { ok: false, kind: 'corrupt', reason: 'History entry chain is invalid.' };
     }
     totalOps += entry.ops.length;
@@ -489,12 +514,16 @@ const persistableEnvelope = async (
   state: DocumentHistoryState,
   snapshotInterval: number,
   savedAt: string,
-): Promise<{ envelope: PersistedHistoryEnvelopeV1; raw: string }> => {
+): Promise<DocumentHistoryState['persistence'] & { raw: string }> => {
   if (state.entries.length > HISTORY_MAX_ENTRIES ||
       state.entries.reduce((count, entry) => count + entry.ops.length, 0) > HISTORY_MAX_TOTAL_OPS) {
     throw new HistoryCapacityError('History operation limit reached.');
   }
   const revision = state.persistence.revision + 1;
+  const writeId = `history-write:${key}:${revision}:${state.head.slice(0, 16)}`;
+  if (!Number.isInteger(revision) || revision < 1 || writeId.length > 128) {
+    throw new Error('History envelope metadata is invalid.');
+  }
   const payload: PersistedHistoryPayloadV1 = {
     kind: HISTORY_ENVELOPE_KIND,
     version: HISTORY_ENVELOPE_VERSION,
@@ -502,7 +531,7 @@ const persistableEnvelope = async (
     editorSchema: HISTORY_EDITOR_SCHEMA_VERSION,
     documentId: key,
     revision,
-    writeId: `history-write:${key}:${revision}:${state.head.slice(0, 16)}`,
+    writeId,
     savedAt,
     previousPayloadSha: state.persistence.payloadSha,
     snapshotInterval,
@@ -526,7 +555,7 @@ const persistableEnvelope = async (
   if (encoder.encode(raw).byteLength > HISTORY_MAX_ENVELOPE_BYTES) {
     throw new HistoryCapacityError('History envelope exceeds 32 MiB.');
   }
-  return { envelope, raw };
+  return { revision, writeId, payloadSha, raw };
 };
 
 export const createHistoryStore = (config: CreateHistoryStoreConfig = {}): HistoryStore => {
@@ -548,13 +577,14 @@ export const createHistoryStore = (config: CreateHistoryStoreConfig = {}): Histo
   const createBaselineState = async (
     baseline: HistoryDocumentState = EMPTY_HISTORY_DOC,
   ): Promise<DocumentHistoryState> => {
-    const preparedBaseline = toHistoryState(baseline);
+    const body = toHistoryState(baseline, true);
+    const preparedBaseline = config.persistence ? cloneCanonicalJson(body) : cloneJson(body);
     const baseSha = await hashCanonical(preparedBaseline);
     return {
       baseSha,
       head: baseSha,
       entries: [],
-      snapshots: new Map([[baseSha, cloneJson(preparedBaseline)]]),
+      snapshots: new Map([[baseSha, preparedBaseline]]),
       persistence: {
         revision: 0,
         writeId: null,
@@ -630,9 +660,11 @@ export const createHistoryStore = (config: CreateHistoryStoreConfig = {}): Histo
     const preparedDocId = input.docId;
     const preparedExpectedParentSha = input.expectedParentSha;
     const preparedSchemaVersion = input.schemaVersion;
-    const preparedOps = cloneJson(input.ops);
-    const preparedActor = cloneJson(input.actor);
-    const preparedAudit = cloneJson(input.audit);
+    // Replay the same JSON values a cold store will see in the durable version.
+    const copyInput = config.persistence ? cloneCanonicalJson : cloneJson;
+    const preparedOps = copyInput(input.ops);
+    const preparedActor = copyInput(input.actor);
+    const preparedAudit = copyInput(input.audit);
     const preparedIntent = input.intent;
     const preparedRestoredFromVersion = input.restoredFromVersion;
     let preparedCommitGuard: () => boolean;
@@ -644,11 +676,14 @@ export const createHistoryStore = (config: CreateHistoryStoreConfig = {}): Histo
     if (typeof preparedCommitGuard !== 'function') {
       return { ok: false, reason: 'commit-rejected', cause: 'guard-denied' };
     }
-    if (!preparedSchemaVersion.trim()) {
+    if (typeof preparedSchemaVersion !== 'string' || !preparedSchemaVersion.trim()) {
       return { ok: false, reason: 'schema-invalid', details: 'schemaVersion is required' };
     }
-    if (!preparedOps.length) {
+    if (!Array.isArray(preparedOps) || !preparedOps.length) {
       return { ok: false, reason: 'schema-invalid', details: 'at least one op is required' };
+    }
+    if (preparedRestoredFromVersion !== undefined && typeof preparedRestoredFromVersion !== 'string') {
+      return { ok: false, reason: 'schema-invalid', details: 'restoredFromVersion must be a string' };
     }
 
     const key = docKey(preparedDocId);
@@ -673,12 +708,15 @@ export const createHistoryStore = (config: CreateHistoryStoreConfig = {}): Histo
     } catch (error) {
       return { ok: false, reason: 'schema-invalid', details: opDetails(error) };
     }
+    if (!isRecord(resultDoc) || resultDoc.type !== 'doc') {
+      return { ok: false, reason: 'schema-invalid', details: 'History result must be a document.' };
+    }
 
     const resultSha = await hashCanonical(resultDoc);
     // Everything capable of throwing through caller data or a caller callback
     // is completed before commitGuard. Once the guard approves, the remaining
     // boundary is synchronous and cannot yield to a revocation.
-    const preparedSnapshot = toHistoryState(resultDoc);
+    const preparedSnapshot = toHistoryState(resultDoc, true);
     const preparedTimestamp = config.now?.() ?? new Date().toISOString();
     const candidateState = stateByDoc.get(key);
     if (candidateState !== preparedState || candidateState.head !== preparedExpectedParentSha) {
@@ -704,10 +742,13 @@ export const createHistoryStore = (config: CreateHistoryStoreConfig = {}): Histo
       audit: preparedAudit,
       ...(preparedRestoredFromVersion ? { restoredFromVersion: preparedRestoredFromVersion } : {}),
     };
+    if (!isHistoryEntryHeader(entry, key, seq, candidateState.head) || !hasValidNewEntryAttribution(entry)) {
+      return { ok: false, reason: 'schema-invalid', details: 'History entry metadata is invalid.' };
+    }
     const nextEntries = [...candidateState.entries, entry];
     const nextSnapshots = new Map(candidateState.snapshots);
     if (seq % snapshotInterval === 0) {
-      nextSnapshots.set(resultSha, preparedSnapshot);
+      nextSnapshots.set(resultSha, copyInput(preparedSnapshot));
     }
     const nextState: DocumentHistoryState = {
       baseSha: candidateState.baseSha,
@@ -716,10 +757,10 @@ export const createHistoryStore = (config: CreateHistoryStoreConfig = {}): Histo
       snapshots: nextSnapshots,
       persistence: candidateState.persistence,
     };
-    const success: AppendResult = { ok: true, entry };
+    const success: AppendResult = { ok: true, entry: cloneJson(entry) };
 
     if (config.persistence) {
-      let preparedPersistence: { envelope: PersistedHistoryEnvelopeV1; raw: string };
+      let preparedPersistence: Awaited<ReturnType<typeof persistableEnvelope>>;
       try {
         preparedPersistence = await persistableEnvelope(
           key,
@@ -735,6 +776,8 @@ export const createHistoryStore = (config: CreateHistoryStoreConfig = {}): Histo
           details: opDetails(error),
         };
       }
+
+      const durableState: DocumentHistoryState = { ...nextState, persistence: preparedPersistence };
 
       let durableResult;
       try {
@@ -800,12 +843,13 @@ export const createHistoryStore = (config: CreateHistoryStoreConfig = {}): Histo
         };
       }
 
-      const verified = await validatePersistedHistory(durableResult.primaryRaw, key);
-      if (!verified.ok) {
+      // This exact candidate extends an already validated prefix. Hydration
+      // and conflict handling still fully verify bytes from any other source.
+      if (durableResult.primaryRaw !== preparedPersistence.raw) {
         return {
           ok: false,
           reason: 'commit-uncertain',
-          details: verified.reason,
+          details: 'Committed local version history did not match the prepared bytes.',
         };
       }
       const liveState = stateByDoc.get(key);
@@ -816,7 +860,7 @@ export const createHistoryStore = (config: CreateHistoryStoreConfig = {}): Histo
           details: 'Durable history committed while the in-memory projection changed.',
         };
       }
-      stateByDoc.set(key, verified.state);
+      stateByDoc.set(key, durableState);
       return success;
     }
 
@@ -922,7 +966,7 @@ export const createHistoryStore = (config: CreateHistoryStoreConfig = {}): Histo
         if (filter.since && entry.ts < filter.since) return false;
         if (filter.until && entry.ts > filter.until) return false;
         return true;
-      });
+      }).map((entry) => cloneJson(entry));
     },
     async loadAt(docId, sha) {
       const key = docKey(docId);

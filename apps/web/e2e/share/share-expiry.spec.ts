@@ -1,9 +1,10 @@
-import { expect, test } from '@playwright/test';
+import { expect, test } from './development-loopback-fixture';
 
-import { openDevelopmentLoopbackShareFixture } from './development-loopback-fixture';
-
-test('share-expiry development fixture rejects an expired fixture token', async ({ page }) => {
-  await openDevelopmentLoopbackShareFixture(page);
+test('share-expiry development fixture rejects an expired fixture token', async ({
+  page,
+  openDevelopmentLoopbackShareFixture,
+}) => {
+  await openDevelopmentLoopbackShareFixture();
   await page.getByTestId('share-create-expired').click();
 
   await expect(page.getByTestId('share-validation')).toContainText('Denied: expired');

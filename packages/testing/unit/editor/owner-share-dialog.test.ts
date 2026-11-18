@@ -108,7 +108,9 @@ describe('owner Share dialog', () => {
     expect(host.querySelector<HTMLButtonElement>('[aria-label="Close sharing"]')?.disabled).toBe(
       true,
     );
-    await rerender(React.createElement(OwnerShareDialog, { ...input, phase: 'retryable' }));
+    await rerender(
+      React.createElement(OwnerShareDialog, { ...input, phase: 'retryable', detail: '' }),
+    );
     expect(host.textContent).toContain('Your document is still on this device.');
     await React.act(async () => button(host, 'Try again')?.click());
     expect(input.onPrimary).toHaveBeenCalledTimes(1);
@@ -117,6 +119,29 @@ describe('owner Share dialog', () => {
     expect(button(host, 'Done')).toBeDefined();
     expect(button(host, 'Copy link')).toBeUndefined();
     expect(button(host, 'Create invite link')).toBeUndefined();
+  });
+
+  it('explains unavailable saving and preserves a specific failure detail', async () => {
+    const input = props({ phase: 'unavailable', detail: '' });
+    const { host, rerender } = await render(React.createElement(OwnerShareDialog, input));
+    expect(host.querySelector('[role="alert"]')?.textContent).toBe(
+      'Account saving is unavailable right now. Your document is still on this device.',
+    );
+
+    const unavailableDetail = 'Account saving and sharing aren’t available in this preview.';
+    await rerender(React.createElement(OwnerShareDialog, { ...input, detail: unavailableDetail }));
+    expect(host.querySelector('[role="alert"]')?.textContent).toBe(unavailableDetail);
+
+    const retryDetail =
+      'Your document was saved, but Lash could not reconnect to it. Try again to finish opening the account copy.';
+    await rerender(
+      React.createElement(OwnerShareDialog, {
+        ...input,
+        phase: 'retryable',
+        detail: retryDetail,
+      }),
+    );
+    expect(host.querySelector('[role="status"]')?.textContent).toBe(retryDetail);
   });
 
   it('keeps named invites available while hiding a blocked public copy action', async () => {

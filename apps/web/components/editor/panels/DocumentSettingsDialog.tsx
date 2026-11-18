@@ -47,7 +47,7 @@ export interface DocumentSettingsDialogProps {
   open: boolean;
   ownerBacked: boolean;
   returnFocusTo: HTMLElement | null;
-  signInHref: string;
+  signInHref?: string;
 }
 
 type Phase = 'local' | 'loading' | 'ready' | 'saving' | 'error' | 'access-changed';
@@ -297,16 +297,19 @@ export function DocumentSettingsDialog({
           <section aria-labelledby={`${groupId}-public-title`}>
             <h3 id={`${groupId}-public-title`}>Public access</h3>
             <p className="lash-document-settings-helper">
-              Choose what anyone with this link can do. Public links aren&apos;t listed or
-              searchable.
+              {signInHref
+                ? 'Choose what anyone with this link can do. Public links aren’t listed or searchable.'
+                : 'Public links aren’t available in this preview.'}
             </p>
 
             {phase === 'local' ? (
               <div className="lash-document-settings-local">
                 <p>This document is only on this device.</p>
-                <a className="lash-document-settings-primary" href={signInHref}>
-                  Sign in to publish
-                </a>
+                {signInHref ? (
+                  <a className="lash-document-settings-primary" href={signInHref}>
+                    Sign in to publish
+                  </a>
+                ) : null}
               </div>
             ) : phase === 'loading' ? (
               <p role="status">Loading public access…</p>

@@ -1,4 +1,7 @@
 import { expect, test, type Browser, type Page } from '@playwright/test';
+import { readFile } from 'node:fs/promises';
+
+import { selectDiscussionTab } from '../discussion-tabs';
 
 type LashTestWindow = Window & {
   __lashEditor?: {
@@ -12,7 +15,6 @@ type LashTestWindow = Window & {
     getJSON: () => Record<string, unknown>;
     attemptSetContent: (content: Record<string, unknown>) => boolean;
   };
-  __lashLastExport?: string;
   __lashLastSave?: unknown;
   __lashRestoreBodySetItem?: () => void;
 };
@@ -82,6 +84,18 @@ const waitForSaved = async (page: Page) => {
   await expect(page.getByTestId('autosave-indicator')).toHaveAttribute('data-status', 'saved', {
     timeout: 2_500,
   });
+};
+
+const downloadMarkdownText = async (page: Page) => {
+  await page.getByRole('button', { name: 'Download Markdown', exact: true }).click();
+  const dialog = page.getByRole('dialog', { name: 'Download Markdown', exact: true });
+  await expect(dialog).toBeVisible();
+  const pending = page.waitForEvent('download');
+  await dialog.getByRole('button', { name: 'Download Markdown', exact: true }).click();
+  const path = await (await pending).path();
+  if (!path) throw new Error('Downloaded Markdown is unavailable');
+  await expect(dialog).toHaveCount(0);
+  return readFile(path, 'utf8');
 };
 
 const reopenInRestoredContext = async (browser: Browser, page: Page, documentId: string) => {
@@ -198,7 +212,7 @@ test.describe('local document body persistence', () => {
     await expect.poll(() => editorText(page)).not.toContain('Alpha pending body');
   });
 
-  test('gates a recovered backup until the keyboard-accessible keep action', async ({ page }) => {
+  test('gates a recovered backup until the keyboard-accessible keep action', async ({ page }, testInfo) => {
     const documentId = 'local-body-recovery';
     const backup = JSON.stringify(bodyEnvelope(documentId, 'Last good recovered body', 4));
     await clearBodyState(page, [documentId]);
@@ -219,6 +233,7 @@ test.describe('local document body persistence', () => {
     await expect(page.getByTestId('autosave-indicator')).toHaveCount(0);
     await expect(page.getByTestId('toolbar-btn-insert-table')).toBeDisabled();
     await expect(page.getByTestId('markdown-import-button')).toBeDisabled();
+    await expect(page.getByTestId('markdown-import-input')).toBeDisabled();
     await expect(page.getByTestId('markdown-export-button')).toBeEnabled();
     await page.waitForFunction(() => Boolean((window as LashTestWindow).__lashRecoveryProbe));
     const recoveredJson = await page.evaluate(() =>
@@ -258,6 +273,7 @@ test.describe('local document body persistence', () => {
       mimeType: 'text/markdown',
       buffer: Buffer.from('# Forbidden markdown mutation'),
     });
+    await expect(page.getByRole('dialog')).toHaveCount(0);
     expect(
       await page.evaluate(() => (window as LashTestWindow).__lashRecoveryProbe?.getJSON()),
     ).toEqual(recoveredJson);
@@ -275,7 +291,7 @@ test.describe('local document body persistence', () => {
     expect(keepActionBox?.height ?? 0).toBeGreaterThanOrEqual(44);
     await expect(page.locator('.lash-app')).toHaveAttribute('data-entrance', 'false');
     await page.screenshot({
-      path: 'artifacts/stranger-test/bead-39/FLOW-01-recovery-mobile-375.png',
+      path: testInfo.outputPath('recovery-mobile-375.png'),
       fullPage: true,
     });
 
@@ -284,6 +300,7 @@ test.describe('local document body persistence', () => {
     await waitForEditor(page);
     await expect(page.locator('.ProseMirror')).toHaveAttribute('contenteditable', 'true');
     await expect(page.locator('.ProseMirror')).toBeFocused();
+    await expect(page.getByTestId('markdown-import-button')).toBeEnabled();
     await expect(page.getByTestId('local-body-notice')).toHaveCount(0);
     const promoted = await page.evaluate((id) => {
       const primary = JSON.parse(window.localStorage.getItem(`lash:body:${id}`) ?? '{}') as {
@@ -378,12 +395,7 @@ test.describe('local document body persistence', () => {
       ),
     ).toEqual({ primary: primaryRaw, backup: backupRaw });
 
-    const download = page.waitForEvent('download');
-    await page.getByTestId('markdown-export-button').click();
-    await download;
-    expect(await page.evaluate(() => (window as LashTestWindow).__lashLastExport ?? '')).toContain(
-      'Exportable recovered body',
-    );
+    expect(await downloadMarkdownText(page)).toContain('Exportable recovered body');
 
     await page.evaluate(() => (window as LashTestWindow).__lashRestoreBodySetItem?.());
     await page.getByTestId('keep-recovered-copy').click();
@@ -568,9 +580,7 @@ test.describe('local document body persistence', () => {
     ).toEqual({ primary: '{"primary":', backup: '{"backup":' });
   });
 
-  test('shows Save failed and preserves the last verified primary on quota failure', async ({
-    page,
-  }) => {
+  test('shows Save failed and preserves the last verified primary on quota failure', async ({ page }, testInfo) => {
     const documentId = 'local-body-quota';
     await clearBodyState(page, [documentId]);
     await page.goto(route(documentId));
@@ -644,12 +654,7 @@ test.describe('local document body persistence', () => {
             .__lashBodyWriteAttempts ?? 0,
       ),
     ).toBe(failedWriteAttempts);
-    const download = page.waitForEvent('download');
-    await page.getByTestId('markdown-export-button').click();
-    await download;
-    expect(await page.evaluate(() => (window as LashTestWindow).__lashLastExport ?? '')).toContain(
-      'unsaved quota text',
-    );
+    expect(await downloadMarkdownText(page)).toContain('unsaved quota text');
     await page.evaluate(() => {
       const selection = window.getSelection();
       const editor = document.querySelector('.ProseMirror');
@@ -686,7 +691,7 @@ test.describe('local document body persistence', () => {
       ),
     ).toBe(failedWriteAttempts);
     await page.screenshot({
-      path: 'artifacts/stranger-test/bead-39/FLOW-01-save-failed.png',
+      path: testInfo.outputPath('save-failed.png'),
       fullPage: true,
     });
   });
@@ -764,7 +769,7 @@ test.describe('local document body persistence', () => {
     const blockedPage = await context.newPage();
     blockedPage.on('pageerror', (error) => pageErrors.push(error.message));
     try {
-      await blockedPage.goto(route('local-body-storage-blocked'));
+      await blockedPage.goto(`${route('local-body-storage-blocked')}?realtime=off`);
       await expect(blockedPage.locator('.ProseMirror')).toBeVisible();
       await expect(blockedPage.getByTestId('local-body-notice')).toContainText(
         'Local saving is unavailable',
@@ -773,17 +778,18 @@ test.describe('local document body persistence', () => {
       await blockedPage.locator('.ProseMirror').click();
       await blockedPage.keyboard.type('Copyable rescue text');
       await expect(blockedPage.locator('.ProseMirror')).toContainText('Copyable rescue text');
-      await expect(blockedPage.getByLabel(/Export markdown/i)).toBeEnabled();
+      await selectDiscussionTab(blockedPage, 'history');
+      await expect(blockedPage.getByRole('tabpanel', { name: 'History' })).toContainText(
+        'Version history is paused while local saving is unavailable.',
+      );
+      await expect(
+        blockedPage.getByRole('button', { name: 'Download Markdown', exact: true }),
+      ).toBeEnabled();
       await blockedPage.waitForTimeout(700);
       expect(
         await blockedPage.evaluate(() => (window as LashTestWindow).__lashLastSave ?? null),
       ).toBeNull();
-      const download = blockedPage.waitForEvent('download');
-      await blockedPage.getByTestId('markdown-export-button').click();
-      await download;
-      expect(
-        await blockedPage.evaluate(() => (window as LashTestWindow).__lashLastExport ?? ''),
-      ).toContain('Copyable rescue text');
+      expect(await downloadMarkdownText(blockedPage)).toContain('Copyable rescue text');
       expect(pageErrors).toEqual([]);
     } finally {
       await context.close();

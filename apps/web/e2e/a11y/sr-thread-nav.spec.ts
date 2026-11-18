@@ -1,28 +1,30 @@
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test } from '@playwright/test';
 
-const ready = async (page: Page) =>
-  page.waitForFunction(() =>
-    Boolean((window as unknown as { __lashEditor?: unknown }).__lashEditor),
-  );
-
-const selectTarget = async (page: Page) =>
-  page.evaluate(() => {
-    const editor = (window as unknown as { __lashEditor: import('@tiptap/core').Editor })
-      .__lashEditor;
-    editor.chain().focus().setTextSelection({ from: 8, to: 14 }).run();
-  });
+import { enableAiFixture } from '../ai/enable-ai-fixture';
+import { selectDiscussionTab } from '../discussion-tabs';
 
 test('sr-thread-nav', async ({ page }) => {
+  await enableAiFixture(page);
   await page.goto('/');
-  await ready(page);
 
-  await page.getByTestId('lash-editor-content').click();
-  await page.keyboard.type('Anchor target remains');
+  const editor = page.getByRole('textbox', { name: 'Document editor' });
+  await expect(editor).toHaveAttribute('contenteditable', 'true');
+  await editor.click();
+  const prefix = 'Anchor ';
+  const target = 'target';
+  await page.keyboard.insertText(`${prefix}${target} remains`);
+  await selectDiscussionTab(page, 'history');
   await expect(page.getByTestId('history-version').first()).toBeVisible();
 
-  await selectTarget(page);
+  await editor.click();
+  await page.keyboard.press('Home');
+  for (let index = 0; index < prefix.length; index += 1) await page.keyboard.press('ArrowRight');
+  for (let index = 0; index < target.length; index += 1)
+    await page.keyboard.press('Shift+ArrowRight');
+  await selectDiscussionTab(page, 'chat');
   await expect(page.getByTestId('chat-create-thread')).toBeEnabled();
   await page.getByTestId('chat-create-thread').click();
+  await expect(page.getByTestId('chat-new-thread-quote')).toHaveText('target');
   await page.getByTestId('chat-new-thread-textarea').fill('Review this target.');
   await page.getByTestId('chat-post-thread').click();
 

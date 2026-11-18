@@ -1,9 +1,10 @@
-import { expect, test } from '@playwright/test';
+import { expect, test } from './development-loopback-fixture';
 
-import { openDevelopmentLoopbackShareFixture } from './development-loopback-fixture';
-
-test('share-suggest-scope development fixture maps suggest capabilities', async ({ page }) => {
-  await openDevelopmentLoopbackShareFixture(page);
+test('share-suggest-scope development fixture maps suggest capabilities', async ({
+  page,
+  openDevelopmentLoopbackShareFixture,
+}) => {
+  await openDevelopmentLoopbackShareFixture();
   await page.getByTestId('share-create-suggest').click();
 
   await expect(page.getByTestId('share-validation')).toContainText('Access granted: suggest');

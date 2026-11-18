@@ -44,7 +44,6 @@ describe('account-owner Share UI contract', () => {
     const dialog = read('apps/web/components/editor/panels/OwnerShareDialog.tsx');
 
     expect(dialog).toContain("phase === 'retryable'");
-    expect(dialog).toContain('detail ??');
     expect(workspace).toContain('Lash could not reach account storage.');
     expect(workspace).toContain('Your document was saved, but Lash could not reconnect to it.');
   });

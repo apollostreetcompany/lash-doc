@@ -140,6 +140,54 @@ const createHarness = (
 };
 
 describe('browser document access controller', () => {
+  it('permits local writing without a recovery journal when realtime is disabled and no invitation exists', async () => {
+    const runtime = vi.fn().mockReturnValueOnce(disabledRuntime).mockReturnValue(configuredRuntime);
+    const harness = createHarness({ recoveryJournal: null, readRuntime: runtime });
+    const controller = createDocumentAccessController({ documentId: 'local-document' }, harness.dependencies);
+
+    await controller.start();
+
+    expect(controller.getResolution()).toMatchObject({ kind: 'local', runtime: disabledRuntime });
+    expect(controller.getMutationAuthority().getSnapshot().bodyWrite).toBe(true);
+    expect(runtime).toHaveBeenCalledTimes(1);
+    expect(harness.dependencies.requestOwnerSession).not.toHaveBeenCalled();
+    expect(harness.calls.exchange).not.toHaveBeenCalled();
+    expect(harness.calls.resources).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    { scenario: 'configured owner route', runtime: configuredRuntime, access: {} },
+    { scenario: 'development loopback route', runtime: loopbackRuntime, access: {} },
+    {
+      scenario: 'incoming invite',
+      runtime: disabledRuntime,
+      access: { readFragmentCredential: () => ({ state: 'valid', token: 'pending-invite' }) as const },
+    },
+    {
+      scenario: 'stored invite',
+      runtime: disabledRuntime,
+      access: { readStoredCredential: () => ({
+        version: 1,
+        documentId: 'local-document',
+        token: 'stored-invite',
+        authority: 'configured',
+        validatedAt: '2026-11-18T00:00:00.000Z',
+      }) as const },
+    },
+  ])('keeps a $scenario closed when recovery storage cannot be acquired', async ({ runtime, access }) => {
+    const harness = createHarness({ ...access, recoveryJournal: null }, runtime);
+    const controller = createDocumentAccessController({ documentId: 'local-document' }, harness.dependencies);
+
+    await controller.start();
+
+    expect(controller.getSnapshot()).toMatchObject({ phase: 'unavailable', reason: 'recovery-storage-unavailable' });
+    expect(controller.getResolution()).toBeNull();
+    expect(controller.getMutationAuthority().getSnapshot().bodyWrite).toBe(false);
+    expect(harness.dependencies.requestOwnerSession).not.toHaveBeenCalled();
+    expect(harness.calls.exchange).not.toHaveBeenCalled();
+    expect(harness.calls.resources).not.toHaveBeenCalled();
+  });
+
   it.each([
     [
       'length',

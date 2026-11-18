@@ -2,7 +2,7 @@ import { InputRule } from '@tiptap/core';
 // eslint-disable-next-line import/no-named-as-default
 import HeadingExtension from '@tiptap/extension-heading';
 import { Plugin, TextSelection } from '@tiptap/pm/state';
-import type { EditorState } from '@tiptap/pm/state';
+import type { EditorState, Transaction } from '@tiptap/pm/state';
 
 import { createUniqueHeadingId, headingInputStabilityKey } from '../plugins/heading-id';
 
@@ -27,6 +27,34 @@ const withStableHeadingId = (
     headingId: currentHeadingId || createUniqueHeadingId(state.doc, $anchor.before()),
   };
 };
+
+function splitsIntoEmptyParagraph(state: EditorState, transaction: Transaction) {
+  const { selection } = state;
+  const previous = selection.$from;
+  if (
+    !transaction.docChanged ||
+    !selection.empty ||
+    !previous.parent.isTextblock ||
+    previous.parentOffset !== previous.parent.content.size
+  )
+    return false;
+
+  const next = transaction.selection.$from;
+  if (
+    !transaction.selection.empty ||
+    next.parent.type.name !== 'paragraph' ||
+    next.parent.content.size !== 0
+  )
+    return false;
+
+  const precedingIndex = next.index(-1) - 1;
+  return (
+    precedingIndex >= 0 &&
+    transaction.mapping.map(previous.pos) === next.pos &&
+    next.before() === previous.before() + previous.parent.nodeSize &&
+    next.node(-1).child(precedingIndex).eq(previous.parent)
+  );
+}
 
 export const LashHeading = HeadingExtension.extend({
   addAttributes() {
@@ -122,13 +150,17 @@ export const LashHeading = HeadingExtension.extend({
         key: headingInputStabilityKey,
         state: {
           init: () => false,
-          apply(transaction, armed) {
+          apply(transaction, armed, previousState) {
             const action = transaction.getMeta(headingInputStabilityKey) as
               | 'arm'
               | 'consume'
               | undefined;
             if (action === 'arm') return true;
             if (action === 'consume') return false;
+            // The browser can report the old caret offset after inserting the
+            // first character in the new paragraph. Advance from the editor
+            // selection established by the split, as for an empty heading.
+            if (splitsIntoEmptyParagraph(previousState, transaction)) return true;
             if (armed && (transaction.docChanged || transaction.selectionSet)) return false;
             return armed;
           },
