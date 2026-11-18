@@ -25,6 +25,7 @@ import {
   type LocalSuggestion,
 } from '../../../../apps/web/lib/localSuggestions';
 import {
+  createRoomCommentReviewAccess,
   isCurrentRoomSuggestion,
   prepareRoomSuggestionDecision,
 } from '../../../realtime-worker/src/collaboratorSuggestion';
@@ -192,6 +193,29 @@ describe('targeted writing suggestions', () => {
     expect(roomDocument(room).eq(document)).toBe(true);
     expect(isCurrentRoomSuggestion(clone(room), proposal)).toBe(false);
     expect(prepareRoomSuggestionDecision(clone(room), proposal)).toBeNull();
+  });
+
+  it('shares read-only validation for several proposals and rechecks formatting on a fresh pass', () => {
+    const room = prosemirrorToYDoc(document, 'content');
+    try {
+      const proposal = proposalFor(room);
+      const alternate = { ...proposal, replacement: 'open the beta' };
+      const original = Y.encodeStateAsUpdate(room);
+      const access = createRoomCommentReviewAccess(room);
+      expect(access.readAnchor(proposal.anchor)?.token.text).toBe(quote);
+      expect(access.validateProposal(proposal)).toBe(true);
+      expect(access.validateProposal(alternate)).toBe(true);
+      expect(Y.encodeStateAsUpdate(room)).toEqual(original);
+
+      yText(room).format(paragraphText.lastIndexOf(quote), quote.length, { bold: null });
+      const next = createRoomCommentReviewAccess(room);
+      expect(next.readAnchor(proposal.anchor)?.token.text).toBe(quote);
+      expect(next.validateProposal(proposal)).toBe(false);
+      expect(next.validateProposal(alternate)).toBe(false);
+      expect(prepareRoomSuggestionDecision(room, proposal)).toBeNull();
+    } finally {
+      room.destroy();
+    }
   });
 
   it('accepts an explicit deletion and leaves the first occurrence intact', () => {

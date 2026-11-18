@@ -155,7 +155,7 @@ describe('named Comment room scope', () => {
     const { encodeNamedCommentYjsProjection } = await import(
       '../../../realtime-worker/src/namedEditProjection'
     );
-    const { createRoomCommentAnchorReader } = await import(
+    const { createRoomCommentReviewAccess } = await import(
       '../../../realtime-worker/src/collaboratorSuggestion'
     );
     const { doc, text } = makeDocument();
@@ -173,9 +173,10 @@ describe('named Comment room scope', () => {
       expect(snapshotBytes.includes('Deleted private phrase.')).toBe(false);
       expect(snapshotBytes.includes('Previous title')).toBe(false);
       Y.applyUpdate(copy, snapshotBytes);
-      expect(createRoomCommentAnchorReader(copy)(anchor)?.token.text).toBe('this');
+      const { readAnchor } = createRoomCommentReviewAccess(copy);
+      expect(readAnchor(anchor)?.token.text).toBe('this');
       expect(
-        createRoomCommentAnchorReader(copy)({
+        readAnchor({
           ...anchor,
           token: { ...anchor.token, text: 'that' },
         }),
@@ -185,7 +186,7 @@ describe('named Comment room scope', () => {
       const next = encodeNamedCommentYjsProjection(doc, state);
       expect(next).toBeTruthy();
       Y.applyUpdate(copy, Buffer.from(next!, 'base64'));
-      expect(createRoomCommentAnchorReader(copy)(anchor)?.token.text).toBe('this');
+      expect(createRoomCommentReviewAccess(copy).readAnchor(anchor)?.token.text).toBe('this');
       doc.getMap('lash:chat-threads').set('historical', 'do not send');
       expect(encodeNamedCommentYjsProjection(doc)).toBeNull();
     } finally {

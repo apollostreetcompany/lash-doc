@@ -159,7 +159,11 @@ test('owner and named account edit the same document, then revocation closes acc
     const access = dialog.getByRole('region', { name: 'People with access' });
     await expect(access.getByLabel('Email address')).toBeVisible();
     await access.getByLabel('Email address').fill(recipientEmail);
-    await expect(access.getByText('Can edit', { exact: true }).first()).toBeVisible();
+    const accessLevel = access.getByRole('combobox', { name: 'Access level' });
+    await expect(accessLevel).toHaveValue('edit');
+    await expect(
+      accessLevel.getByRole('option', { name: 'Can edit', exact: true, selected: true }),
+    ).toHaveCount(1);
     await access.getByRole('button', { name: 'Create invite link' }).click();
     await dialog.getByRole('button', { name: 'Copy invite link' }).click();
     await expect(dialog.getByRole('button', { name: 'Invite link copied' })).toBeVisible();

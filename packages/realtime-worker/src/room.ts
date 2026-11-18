@@ -19,7 +19,7 @@ import {
   readCollaboratorReviewSnapshot,
 } from './collaboratorReviewStore';
 import {
-  createRoomCommentAnchorReader,
+  createRoomCommentReviewAccess,
   isCurrentRoomSuggestion,
   prepareRoomSuggestionDecision,
 } from './collaboratorSuggestion';
@@ -2803,17 +2803,16 @@ export class LashRealtimeRoom extends DurableObject<Env> {
     try {
       const commentProjection = comment ? this.loadProjection() : null;
       if (comment && !commentProjection) throw new Error('Comment projection is unavailable.');
+      const commentAccess = commentProjection && createRoomCommentReviewAccess(commentProjection);
       committed = commitCollaboratorReviewOperation({
         storage: this.ctx.storage,
         actorId,
         operationId,
         operation: message.operation,
-        ...(commentProjection
-          ? { commentAccess: this.commentReviewAccess(commentProjection) }
-          : {}),
+        ...(commentAccess ? { commentAccess } : {}),
         suggestions: {
           validateProposal: (proposal) => {
-            if (commentProjection) return isCurrentRoomSuggestion(commentProjection, proposal);
+            if (commentAccess) return commentAccess.validateProposal(proposal);
             const projection = loadRoomYjsProjection(this.hydrationUpdates());
             if (!projection) return false;
             try {
@@ -3026,14 +3025,6 @@ export class LashRealtimeRoom extends DurableObject<Env> {
     );
   }
 
-  private commentReviewAccess(projection: Y.Doc) {
-    return {
-      readAnchor: createRoomCommentAnchorReader(projection),
-      validateProposal: (proposal: Parameters<typeof isCurrentRoomSuggestion>[1]) =>
-        isCurrentRoomSuggestion(projection, proposal),
-    };
-  }
-
   private projectCommentReview(roomId: string) {
     const operations = readCollaboratorReviewSnapshot(this.ctx.storage);
     const projection = operations.length ? this.loadProjection() : null;
@@ -3041,7 +3032,7 @@ export class LashRealtimeRoom extends DurableObject<Env> {
       ? projectNamedCommentReview(
           createDocumentId(roomId),
           operations,
-          this.commentReviewAccess(projection),
+          createRoomCommentReviewAccess(projection),
         )
       : { fingerprint: '0:', threadsFor: () => [] };
   }

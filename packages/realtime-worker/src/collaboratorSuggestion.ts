@@ -15,11 +15,21 @@ const textOptions = {
   textSerializers: getTextSerializersFromSchema(schema),
 };
 
-export function createRoomCommentAnchorReader(room: Y.Doc) {
+function readRoomReviewContext(room: Y.Doc) {
   const root = room.getXmlFragment('content');
   const { doc, mapping } = initProseMirrorDoc(root, schema);
   doc.check();
-  return (anchor: ChatAnchor<null>): ChatAnchor<null> | null => {
+  return { root, doc, mapping };
+}
+
+type RoomReviewContext = ReturnType<typeof readRoomReviewContext>;
+
+/** Use only for the synchronous validation pass over this room state. */
+export function createRoomCommentReviewAccess(room: Y.Doc) {
+  const context = readRoomReviewContext(room);
+  const { root, doc, mapping } = context;
+
+  const readAnchor = (anchor: ChatAnchor<null>): ChatAnchor<null> | null => {
     const range = anchor.relativeRange;
     if (!range) return null;
     try {
@@ -43,14 +53,16 @@ export function createRoomCommentAnchorReader(room: Y.Doc) {
       return null;
     }
   };
+  return {
+    readAnchor,
+    validateProposal: (proposal: ReviewProposal) => validateRoomSuggestion(room, proposal, context),
+  };
 }
 
-function resolveTarget(room: Y.Doc, proposal: ReviewProposal) {
+function resolveTarget(room: Y.Doc, proposal: ReviewProposal, context?: RoomReviewContext) {
   const range = proposal.anchor.relativeRange;
   if (!range) return null;
-  const root = room.getXmlFragment('content');
-  const { doc, mapping } = initProseMirrorDoc(root, schema);
-  doc.check();
+  const { root, doc, mapping } = context ?? readRoomReviewContext(room);
   const start = Y.createRelativePositionFromJSON(range.start);
   const end = Y.createRelativePositionFromJSON(range.end);
   const first = Y.createAbsolutePositionFromRelativePosition(start, room);
@@ -96,12 +108,20 @@ function resolveTarget(room: Y.Doc, proposal: ReviewProposal) {
     : null;
 }
 
-export function isCurrentRoomSuggestion(room: Y.Doc, proposal: ReviewProposal) {
+function validateRoomSuggestion(
+  room: Y.Doc,
+  proposal: ReviewProposal,
+  context?: RoomReviewContext,
+) {
   try {
-    return Boolean(resolveTarget(room, proposal));
+    return Boolean(resolveTarget(room, proposal, context));
   } catch {
     return false;
   }
+}
+
+export function isCurrentRoomSuggestion(room: Y.Doc, proposal: ReviewProposal) {
+  return validateRoomSuggestion(room, proposal);
 }
 
 /** Only call with a disposable authoritative copy of the room state. */

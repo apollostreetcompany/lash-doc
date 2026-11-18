@@ -9,6 +9,10 @@ restore an earlier version, and revoke the invitation.
 - **Write and return.** Documents lists recent drafts on this device and supports
   title search. Markdown transfer preserves supported rich structure and bounded
   embedded images. Local history preserves formatting when restoring a version.
+- **Invite a reviewer.** Owners can choose **Can comment** for a verified account.
+  The reviewer can select a passage, discuss it and suggest wording. The document
+  title and body stay read-only for that reviewer. Editors can accept or reject
+  the suggestion. Revoking access also closes an open reviewer session.
 - **Review a change.** Replies and suggestion decisions survive reopening the
   document. Shared History lets both editors compare versions. Owners can
   restore an earlier body as a new version.
