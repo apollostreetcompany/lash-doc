@@ -4,6 +4,7 @@ import { parseDateMention } from '@lash/mentions';
 import type { VisibleMentionResult } from '@lash/types';
 import type { Editor } from '@tiptap/core';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 
 import styles from './DocumentReferencePicker.module.css';
 import { type DocumentReference } from '../../lib/documentReferenceCatalog';
@@ -198,27 +199,32 @@ export function DocumentReferencePicker({
       <div className="sr-only" aria-live="polite">
         {active ? `${optionText(active)}, ${active.kind}. Use up or down and Enter to insert.` : ''}
       </div>
-      {options.length > 0 ? (
-        <div ref={popup} className={styles.popup}>
-          <div role="listbox" aria-label="Insert a reference" data-testid="reference-picker">
-            {options.map((option, index) => (
-              <button
-                key={option.kind === 'date' ? option.value.refId : option.value.id}
-                type="button"
-                role="option"
-                aria-selected={index === activeIndex}
-                tabIndex={-1}
-                className={styles.option}
-                onPointerDown={(event) => event.preventDefault()}
-                onClick={() => insert(option)}
-              >
-                <span>{optionText(option)}</span>
-                <span className={styles.kind}>{option.kind === 'date' ? 'Date' : 'Document'}</span>
-              </button>
-            ))}
-          </div>
-        </div>
-      ) : null}
+      {options.length > 0
+        ? createPortal(
+            <div ref={popup} className={styles.popup}>
+              <div role="listbox" aria-label="Insert a reference" data-testid="reference-picker">
+                {options.map((option, index) => (
+                  <button
+                    key={option.kind === 'date' ? option.value.refId : option.value.id}
+                    type="button"
+                    role="option"
+                    aria-selected={index === activeIndex}
+                    tabIndex={-1}
+                    className={styles.option}
+                    onPointerDown={(event) => event.preventDefault()}
+                    onClick={() => insert(option)}
+                  >
+                    <span>{optionText(option)}</span>
+                    <span className={styles.kind}>
+                      {option.kind === 'date' ? 'Date' : 'Document'}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            </div>,
+            document.body,
+          )
+        : null}
     </>
   );
 }

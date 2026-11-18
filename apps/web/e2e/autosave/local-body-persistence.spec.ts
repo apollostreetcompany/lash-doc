@@ -5,6 +5,7 @@ import { selectDiscussionTab } from '../discussion-tabs';
 
 type LashTestWindow = Window & {
   __lashEditor?: {
+    readonly isEditable: boolean;
     commands: {
       focus: (position?: 'start' | 'end') => boolean;
       setContent: (content: Record<string, unknown>) => boolean;
@@ -65,8 +66,8 @@ const clearBodyState = async (page: Page, documentIds: string[]) => {
 };
 
 const waitForEditor = async (page: Page) => {
-  await page.waitForFunction(() => Boolean((window as LashTestWindow).__lashEditor));
-  await expect(page.locator('.ProseMirror')).toBeVisible();
+  await expect(page.locator('.ProseMirror[contenteditable="true"]')).toBeVisible();
+  await page.waitForFunction(() => (window as LashTestWindow).__lashEditor?.isEditable === true);
 };
 
 const editorText = (page: Page) =>
@@ -804,10 +805,10 @@ test.describe('local document body persistence', () => {
     await waitForEditor(page);
 
     const saveStartedAt = Date.now();
-    await page.evaluate((text) => {
+    const applied = await page.evaluate((text) => {
       const editor = (window as LashTestWindow).__lashEditor;
       if (!editor) throw new Error('Lash editor test hook is unavailable');
-      editor.commands.setContent({
+      return editor.commands.setContent({
         type: 'doc',
         content: [
           {
@@ -817,6 +818,7 @@ test.describe('local document body persistence', () => {
         ],
       });
     }, payload);
+    expect(applied).toBe(true);
     await waitForSaved(page);
     const saveVisibleMs = Date.now() - saveStartedAt;
 

@@ -56,6 +56,7 @@ test('reviews and applies a browser model revision without flattening the docume
   };
 
   await expect(draft).toHaveAttribute('contenteditable', 'true');
+  await selectDiscussionTab(page, 'history');
   await draft.click();
   await draft.evaluate((element) => {
     const clipboardData = new DataTransfer();
@@ -69,9 +70,9 @@ test('reviews and applies a browser model revision without flattening the docume
   });
   await expectRichDraft('the rough plan');
   await expect(page.getByTestId('autosave-indicator')).toHaveAttribute('data-status', 'saved');
-  await selectDiscussionTab(page, 'history');
   await expect(page.getByTestId('history-version')).toHaveCount(1);
-  await selectDiscussionTab(page, 'ai');
+  // Keep focus from paste through selection so the editor can finish reconciling native focus.
+  await expect(draft).toBeFocused();
   await planParagraph.click();
   await page.keyboard.press('End');
   await page.keyboard.press('ArrowLeft');
@@ -80,6 +81,7 @@ test('reviews and applies a browser model revision without flattening the docume
     .poll(() => page.evaluate(() => window.getSelection()?.toString()))
     .toBe('the rough plan');
 
+  await selectDiscussionTab(page, 'ai');
   await page.getByRole('button', { name: 'Improve writing' }).click();
   await expect(page.getByTestId('ai-original')).toHaveText('the rough plan');
   await expect(page.getByTestId('ai-revision')).toHaveText('the tentative plan');

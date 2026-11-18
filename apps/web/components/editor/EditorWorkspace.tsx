@@ -863,6 +863,7 @@ function ResolvedDocumentWorkspace({
     envelope: LocalBodyEnvelope;
     recoveryToken: Readonly<LocalBodyRecoveryToken>;
   } | null>(null);
+  const localRecoveryFocusDocumentRef = useRef<string | null>(null);
   const hydratedLocalEditorRef = useRef<Editor | null>(null);
   const localBodyMutationsAllowedRef = useRef(realtimeEnabled);
   const localBodySavingUnavailable = !realtimeEnabled && localBodyState === 'unavailable';
@@ -1457,17 +1458,14 @@ function ResolvedDocumentWorkspace({
   const inviteScope = accessSnapshot.scope;
   const documentSurfaceReady = true;
   useEffect(() => {
-    const localBodyLocksEditing =
-      !realtimeEnabled &&
-      (localBodyState === 'loading' || localBodyState === 'recovered-awaiting-confirmation');
-    const localHistoryLocksEditing =
-      !realtimeEnabled &&
-      !localBodySavingUnavailable &&
-      historyAvailability !== 'ready' &&
-      historyAvailability !== 'empty-baseline' &&
-      historyAvailability !== 'capacity-reached';
-    editor?.setEditable(canEditDocument && !localBodyLocksEditing && !localHistoryLocksEditing);
-  }, [editor, canEditDocument, historyAvailability, localBodySavingUnavailable, localBodyState, realtimeEnabled]);
+    if (!editor || editor.isDestroyed) return;
+    editor.setEditable(!documentMutationLocked);
+    if (!documentMutationLocked && localRecoveryFocusDocumentRef.current === activeDocumentId) {
+      localRecoveryFocusDocumentRef.current = null;
+      const ownerDocument = editor.view.dom.ownerDocument;
+      if (ownerDocument.activeElement === ownerDocument.body) editor.view.focus();
+    }
+  }, [activeDocumentId, documentMutationLocked, editor]);
 
   useEffect(() => {
     if (!editor || !realtimeProvider) return;
@@ -3894,14 +3892,9 @@ function ResolvedDocumentWorkspace({
       localBodyExpectedRef.current = localBodyExpectedRevision(promoted);
       recoveredLocalBodyRef.current = null;
       localBodyMutationsAllowedRef.current = true;
-      editor.setEditable(canEditDocument);
+      if (canEditDocument) localRecoveryFocusDocumentRef.current = activeDocumentId;
       setLocalBodyState('ready');
       setLocalBodyNotice(null);
-      if (canEditDocument) {
-        window.requestAnimationFrame(() => {
-          if (!editor.isDestroyed) editor.commands.focus();
-        });
-      }
       try {
         setDocuments(
           upsertDocument(storage, {

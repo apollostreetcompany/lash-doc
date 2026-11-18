@@ -24,24 +24,55 @@ test('inserts a date at the actual caret using the local calendar date and local
   // UTC is already Friday, while the writer is still on Thursday evening.
   await page.clock.setFixedTime(new Date('2026-06-19T02:00:00Z'));
   await openSource(page);
-  await documentEditor(page).fill('Later paragraph');
-  await page.keyboard.press('Home');
+  await page.keyboard.insertText('Review');
   await page.keyboard.press('Enter');
-  await page.keyboard.press('ArrowUp');
-  await page.keyboard.type('Review @next Friday 3pm');
+  await page.keyboard.insertText('Later paragraph');
+  const paragraphs = documentEditor(page).locator('p');
+  await expect(paragraphs).toHaveText(['Review', 'Later paragraph']);
+  await expect(page.getByTestId('autosave-indicator')).toHaveAttribute('data-status', 'saved');
+
+  const target = paragraphs.first();
+  const tail = await target.evaluate((element) => {
+    const range = document.createRange();
+    range.selectNodeContents(element);
+    const text = range.getBoundingClientRect();
+    const paragraph = element.getBoundingClientRect();
+    return { x: text.right - paragraph.left + 2, y: text.top - paragraph.top + text.height / 2 };
+  });
+  await target.click({ position: tail });
+  await expect
+    .poll(() =>
+      target.evaluate((element) => {
+        const selection = window.getSelection();
+        if (
+          !selection?.isCollapsed ||
+          !selection.focusNode ||
+          !element.contains(selection.focusNode)
+        )
+          return false;
+        const suffix = document.createRange();
+        suffix.setStart(selection.focusNode, selection.focusOffset);
+        suffix.setEnd(element, element.childNodes.length);
+        return !suffix.toString();
+      }),
+    )
+    .toBe(true);
+  await page.keyboard.type(' @next Friday 3pm');
 
   const option = page.getByRole('option', { name: /6月19日/ });
   await expect(option).toBeVisible();
   await page.keyboard.press('Enter');
-  const date = page.getByTestId('lash-inline-mention');
+  const date = target.getByTestId('lash-inline-mention');
   await expect(date).toHaveText(/6月19日/);
   await expect(date).toHaveAttribute('data-iso', '2026-06-19T15:00:00-07:00');
   await expect(date).toHaveAttribute('title', '2026-06-19T15:00:00-07:00');
-  await expect(documentEditor(page).locator('p').first()).toContainText('Review');
-  await expect(documentEditor(page).locator('p').last()).toHaveText('Later paragraph');
+  await expect(target).toHaveText(/^Review\s+@6月19日/u);
+  await expect(paragraphs).toHaveCount(2);
+  await expect(paragraphs.last()).toHaveText('Later paragraph');
   await expect(page.getByTestId('autosave-indicator')).toHaveAttribute('data-status', 'saved');
   await page.reload();
   await expect(date).toHaveAttribute('data-iso', '2026-06-19T15:00:00-07:00');
+  await expect(paragraphs.last()).toHaveText('Later paragraph');
 });
 
 test('chooses a real browser document with keyboard navigation', async ({ page }) => {
@@ -75,7 +106,12 @@ test('chooses a real browser document with keyboard navigation', async ({ page }
 });
 
 test.describe('mobile reference picker', () => {
-  test.use({ hasTouch: true, isMobile: true, viewport: { width: 390, height: 844 } });
+  test.use({
+    hasTouch: true,
+    isMobile: true,
+    viewport: { width: 390, height: 844 },
+    deviceScaleFactor: 3,
+  });
 
   test('picks a document on a phone without changing unrelated writing', async ({ page }) => {
     const target = await createDocument(page, 'Mobile outline');
@@ -84,8 +120,10 @@ test.describe('mobile reference picker', () => {
     const picker = page.getByRole('listbox', { name: 'Insert a reference' });
     const option = picker.getByRole('option', { name: /Mobile outline/ });
     await expect(option).toBeVisible();
+    await expect
+      .poll(async () => (await option.boundingBox())?.height ?? 0)
+      .toBeGreaterThanOrEqual(44);
     const box = await option.boundingBox();
-    expect(box?.height).toBeGreaterThanOrEqual(44);
     expect(box?.x).toBeGreaterThanOrEqual(0);
     expect((box?.x ?? 0) + (box?.width ?? 0)).toBeLessThanOrEqual(390);
     await option.tap();

@@ -7,7 +7,11 @@ import {
 } from '../../../../apps/web/lib/namedEdit/contract';
 import { handleNamedEdit } from '../../../../apps/web/lib/namedEdit/routeHandler';
 import { NextRequest } from '../../../../apps/web/node_modules/next/server.js';
-import { parseNamedEditCommand, namedEditResponse } from '../../../realtime-worker/src/namedEdit';
+import {
+  namedEditFailure,
+  namedEditResponse,
+  parseNamedEditCommand,
+} from '../../../realtime-worker/src/namedEdit';
 
 const auth = vi.hoisted(() => ({ principal: vi.fn() }));
 vi.mock('../../../../apps/web/node_modules/server-only/index.js', () => ({}));
@@ -81,6 +85,27 @@ describe('named edit browser and Worker contract', () => {
     expect((await post('session', { token: null, email: 'editor@example.test' })).status).toBe(400);
     expect(auth.principal).not.toHaveBeenCalled();
     expect(worker).not.toHaveBeenCalled();
+  });
+
+  it('makes a disabled Worker terminal for named sessions and keeps transient failures retryable', async () => {
+    configure();
+    auth.principal.mockResolvedValue({ id: member, email: 'member@example.test' });
+    const worker = vi.fn()
+      .mockResolvedValueOnce(namedEditResponse(namedEditFailure('named-edit-disabled')))
+      .mockResolvedValueOnce(namedEditResponse(namedEditFailure('internal-error')));
+    vi.stubGlobal('fetch', worker);
+
+    const disabled = await post('session', { token: null });
+    expect(disabled.status).toBe(404);
+    expect(await disabled.json()).toEqual({ ok: false, version: 1, error: 'unavailable' });
+
+    const unavailable = await post('session', { token: null });
+    expect(unavailable.status).toBe(503);
+    expect(await unavailable.json()).toEqual({
+      ok: false,
+      version: 1,
+      error: 'temporarily-unavailable',
+    });
   });
 
   it('commits only encrypted email and a hash to Worker, then carries the raw token only in a continuation cookie', async () => {

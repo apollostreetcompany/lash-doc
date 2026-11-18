@@ -8,7 +8,7 @@ interface MailpitSearchResult {
   messages?: MailpitMessageSummary[];
 }
 
-const mailpitUrl = process.env.LASH_MAILPIT_URL ?? 'http://127.0.0.1:54324';
+const mailpitUrl = process.env.LASH_MAILPIT_URL ?? 'http://127.0.0.1:55324';
 
 export const latestSignInLink = async (email: string): Promise<string | null> => {
   const search = await fetch(

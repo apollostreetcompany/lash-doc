@@ -86,6 +86,14 @@ const parseResult = (data: unknown, status: number, request: WorkerRequest): Wor
       typeof data.retryable !== 'boolean'
     )
       return { ok: false, status: 503 };
+    if (
+      request.operation === 'session' &&
+      status === 503 &&
+      data.error === 'named-edit-disabled' &&
+      data.retryable === false
+    ) {
+      return { ok: false, status: 404 };
+    }
     if (status === 403 && data.error === 'forbidden') return { ok: false, status: 403 };
     if (status === 409 && data.error === 'conflict') return { ok: false, status: 409 };
     if (status === 429 && data.error === 'rate-limited') return { ok: false, status: 429 };

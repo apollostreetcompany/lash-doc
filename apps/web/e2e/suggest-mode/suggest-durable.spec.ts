@@ -11,6 +11,7 @@ test('remembers the moved selection and the accepted decision through reload', a
   const editor = await proposeWording(page);
   await editor.press('Home');
   await page.keyboard.insertText('Reminder: ');
+  await expect(editor).toHaveText(`Reminder: ${wording} once, then ${wording}`);
   await expect(page.getByTestId('autosave-indicator')).toHaveAttribute('data-status', 'saved');
 
   await page.reload();

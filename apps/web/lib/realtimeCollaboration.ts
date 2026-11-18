@@ -22,6 +22,8 @@ const OWNER_REALTIME_PROTOCOL_VERSION = 3 as const;
 const OWNER_SOCKET_PROTOCOL = 'lash-realtime-v3' as const;
 const SOCKET_OPEN = 1;
 const SESSION_EXCHANGE_DEADLINE_MS = 5_000;
+const ACCOUNT_RECONNECT_DELAYS_MS = [250, 1_000, 2_000, 4_000, 8_000] as const;
+const ACCOUNT_RECONNECT_MAX_DELAY_MS = 15_000;
 
 export const REALTIME_DOCUMENT_METADATA_YMAP = 'lash:document-metadata:v1';
 export const REALTIME_DOCUMENT_TITLE_KEY = 'title';
@@ -1064,6 +1066,7 @@ export class LashRealtimeYjsProvider {
   private socketEpoch = 0;
   private connectionAttempt = 0;
   private suppressAutoReconnect = false;
+  private onlineWakeTarget: Window | null = null;
   private ownerRefreshController: AbortController | null = null;
   private readonly usedOwnerTickets = new Set<string>();
   private readonly ownerAuthorityCandidate: boolean;
@@ -1240,6 +1243,7 @@ export class LashRealtimeYjsProvider {
     this.abortOwnerRefresh();
     this.clearReconnectTimer();
     this.clearHydrationTimer();
+    this.stopOnlineWake();
     if (this.localListenerAttached) {
       this.doc.off('update', this.handleLocalUpdate);
       this.localListenerAttached = false;
@@ -1364,6 +1368,7 @@ export class LashRealtimeYjsProvider {
     this.suppressAutoReconnect = true;
     this.socketEpoch += 1;
     this.abortOwnerRefresh();
+    this.clearReconnectTimer();
     this.clearHydrationTimer();
     const socket = this.socket;
     this.detachSocket(socket);
@@ -1377,11 +1382,17 @@ export class LashRealtimeYjsProvider {
   }
 
   reconnectForTest() {
+    this.reconnectNow();
+  }
+
+  reconnectNow() {
     if (
       this.destroyed ||
       this.lifecycleState !== 'active' ||
       !this.session ||
-      this.terminalReason
+      this.terminalReason ||
+      this.socket ||
+      this.ownerRefreshController
     ) {
       return;
     }
@@ -1389,10 +1400,6 @@ export class LashRealtimeYjsProvider {
     this.clearReconnectTimer();
     this.connectionAttempt = 0;
     this.connect();
-  }
-
-  reconnectNow() {
-    this.reconnectForTest();
   }
 
   destroy(): boolean {
@@ -1409,6 +1416,7 @@ export class LashRealtimeYjsProvider {
       this.lifecycleState !== 'active' ||
       this.socket ||
       this.ownerRefreshController ||
+      this.suppressAutoReconnect ||
       this.terminalReason
     ) {
       return;
@@ -1420,13 +1428,13 @@ export class LashRealtimeYjsProvider {
     this.setConnectionState(this.hasHydratedOnce ? 'reconnecting' : 'connecting');
 
     if (isAccountRealtimeSession(session) && this.usedOwnerTickets.size > 0) {
-      this.refreshAndOpenOwnerSocket(epoch);
+      void this.refreshAndOpenOwnerSocket(epoch);
       return;
     }
     this.openSocket(session, epoch);
   }
 
-  private refreshAndOpenOwnerSocket(epoch: number) {
+  private async refreshAndOpenOwnerSocket(epoch: number) {
     const binding = this.ownerSessionBinding;
     const refresh = this.refreshOwnerSession;
     if (!binding || !refresh) {
@@ -1435,49 +1443,41 @@ export class LashRealtimeYjsProvider {
     }
     const controller = new AbortController();
     this.ownerRefreshController = controller;
-    void refresh(binding.routeDocumentId, controller.signal).then(
-      (refreshed) => {
-        if (
-          controller.signal.aborted ||
-          this.destroyed ||
-          this.lifecycleState !== 'active' ||
-          epoch !== this.socketEpoch
-        ) {
+    this.armHydrationTimer(epoch);
+    let refreshed: AccountRealtimeSession;
+    try {
+      refreshed = await refresh(binding.routeDocumentId, controller.signal);
+    } catch (error) {
+      if (this.ownerRefreshController !== controller) return;
+      this.ownerRefreshController = null;
+      this.clearHydrationTimer();
+      if (error instanceof RealtimeProviderStartError) {
+        if (error.kind === 'authorization') {
+          this.failTerminal(epoch, 'scope-mismatch', 'Document access could not be renewed.');
           return;
         }
-        this.ownerRefreshController = null;
-        const stableRefreshed = cloneAccountRealtimeSession(refreshed);
-        if (
-          !stableRefreshed ||
-          !isValidAccountRealtimeSession(stableRefreshed, binding) ||
-          this.usedOwnerTickets.has(stableRefreshed.ticketProtocol)
-        ) {
-          this.failProtocol(epoch, 'Owner realtime authorization changed unexpectedly.');
+        if (error.kind === 'protocol') {
+          this.failProtocol(epoch, 'Document authorization changed unexpectedly.');
           return;
         }
-        this.session = stableRefreshed;
-        this.openSocket(stableRefreshed, epoch);
-      },
-      (error: unknown) => {
-        if (
-          controller.signal.aborted ||
-          this.destroyed ||
-          this.lifecycleState !== 'active' ||
-          epoch !== this.socketEpoch
-        ) {
-          return;
-        }
-        this.ownerRefreshController = null;
-        if (
-          binding.source === 'named' &&
-          error instanceof RealtimeProviderStartError && error.kind === 'authorization'
-        ) {
-          this.failTerminal(epoch, 'scope-mismatch', 'Shared edit access was removed.');
-          return;
-        }
-        this.handleTransientSocketFailure(epoch);
-      },
-    );
+      }
+      this.handleTransientSocketFailure(epoch);
+      return;
+    }
+    if (this.ownerRefreshController !== controller) return;
+    this.ownerRefreshController = null;
+    this.clearHydrationTimer();
+    const stableRefreshed = refreshed && cloneAccountRealtimeSession(refreshed);
+    if (
+      !stableRefreshed ||
+      !isValidAccountRealtimeSession(stableRefreshed, binding) ||
+      this.usedOwnerTickets.has(stableRefreshed.ticketProtocol)
+    ) {
+      this.failProtocol(epoch, 'Document authorization changed unexpectedly.');
+      return;
+    }
+    this.session = stableRefreshed;
+    this.openSocket(stableRefreshed, epoch);
   }
 
   private openSocket(session: RealtimeProviderSession, epoch: number) {
@@ -1745,6 +1745,10 @@ export class LashRealtimeYjsProvider {
     this.hydrated = true;
     this.hasHydratedOnce = true;
     this.connectionAttempt = 0;
+    if (firstHydration && this.canRetryOpenAccountSession() && typeof window !== 'undefined') {
+      this.onlineWakeTarget = window;
+      window.addEventListener('online', this.wakeAfterNetworkRestored);
+    }
     if (this.pendingUpdates.size === 0 && this.queuedUpdates.length === 0) {
       this.lastAcknowledgedStateVector = Y.encodeStateVector(this.doc);
     }
@@ -1856,6 +1860,13 @@ export class LashRealtimeYjsProvider {
 
   private handleTransientSocketFailure(epoch: number) {
     if (this.destroyed || this.lifecycleState !== 'active' || epoch !== this.socketEpoch) return;
+    if (this.canRetryOpenAccountSession()) {
+      this.scheduleReconnect(
+        ACCOUNT_RECONNECT_DELAYS_MS[this.connectionAttempt] ?? ACCOUNT_RECONNECT_MAX_DELAY_MS,
+      );
+      this.setConnectionState('reconnecting');
+      return;
+    }
     if (this.connectionAttempt >= 3) {
       this.status = 'offline';
       const reject = this.rejectStart;
@@ -1874,6 +1885,19 @@ export class LashRealtimeYjsProvider {
     this.scheduleReconnect(delay);
   }
 
+  private canRetryOpenAccountSession() {
+    return this.hasHydratedOnce && this.session !== null && isAccountRealtimeSession(this.session);
+  }
+
+  private wakeAfterNetworkRestored = () => {
+    if (!this.suppressAutoReconnect) this.reconnectNow();
+  };
+
+  private stopOnlineWake() {
+    this.onlineWakeTarget?.removeEventListener('online', this.wakeAfterNetworkRestored);
+    this.onlineWakeTarget = null;
+  }
+
   private scheduleReconnect(delayMs: number) {
     if (this.destroyed || this.lifecycleState !== 'active' || this.reconnectTimer) return;
     const schedule = this.setTimeoutFn;
@@ -1889,14 +1913,14 @@ export class LashRealtimeYjsProvider {
     this.hydrationTimer = schedule(() => {
       this.hydrationTimer = null;
       if (this.socket?.readyState !== SOCKET_OPEN) {
-        this.failTransientExhausted(epoch, 'Realtime socket did not open before its deadline.');
+        this.expireTransportAttempt(epoch);
         return;
       }
       this.failProtocol(epoch, 'Realtime hydration did not complete.');
     }, this.hydrationTimeoutMs);
   }
 
-  private failTransientExhausted(epoch: number, message: string) {
+  private expireTransportAttempt(epoch: number) {
     if (this.destroyed || this.lifecycleState !== 'active' || epoch !== this.socketEpoch) return;
     this.socketEpoch += 1;
     this.abortOwnerRefresh();
@@ -1905,16 +1929,25 @@ export class LashRealtimeYjsProvider {
     const socket = this.socket;
     this.detachSocket(socket);
     this.socket = null;
-    socket?.close(1013, 'realtime attempt exhausted');
+    socket?.close(4000, 'Realtime attempt timed out');
     this.requeuePendingUpdates();
     this.hydrated = false;
     this.hydrationStarted = false;
     this.peers.clear();
+    if (this.canRetryOpenAccountSession()) {
+      this.handleTransientSocketFailure(this.socketEpoch);
+      return;
+    }
     this.status = 'offline';
     const reject = this.rejectStart;
     this.resolveStart = null;
     this.rejectStart = null;
-    reject?.(new RealtimeProviderStartError('transient-exhausted', message));
+    reject?.(
+      new RealtimeProviderStartError(
+        'transient-exhausted',
+        'Realtime transport did not open before its deadline.',
+      ),
+    );
     this.emit();
   }
 
@@ -1937,6 +1970,7 @@ export class LashRealtimeYjsProvider {
     this.abortOwnerRefresh();
     this.clearHydrationTimer();
     this.clearReconnectTimer();
+    this.stopOnlineWake();
     const socket = this.socket;
     this.detachSocket(socket);
     this.socket = null;

@@ -6,7 +6,9 @@ import {
   createRealtimeDocument,
   createOwnerCandidateResources,
   LashRealtimeYjsProvider,
+  RealtimeProviderStartError,
   type AuthorizedRealtimeSession,
+  type NamedRealtimeSessionV5,
   type OwnerRealtimeSessionV3,
   type RealtimeSocket,
 } from '../../../../apps/web/lib/realtimeCollaboration';
@@ -103,6 +105,36 @@ const ownerHydrationComplete = JSON.stringify({
   protocolVersion: 3,
   persistedUpdates: 0,
 });
+
+const namedRoomId = `doc-v1-${'a'.repeat(64)}`;
+const namedActorId = `named-${'b'.repeat(32)}`;
+const namedSession = (ticket: string): NamedRealtimeSessionV5 => ({
+  actorId: namedActorId,
+  capabilities: ['doc.read', 'doc.edit'],
+  expiresAt: new Date(Date.now() + 60_000).toISOString(),
+  protocolVersion: 5,
+  remoteDocumentId: namedRoomId,
+  role: 'edit',
+  roomId: namedRoomId,
+  routeDocumentId: namedRoomId,
+  socketProtocol: 'lash-realtime-v5',
+  socketUrl: `wss://realtime.example.test/api/realtime/rooms/${namedRoomId}/socket?protocolVersion=5&actorId=${namedActorId}`,
+  source: 'named',
+  ticketProtocol: `lash-named-ticket.${ticket.padEnd(43, 't')}`,
+});
+
+function hydrateSocket(socket: FakeSocket, roomId: string, protocolVersion: number) {
+  socket.readyState = 1;
+  socket.emit('message', { data: JSON.stringify({ type: 'room-ready', roomId, protocolVersion }) });
+  socket.emit('message', {
+    data: JSON.stringify({
+      type: 'room-hydration-complete',
+      roomId,
+      protocolVersion,
+      persistedUpdates: 0,
+    }),
+  });
+}
 
 const encodedRemoteUpdate = (text: string) => {
   const remote = createRealtimeDocument();
@@ -1149,6 +1181,172 @@ describe('authorized realtime provider lifecycle', () => {
     vi.useRealTimers();
 
     expect(boundedError).toMatchObject({ kind: 'transient-exhausted' });
+  });
+
+  it('keeps retrying a hydrated named editor after 15 seconds of transport failures', async () => {
+    vi.useFakeTimers();
+    const first = new FakeSocket();
+    const healed = new FakeSocket();
+    const doc = createRealtimeDocument();
+    let networkAvailable = false;
+    let renewal = 0;
+    let socketAttempts = 0;
+    const refreshOwnerSession = vi
+      .fn(async () => namedSession(`renewed-${++renewal}`))
+      .mockImplementationOnce(() => {
+        throw new TypeError('Network is unavailable');
+      })
+      .mockRejectedValueOnce(new TypeError('Network is unavailable'));
+    const createSocket = vi.fn(() => {
+      if (socketAttempts++ === 0) return first;
+      if (!networkAvailable) throw new TypeError('Socket transport is unavailable');
+      return healed;
+    });
+    const provider = new LashRealtimeYjsProvider({
+      createSocket,
+      doc,
+      refreshOwnerSession,
+      session: namedSession('initial'),
+    });
+
+    try {
+      const starting = provider.start();
+      hydrateSocket(first, namedRoomId, 5);
+      await starting;
+      doc.getText('body').insert(0, 'sent while connected ');
+      const unacknowledged = first.sent.map((message) => JSON.parse(message))
+        .find((message) => message.type === 'yjs-update');
+      first.emit('close', { code: 1006 });
+      doc.getText('body').insert(doc.getText('body').length, 'queued while disconnected');
+
+      await vi.advanceTimersByTimeAsync(15_000);
+      expect(provider.getSnapshot()).toMatchObject({
+        syncState: 'reconnecting',
+        queuedUpdateCount: 2,
+        pendingUpdateCount: 0,
+      });
+      networkAvailable = true;
+      await vi.advanceTimersByTimeAsync(2_000);
+      expect(healed.sent).toEqual([]);
+      expect(refreshOwnerSession.mock.calls.length).toBeGreaterThan(3);
+      expect(createSocket).toHaveBeenLastCalledWith(
+        expect.any(String),
+        ['lash-realtime-v5', namedSession(`renewed-${renewal}`).ticketProtocol],
+      );
+
+      hydrateSocket(healed, namedRoomId, 5);
+      const updates = healed.sent.map((message) => JSON.parse(message))
+        .filter((message) => message.type === 'yjs-update');
+      expect(updates).toHaveLength(2);
+      expect(updates[0]).toMatchObject(unacknowledged);
+      expect(new Set(updates.map((message) => message.updateId)).size).toBe(2);
+      for (const { updateId } of updates) {
+        healed.emit('message', {
+          data: JSON.stringify({ type: 'sync-ack', roomId: namedRoomId, updateId }),
+        });
+      }
+      expect(provider.getSnapshot()).toMatchObject({
+        syncState: 'saved',
+        queuedUpdateCount: 0,
+        pendingUpdateCount: 0,
+      });
+      expect(doc.getText('body').toString()).toBe('sent while connected queued while disconnected');
+    } finally {
+      provider.destroy();
+      doc.destroy();
+      vi.useRealTimers();
+    }
+  });
+
+  it('bounds in-flight transport attempts and wakes an editor on online or manual retry', async () => {
+    vi.useFakeTimers();
+    const eventTarget = new EventTarget();
+    vi.stubGlobal('window', eventTarget);
+    const first = new FakeSocket();
+    const stalled = new FakeSocket();
+    const healed = new FakeSocket();
+    const doc = createRealtimeDocument();
+    const refreshOwnerSession = vi.fn<[_: string, signal: AbortSignal], Promise<OwnerRealtimeSessionV3>>()
+      .mockImplementationOnce(() => new Promise(() => {}))
+      .mockResolvedValueOnce(ownerSession('online-wake'))
+      .mockResolvedValueOnce(ownerSession('manual-wake'));
+    const createSocket = vi.fn()
+      .mockReturnValueOnce(first)
+      .mockReturnValueOnce(stalled)
+      .mockReturnValueOnce(healed);
+    const provider = new LashRealtimeYjsProvider({
+      createSocket,
+      doc,
+      refreshOwnerSession,
+      session: ownerSession('before-going-online'),
+    });
+
+    try {
+      const starting = provider.start();
+      hydrateSocket(first, 'opaque-room-47', 3);
+      await starting;
+      first.emit('close', { code: 1006 });
+      await vi.advanceTimersByTimeAsync(5_250);
+      expect(refreshOwnerSession.mock.calls[0]?.[1].aborted).toBe(true);
+      expect(refreshOwnerSession).toHaveBeenCalledTimes(1);
+
+      eventTarget.dispatchEvent(new Event('online'));
+      await vi.advanceTimersByTimeAsync(0);
+      expect(refreshOwnerSession).toHaveBeenCalledTimes(2);
+      expect(stalled.readyState).toBe(0);
+      await vi.advanceTimersByTimeAsync(5_000);
+      expect(stalled.readyState).toBe(3);
+      expect(provider.getSnapshot().syncState).toBe('reconnecting');
+
+      provider.reconnectNow();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(refreshOwnerSession).toHaveBeenCalledTimes(3);
+      hydrateSocket(healed, 'opaque-room-47', 3);
+      expect(provider.getSnapshot().syncState).toBe('saved');
+
+      healed.emit('close', { code: 1006 });
+      expect(provider.destroy()).toBe(true);
+      eventTarget.dispatchEvent(new Event('online'));
+      await vi.advanceTimersByTimeAsync(30_000);
+      expect(refreshOwnerSession).toHaveBeenCalledTimes(3);
+    } finally {
+      provider.destroy();
+      doc.destroy();
+      vi.unstubAllGlobals();
+      vi.useRealTimers();
+    }
+  });
+
+  it.each([
+    ['authorization', 'scope-mismatch'],
+    ['protocol', 'protocol-error'],
+  ] as const)('ends owner retries after definitive %s renewal failure', async (kind, reason) => {
+    vi.useFakeTimers();
+    const socket = new FakeSocket();
+    const doc = createRealtimeDocument();
+    const refreshOwnerSession = vi.fn().mockRejectedValue(new RealtimeProviderStartError(kind, 'Denied'));
+    const provider = new LashRealtimeYjsProvider({
+      createSocket: () => socket,
+      doc,
+      refreshOwnerSession,
+      session: ownerSession('before-terminal-renewal'),
+    });
+
+    try {
+      const starting = provider.start();
+      hydrateSocket(socket, 'opaque-room-47', 3);
+      await starting;
+      socket.emit('close', { code: 1006 });
+      await vi.advanceTimersByTimeAsync(30_000);
+      provider.reconnectNow();
+      expect(provider.getTerminalReason()).toBe(reason);
+      expect(provider.getSnapshot()).toMatchObject({ syncState: 'offline', canWrite: false });
+      expect(refreshOwnerSession).toHaveBeenCalledTimes(1);
+    } finally {
+      provider.destroy();
+      doc.destroy();
+      vi.useRealTimers();
+    }
   });
 
   it.each([
