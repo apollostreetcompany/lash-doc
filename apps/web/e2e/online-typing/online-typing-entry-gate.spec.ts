@@ -14,7 +14,10 @@ type LashTestWindow = Window & {
     disconnectForTest: () => void;
     reconnectForTest: () => void;
     getSnapshot: () => {
+      connectionState: string;
       syncState: string;
+      queuedUpdateCount: number;
+      pendingUpdateCount: number;
       peers: Array<{
         actorId: string;
         selection: { from: number; to: number } | null;
@@ -307,12 +310,29 @@ test.describe('online typing entry gate', () => {
   test('typed document content survives reload of the same document', async ({ browser }) => {
     const context = await browser.newContext();
     await enableLocalRealtime(context);
+    const primarySentinel = 'realtime-primary-sentinel';
+    const backupSentinel = 'realtime-backup-sentinel';
+    await context.addInitScript(
+      ({ primary, backup }) => {
+        window.localStorage.setItem('lash:body:demo-document', primary);
+        window.localStorage.setItem('lash:body-backup:demo-document', backup);
+      },
+      { primary: primarySentinel, backup: backupSentinel },
+    );
     const page = await context.newPage();
 
     try {
       await openDemoDoc(page);
+      await expect(page.getByTestId('autosave-indicator')).toHaveCount(0);
       const durableText = 'Durable reload text';
       await typeIntoEditor(page, durableText);
+      await page.waitForTimeout(700);
+      expect(
+        await page.evaluate(() => ({
+          primary: window.localStorage.getItem('lash:body:demo-document'),
+          backup: window.localStorage.getItem('lash:body-backup:demo-document'),
+        })),
+      ).toEqual({ primary: primarySentinel, backup: backupSentinel });
 
       await page.reload();
       await waitForEditor(page);
@@ -323,6 +343,13 @@ test.describe('online typing entry gate', () => {
           timeout: 3_000,
         })
         .toContain(durableText);
+      await expect(page.getByTestId('autosave-indicator')).toHaveCount(0);
+      expect(
+        await page.evaluate(() => ({
+          primary: window.localStorage.getItem('lash:body:demo-document'),
+          backup: window.localStorage.getItem('lash:body-backup:demo-document'),
+        })),
+      ).toEqual({ primary: primarySentinel, backup: backupSentinel });
     } finally {
       await context.close();
     }
@@ -399,6 +426,216 @@ test.describe('online typing entry gate', () => {
       await expect(
         room.pageA.locator('[data-testid="remote-cursor-marker"][data-actor-id="grace-editor"]'),
       ).toContainText(/Grace Editor: cursor/i);
+    } finally {
+      await room.close();
+    }
+  });
+
+  test('offline-queue uses the actual provider queue while the peer remains unchanged', async ({
+    browser,
+  }) => {
+    const queuedText = 'Queued through the real Yjs provider';
+    const room = await openTwoClientsOnSameDoc(browser, {
+      actorA: 'queue-author',
+      actorB: 'queue-observer',
+      documentId: `bead-43-offline-queue-${Date.now()}`,
+    });
+
+    try {
+      await expect
+        .poll(() => realtimeSnapshot(room.pageA), {
+          message: 'both clients should establish actual awareness before disconnect',
+        })
+        .toMatchObject({
+          connectionState: 'connected',
+          peers: expect.arrayContaining([
+            expect.objectContaining({
+              actorId: 'queue-observer',
+            }),
+          ]),
+        });
+
+      await room.pageA.evaluate(() => {
+        const api = (window as LashTestWindow).__lashRealtime;
+        if (!api) throw new Error('Realtime test API unavailable');
+        api.disconnectForTest();
+      });
+      await expect
+        .poll(() => realtimeSnapshot(room.pageA))
+        .toMatchObject({ connectionState: 'reconnecting' });
+      await expect
+        .poll(async () => {
+          const snapshot = await realtimeSnapshot(room.pageB);
+          return snapshot?.peers.some((peer) => peer.actorId === 'queue-author') ?? false;
+        })
+        .toBe(false);
+
+      await typeIntoEditor(room.pageA, queuedText);
+      await expect
+        .poll(() => realtimeSnapshot(room.pageA), {
+          message: 'the disconnected provider should own a real queued Yjs update',
+        })
+        .toMatchObject({
+          connectionState: 'reconnecting',
+          syncState: 'reconnecting',
+          queuedUpdateCount: expect.any(Number),
+          pendingUpdateCount: 0,
+        });
+      expect((await realtimeSnapshot(room.pageA))?.queuedUpdateCount ?? 0).toBeGreaterThan(0);
+
+      await room.pageB.waitForTimeout(500);
+      expect(await editorText(room.pageB)).not.toContain(queuedText);
+    } finally {
+      await room.close();
+    }
+  });
+
+  test('offline-merge reconnects, converges, and reloads the actual queued update', async ({
+    browser,
+  }) => {
+    const queuedText = 'Durable queued update from the real provider';
+    const documentId = `bead-43-offline-merge-${Date.now()}`;
+    const room = await openTwoClientsOnSameDoc(browser, {
+      actorA: 'merge-author',
+      actorB: 'merge-observer',
+      documentId,
+    });
+    let verificationContext: BrowserContext | null = null;
+
+    try {
+      await expect
+        .poll(() => realtimeSnapshot(room.pageA))
+        .toMatchObject({
+          connectionState: 'connected',
+          peers: expect.arrayContaining([
+            expect.objectContaining({
+              actorId: 'merge-observer',
+            }),
+          ]),
+        });
+
+      await room.pageA.evaluate(() => {
+        const api = (window as LashTestWindow).__lashRealtime;
+        if (!api) throw new Error('Realtime test API unavailable');
+        api.disconnectForTest();
+      });
+      await typeIntoEditor(room.pageA, queuedText);
+      await expect
+        .poll(async () => (await realtimeSnapshot(room.pageA))?.queuedUpdateCount ?? 0)
+        .toBeGreaterThan(0);
+      expect(await editorText(room.pageB)).not.toContain(queuedText);
+
+      await room.pageA.evaluate(() => {
+        const api = (window as LashTestWindow).__lashRealtime;
+        if (!api) throw new Error('Realtime test API unavailable');
+        api.reconnectForTest();
+      });
+      await expect
+        .poll(
+          async () => {
+            const [textA, textB] = await Promise.all([
+              editorText(room.pageA),
+              editorText(room.pageB),
+            ]);
+            return { textA, textB };
+          },
+          {
+            message: 'both clients should converge after the provider reconnects',
+            timeout: 5_000,
+          },
+        )
+        .toEqual({ textA: queuedText, textB: queuedText });
+      await expect
+        .poll(() => realtimeSnapshot(room.pageA))
+        .toMatchObject({
+          connectionState: 'connected',
+          syncState: 'saved',
+          queuedUpdateCount: 0,
+          pendingUpdateCount: 0,
+        });
+
+      await Promise.all([room.pageA.reload(), room.pageB.reload()]);
+      await Promise.all([waitForEditor(room.pageA), waitForEditor(room.pageB)]);
+      await expect
+        .poll(
+          async () => {
+            const [textA, textB] = await Promise.all([
+              editorText(room.pageA),
+              editorText(room.pageB),
+            ]);
+            return { textA, textB };
+          },
+          {
+            message: 'the converged provider state should hydrate both reloaded clients',
+            timeout: 5_000,
+          },
+        )
+        .toEqual({ textA: queuedText, textB: queuedText });
+
+      verificationContext = await browser.newContext();
+      await enableLocalRealtime(verificationContext, 'merge-clean-verifier');
+      const verificationPage = await verificationContext.newPage();
+      await verificationPage.goto(`/doc/${documentId}`);
+      await waitForEditor(verificationPage);
+      await expect
+        .poll(() => editorText(verificationPage), {
+          message: 'a third clean context should hydrate the exact Durable Object text',
+          timeout: 5_000,
+        })
+        .toBe(queuedText);
+    } finally {
+      await verificationContext?.close();
+      await room.close();
+    }
+  });
+
+  test('presence-resume removes and restores actual provider awareness', async ({ browser }) => {
+    const room = await openTwoClientsOnSameDoc(browser, {
+      actorA: 'presence-author',
+      actorB: 'presence-observer',
+      documentId: `bead-43-presence-resume-${Date.now()}`,
+    });
+
+    try {
+      await expect
+        .poll(() => realtimeSnapshot(room.pageA))
+        .toMatchObject({
+          peers: expect.arrayContaining([
+            expect.objectContaining({
+              actorId: 'presence-observer',
+            }),
+          ]),
+        });
+
+      await room.pageB.evaluate(() => {
+        const api = (window as LashTestWindow).__lashRealtime;
+        if (!api) throw new Error('Realtime test API unavailable');
+        api.disconnectForTest();
+      });
+      await expect
+        .poll(async () => {
+          const snapshot = await realtimeSnapshot(room.pageA);
+          return snapshot?.peers.some((peer) => peer.actorId === 'presence-observer') ?? false;
+        })
+        .toBe(false);
+
+      await room.pageB.evaluate(() => {
+        const api = (window as LashTestWindow).__lashRealtime;
+        if (!api) throw new Error('Realtime test API unavailable');
+        api.reconnectForTest();
+      });
+      await expect
+        .poll(() => realtimeSnapshot(room.pageA), {
+          message: 'actual room awareness should restore the reconnected peer',
+          timeout: 5_000,
+        })
+        .toMatchObject({
+          peers: expect.arrayContaining([
+            expect.objectContaining({
+              actorId: 'presence-observer',
+            }),
+          ]),
+        });
     } finally {
       await room.close();
     }

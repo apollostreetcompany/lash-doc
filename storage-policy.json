@@ -1,0 +1,121 @@
+{
+  "schema": 1,
+  "generated_roots": [
+    "apps/web/.next",
+    "apps/web/out",
+    "node_modules",
+    "apps/web/node_modules",
+    "playwright-report",
+    "test-results",
+    "coverage",
+    "build",
+    ".turbo",
+    "__pycache__"
+  ],
+  "generated_suffixes": [
+    ".pyc",
+    ".xcresult",
+    ".tsbuildinfo"
+  ],
+  "exceptions": [],
+  "legacy_tracked": [],
+  "entrypoints": [
+    {
+      "path": "apps/web/package.json",
+      "kind": "ordinary_build",
+      "route": "tool_default",
+      "stable_output_root": "apps/web/.next",
+      "default_basis": "Web Next build uses apps/web/.next and local wrapper preflights admission; build:ci direct is called by hosted CI",
+      "caller_tokens": [
+        "\"build\": \"python3 ../../tools/disk_admission.py check --output-root .next && pnpm run build:ci\"",
+        "\"build:ci\": \"next build --webpack\""
+      ],
+      "guard_path": "apps/web/next.config.mjs",
+      "guard_tokens": [
+        "const nextConfig = {"
+      ],
+      "forbidden_output_overrides": [
+        "--distDir",
+        "NEXT_DIST_DIR="
+      ],
+      "source_sha256": "f60f32012d0acdb1324760819231becac9241f3689f0dab4a6f23316926906e2",
+      "guard_sha256": "f5dad0f345fab6eb73da4e95ffda229bc7a046175e43d7fc558db6f230349107"
+    },
+    {
+      "path": "apps/web/package.json",
+      "kind": "ordinary_build",
+      "route": "tool_default",
+      "stable_output_root": "apps/web/out",
+      "default_basis": "Static export option fixes a second purpose output at apps/web/out after .next admission",
+      "caller_tokens": [
+        "\"build:static\": \"python3 ../../tools/disk_admission.py check --output-root .next && python3 ../../tools/disk_admission.py check --output-root out && pnpm run build:static:ci\"",
+        "\"build:static:ci\": \"LASH_STATIC_EXPORT=1 next build --webpack\""
+      ],
+      "guard_path": "apps/web/next.config.mjs",
+      "guard_tokens": [
+        "const staticExport = process.env.LASH_STATIC_EXPORT === '1';",
+        "output: 'export'"
+      ],
+      "forbidden_output_overrides": [
+        "--distDir",
+        "NEXT_DIST_DIR="
+      ],
+      "source_sha256": "f60f32012d0acdb1324760819231becac9241f3689f0dab4a6f23316926906e2",
+      "guard_sha256": "f5dad0f345fab6eb73da4e95ffda229bc7a046175e43d7fc558db6f230349107"
+    },
+    {
+      "path": "package.json",
+      "kind": "ordinary_test",
+      "route": "tool_default",
+      "stable_output_root": "apps/web/.next",
+      "default_basis": "Top-level E2E caller builds the same .next purpose root through web build; hosted test:e2e:ci calls direct build:ci",
+      "caller_tokens": [
+        "\"test:e2e\": \"NEXT_PUBLIC_LASH_TEST_HOOKS=true pnpm --filter @lash/web build && playwright test\"",
+        "\"test:e2e:ci\": \"NEXT_PUBLIC_LASH_TEST_HOOKS=true pnpm --filter @lash/web build:ci && playwright test --workers=1\""
+      ],
+      "guard_path": "apps/web/next.config.mjs",
+      "guard_tokens": [
+        "const nextConfig = {"
+      ],
+      "forbidden_output_overrides": [
+        "--output",
+        "--distDir"
+      ],
+      "source_sha256": "cead8075f4dccbe8f7b1bd1ef2867c8ae41979304d62dc7463ceacaf19457a60",
+      "guard_sha256": "f5dad0f345fab6eb73da4e95ffda229bc7a046175e43d7fc558db6f230349107"
+    },
+    {
+      "path": ".github/workflows/ci.yml",
+      "kind": "ordinary_build",
+      "route": "tool_default",
+      "stable_output_root": "apps/web/.next",
+      "default_basis": "Hosted CI verifies indexed source and invokes direct stable build:ci after E2E",
+      "caller_tokens": [
+        "--source index",
+        "run: pnpm run build:ci",
+        "run: pnpm run test:e2e:ci"
+      ],
+      "forbidden_output_overrides": [
+        "--distDir",
+        "-resultBundlePath"
+      ],
+      "source_sha256": "4cd716e6e620fa7389dfd3c254c5b479f95b8a14f84967ca804f589377c681aa"
+    },
+    {
+      "path": "playwright.config.ts",
+      "kind": "ordinary_test",
+      "route": "tool_default",
+      "stable_output_root": "test-results",
+      "default_basis": "Playwright config list reporter uses its checkout-local default test-results directory",
+      "caller_tokens": [
+        "export default defineConfig({",
+        "reporter: 'list'"
+      ],
+      "forbidden_output_overrides": [
+        "outputDir:",
+        "--output"
+      ],
+      "source_sha256": "6b4b39e903ce85a21ee66d9f47fe037ecf13995dce9c4192014fc649ce9a9081"
+    }
+  ]
+}

@@ -10,6 +10,8 @@
   "dependencies": {
     "@tiptap/core": "^2.4.0",
     "@tiptap/extension-table": "^2.4.0",
-    "@tiptap/pm": "^2.4.0"
+    "@tiptap/pm": "^2.4.0",
+    "y-prosemirror": "^1.2.5",
+    "yjs": "^13.6.31"
   }
 }

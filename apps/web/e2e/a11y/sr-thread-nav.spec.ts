@@ -23,6 +23,8 @@ test('sr-thread-nav', async ({ page }) => {
   await selectTarget(page);
   await expect(page.getByTestId('chat-create-thread')).toBeEnabled();
   await page.getByTestId('chat-create-thread').click();
+  await page.getByTestId('chat-new-thread-textarea').fill('Review this target.');
+  await page.getByTestId('chat-post-thread').click();
 
   await expect(page.getByTestId('chat-thread-list')).toHaveAttribute(
     'aria-label',

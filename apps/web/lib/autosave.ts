@@ -2,7 +2,7 @@
  * apps/web/lib/autosave — debounced autosave hook for the Lash editor.
  *
  * Owns M1/B3 acceptance (agents.md H.1):
- *   - 500 ms-after-idle flush triggered by editor `transaction` events
+ *   - 350 ms-after-idle flush triggered by editor `transaction` events
  *   - "All changes saved" status + last-saved timestamp for hover display
  *   - SLO: visible within < 500 ms p95 after idle
  *
@@ -13,8 +13,8 @@
  */
 'use client';
 
-import type { Editor } from '@tiptap/core';
-import { useEffect, useRef, useState } from 'react';
+import type { Editor, EditorEvents } from '@tiptap/core';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 /** All states an autosave indicator can be in. */
 export type AutosaveStatus = 'idle' | 'pending' | 'saving' | 'saved' | 'error';
@@ -52,6 +52,10 @@ export interface AutosaveSchedulerHandle {
   cancel: () => void;
   /** Force an immediate flush (for tests / explicit Save). */
   flush: () => Promise<void>;
+  /** Flush only when dirty work is pending; idle cleanup remains a no-op. */
+  flushPending: () => Promise<void>;
+  /** Suspend queued dirty work and return whether it must be resumed later. */
+  suspendPending: () => boolean;
   /** Current status (read-only snapshot). */
   getStatus: () => AutosaveStatus;
   /** Last successful save ISO timestamp, or null. */
@@ -62,10 +66,12 @@ export interface ImeAwareTransactionGate {
   notifyTransaction: () => void;
   compositionStart: () => void;
   compositionEnd: () => void;
+  /** Release the visible composing snapshot when the page is leaving. */
+  flushPendingForLifecycle: () => void;
   isComposing: () => boolean;
 }
 
-const DEFAULT_DEBOUNCE_MS = 500;
+const DEFAULT_DEBOUNCE_MS = 350;
 
 /**
  * Pure scheduler: no React, no editor. Tested under vitest fake timers.
@@ -156,17 +162,39 @@ export function createAutosaveScheduler(opts: AutosaveSchedulerOptions): Autosav
     await performSave();
   };
 
+  const flushPending = async () => {
+    const hasPendingWork = timer !== null || status === 'pending' || (saving && pendingAfterSave);
+    if (!hasPendingWork) return;
+    await flush();
+  };
+
+  const suspendPending = () => {
+    let transferredDirtyWork = false;
+    if (timer !== null) {
+      clearTimeout(timer);
+      timer = null;
+      transferredDirtyWork = true;
+    }
+    if (pendingAfterSave) {
+      pendingAfterSave = false;
+      transferredDirtyWork = true;
+    }
+    return transferredDirtyWork;
+  };
+
   return {
     notify,
     cancel,
     flush,
+    flushPending,
+    suspendPending,
     getStatus: () => status,
     getLastSavedAt: () => lastSavedAt,
   };
 }
 
 export function createImeAwareTransactionGate(
-  scheduler: Pick<AutosaveSchedulerHandle, 'notify'>,
+  scheduler: Pick<AutosaveSchedulerHandle, 'notify' | 'suspendPending'>,
 ): ImeAwareTransactionGate {
   let composing = false;
   let pendingDuringComposition = false;
@@ -180,8 +208,9 @@ export function createImeAwareTransactionGate(
       scheduler.notify();
     },
     compositionStart() {
+      if (composing) return;
       composing = true;
-      pendingDuringComposition = false;
+      pendingDuringComposition = scheduler.suspendPending();
     },
     compositionEnd() {
       if (!composing) return;
@@ -191,15 +220,21 @@ export function createImeAwareTransactionGate(
         scheduler.notify();
       }
     },
+    flushPendingForLifecycle() {
+      composing = false;
+      if (!pendingDuringComposition) return;
+      pendingDuringComposition = false;
+      scheduler.notify();
+    },
     isComposing: () => composing,
   };
 }
 
 export interface UseAutosaveOptions {
-  /** Debounce window in ms (default 500 per agents.md H.1 SLO). */
+  /** Debounce window in ms (default 350, reserving write/render headroom under the 500 ms SLO). */
   debounceMs?: number;
   /** Persistence callback. Receives the doc JSON + ISO timestamp. */
-  onSave?: (ctx: AutosaveSaveContext) => AutosaveSaveResult;
+  onSave: (ctx: AutosaveSaveContext) => AutosaveSaveResult;
   /** When true, also publish state to `window.__lashLastSave` for e2e tests. */
   exposeOnWindow?: boolean;
 }
@@ -209,6 +244,16 @@ export interface UseAutosaveResult {
   lastSavedAt: string | null;
   /** Imperative flush; primarily for tests. */
   flush: () => Promise<void>;
+  /**
+   * Persist the current editor JSON and confirm no document transaction
+   * changed it before the verified save completed.
+   */
+  flushVerified: () => Promise<boolean>;
+}
+
+export interface AutosaveFlushController {
+  getStatus: () => AutosaveStatus;
+  flushVerified: () => Promise<boolean>;
 }
 
 declare global {
@@ -232,10 +277,7 @@ declare global {
  * Initial state is `idle` (renders nothing). After the first transaction the
  * status moves through `pending` → `saving` → `saved`.
  */
-export function useAutosave(
-  editor: Editor | null,
-  opts: UseAutosaveOptions = {},
-): UseAutosaveResult {
+export function useAutosave(editor: Editor | null, opts: UseAutosaveOptions): UseAutosaveResult {
   // Use a single state object so `status` and `lastSavedAt` always commit
   // together. React 18 auto-batches multiple setters, but a single state
   // shape makes the invariant impossible to violate (status='saved' with
@@ -263,11 +305,9 @@ export function useAutosave(
       debounceMs: opts.debounceMs,
       getDocJson: () => editor.getJSON(),
       onSave: async (ctx) => {
+        await onSaveRef.current(ctx);
         if (typeof window !== 'undefined' && opts.exposeOnWindow !== false) {
           window.__lashLastSave = { savedAt: ctx.savedAt, docJson: ctx.docJson };
-        }
-        if (onSaveRef.current) {
-          await onSaveRef.current(ctx);
         }
       },
       onStatusChange: (next, ctx) => {
@@ -282,18 +322,37 @@ export function useAutosave(
     schedulerRef.current = scheduler;
 
     const imeGate = createImeAwareTransactionGate(scheduler);
-    const handler = () => imeGate.notifyTransaction();
+    const handler = ({ transaction }: EditorEvents['transaction']) => {
+      // Cursor, selection, and focus transactions do not change the durable
+      // document and must not move a failed save back to pending or retry a
+      // storage write.
+      if (!transaction.docChanged) return;
+      imeGate.notifyTransaction();
+    };
     const onCompositionStart = () => imeGate.compositionStart();
     const onCompositionEnd = () => imeGate.compositionEnd();
     const editorDom = editor.view.dom;
+    const flushPending = () => {
+      // Leaving the page is the one point where preserving the visible
+      // composing snapshot is safer than waiting for compositionend, which
+      // browsers do not guarantee before teardown.
+      imeGate.flushPendingForLifecycle();
+      // The persistence callback is required to complete its localStorage
+      // write synchronously before returning. Starting this Promise is enough
+      // to preserve the final sub-debounce edit during pagehide/teardown.
+      void scheduler.flushPending();
+    };
     editor.on('transaction', handler);
     editorDom.addEventListener('compositionstart', onCompositionStart);
     editorDom.addEventListener('compositionend', onCompositionEnd);
+    window.addEventListener('pagehide', flushPending);
 
     return () => {
       editor.off('transaction', handler);
       editorDom.removeEventListener('compositionstart', onCompositionStart);
       editorDom.removeEventListener('compositionend', onCompositionEnd);
+      window.removeEventListener('pagehide', flushPending);
+      flushPending();
       scheduler.cancel();
       schedulerRef.current = null;
     };
@@ -318,12 +377,25 @@ export function useAutosave(
     };
   }, [state.status, state.lastSavedAt, opts.exposeOnWindow]);
 
+  const flushVerified = useCallback(async () => {
+    const scheduler = schedulerRef.current;
+    if (!scheduler || !editor || editor.isDestroyed) return false;
+    const before = JSON.stringify(editor.getJSON());
+    await scheduler.flush();
+    return (
+      scheduler.getStatus() === 'saved' &&
+      !editor.isDestroyed &&
+      JSON.stringify(editor.getJSON()) === before
+    );
+  }, [editor]);
+
   return {
     status: state.status,
     lastSavedAt: state.lastSavedAt,
     flush: async () => {
       await schedulerRef.current?.flush();
     },
+    flushVerified,
   };
 }
 

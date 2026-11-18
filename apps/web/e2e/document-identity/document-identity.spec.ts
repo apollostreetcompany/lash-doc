@@ -66,12 +66,16 @@ test.describe('real document identity', () => {
     await page.goto(docUrl(alpha));
     await expect(page.getByTestId('lash-doc-title-input')).toBeVisible();
     await page.getByTestId('lash-doc-title-input').fill('Alpha brief');
-    await expect(page.getByTestId('topbar-doc-title')).toHaveText('Alpha brief');
+    await expect(page.getByTestId('document-open-select').locator('option:checked')).toHaveText(
+      'Alpha brief',
+    );
 
     await page.goto(docUrl(beta));
     await expect(page.getByTestId('lash-doc-title-input')).toHaveValue('Untitled document');
     await page.getByTestId('lash-doc-title-input').fill('Beta brief');
-    await expect(page.getByTestId('topbar-doc-title')).toHaveText('Beta brief');
+    await expect(page.getByTestId('document-open-select').locator('option:checked')).toHaveText(
+      'Beta brief',
+    );
 
     await page.goto(docUrl(alpha));
     await expect(page.getByTestId('lash-doc-title-input')).toHaveValue('Alpha brief');
@@ -89,10 +93,11 @@ test.describe('real document identity', () => {
 
     await expect(page).toHaveURL(/\/doc\/doc-[a-z0-9-]+$/);
     const createdPath = new URL(page.url()).pathname;
-    await expect(page.getByTestId('lash-doc-route')).toHaveText(createdPath);
+    await expect(page.getByTestId('document-open-select')).toHaveValue(createdPath);
 
     await page.reload();
-    await expect(page.getByTestId('lash-doc-route')).toHaveText(createdPath);
+    await expect(page).toHaveURL(new RegExp(`${createdPath}$`));
+    await expect(page.getByTestId('document-open-select')).toHaveValue(createdPath);
   });
 
   test('opens an existing document from the document switcher', async ({ page }) => {

@@ -9,10 +9,11 @@ import { type ChangeEvent, type RefObject } from 'react';
 import { Icon } from '../../shell/Icon';
 
 export interface MarkdownIOProps {
-  fileInputRef: RefObject<HTMLInputElement>;
-  onImportClick: () => void;
-  onExportClick: () => void;
+  fileInputRef: RefObject<HTMLInputElement | null>;
+  onImportClick: (trigger: HTMLButtonElement) => void;
+  onExportClick: (trigger: HTMLButtonElement) => void;
   onFileChange: (event: ChangeEvent<HTMLInputElement>) => void;
+  importDisabled?: boolean;
   exportDisabled: boolean;
 }
 
@@ -21,37 +22,38 @@ export function MarkdownIO({
   onImportClick,
   onExportClick,
   onFileChange,
+  importDisabled = false,
   exportDisabled,
 }: MarkdownIOProps) {
   return (
-    <div className="lash-editor-action-group" style={{ display: 'inline-flex', gap: 4 }}>
+    <div className="lash-editor-action-group lash-markdown-actions">
       <button
         type="button"
-        className="lash-icon-btn"
+        className="lash-markdown-action"
         data-testid="markdown-import-button"
-        onClick={onImportClick}
-        aria-label="Import markdown"
-        data-tooltip="Import .md"
+        onClick={(event) => onImportClick(event.currentTarget)}
+        disabled={importDisabled}
       >
         <Icon name="upload" />
+        <span>Import Markdown</span>
       </button>
       <button
         type="button"
-        className="lash-icon-btn"
+        className="lash-markdown-action"
         data-testid="markdown-export-button"
-        onClick={onExportClick}
+        onClick={(event) => onExportClick(event.currentTarget)}
         disabled={exportDisabled}
-        aria-label="Export markdown"
-        data-tooltip="Export .md"
       >
         <Icon name="download" />
+        <span>Download Markdown</span>
       </button>
       <input
         ref={fileInputRef}
         type="file"
-        accept=".md,text/markdown"
+        accept=".md,.markdown,text/markdown"
         data-testid="markdown-import-input"
         onChange={onFileChange}
+        disabled={importDisabled}
         style={{ display: 'none' }}
       />
     </div>

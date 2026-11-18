@@ -13,14 +13,18 @@ test.describe('title regression', () => {
     await expect(title).toHaveAttribute('aria-label', 'Document title');
 
     await title.fill('Launch memo');
-    await expect(page.getByTestId('topbar-doc-title')).toHaveText('Launch memo');
+    await expect(page.getByTestId('document-open-select').locator('option:checked')).toHaveText(
+      'Launch memo',
+    );
 
     await page.reload();
     await expect(page.getByTestId('lash-doc-title-input')).toHaveValue('Launch memo');
-    await expect(page.getByTestId('topbar-doc-title')).toHaveText('Launch memo');
+    await expect(page.getByTestId('document-open-select').locator('option:checked')).toHaveText(
+      'Launch memo',
+    );
   });
 
-  test('keeps the editable title readable without overlapping metadata on mobile', async ({
+  test('keeps the editable title readable without overlapping document status on mobile', async ({
     page,
   }) => {
     await page.setViewportSize({ width: 390, height: 844 });
@@ -37,19 +41,19 @@ test.describe('title regression', () => {
       const titleBox = document
         .querySelector('[data-testid="lash-doc-title-input"]')
         ?.getBoundingClientRect();
-      const metaBox = document
-        .querySelector('[data-testid="lash-doc-meta"]')
+      const statusBox = document
+        .querySelector('[aria-label="Document status"]')
         ?.getBoundingClientRect();
-      if (!titleBox || !metaBox) {
+      if (!titleBox || !statusBox) {
         return null;
       }
       return {
         titleBottom: titleBox.bottom,
-        metaTop: metaBox.top,
+        statusTop: statusBox.top,
       };
     });
 
     expect(boxes).not.toBeNull();
-    expect(boxes!.titleBottom).toBeLessThanOrEqual(boxes!.metaTop);
+    expect(boxes!.titleBottom).toBeLessThanOrEqual(boxes!.statusTop);
   });
 });

@@ -73,45 +73,51 @@ const buildHiddenRanges = (doc: ProseMirrorNode, items: OutlineItem[], collapsed
     .map((item) => ({ from: item.contentFrom, to: item.contentTo }));
 };
 
-const countDocLevelBlocks = (doc: ProseMirrorNode, from: number, to: number) => {
-  let count = 0;
-  doc.nodesBetween(from, to, (node, pos, parent) => {
-    if (parent === doc && node.isBlock) {
-      count += 1;
-      return false;
-    }
-    return true;
-  });
-  return count;
-};
-
 const computeOutlineItems = (doc: ProseMirrorNode, collapsed: Set<string>) => {
   type RawHeading = {
-    node: ProseMirrorNode;
     from: number;
     to: number;
     headingId: string;
     level: number;
     title: string;
+    blocksStartingBefore: number;
+    blocksEndingBeforeBody: number;
   };
 
   const headings: RawHeading[] = [];
-  doc.descendants((node, pos) => {
-    if (node.type.name !== 'heading') {
-      return true;
-    }
-    const headingId = node.attrs.headingId ?? null;
-    const level = node.attrs.level ?? 1;
-    const title = node.textContent || `Heading ${headings.length + 1}`;
+  const collectHeading = (
+    node: ProseMirrorNode,
+    from: number,
+    blocksStartingBefore: number,
+    blocksEndingBeforeBody: number,
+  ) => {
     headings.push({
-      node,
-      from: pos,
-      to: pos + node.nodeSize,
-      headingId: headingId ?? `heading-${pos}`,
-      level,
-      title,
+      from,
+      to: from + node.nodeSize,
+      headingId: node.attrs.headingId ?? `heading-${from}`,
+      level: node.attrs.level ?? 1,
+      title: node.textContent || `Heading ${headings.length + 1}`,
+      blocksStartingBefore,
+      blocksEndingBeforeBody,
     });
-    return false;
+  };
+
+  // Count top-level blocks where we already visit them for heading discovery.
+  // A nested heading's enclosing block starts before the heading and ends
+  // after its body starts, so it can overlap both neighboring sections.
+  let blocksSeen = 0;
+  doc.forEach((node, offset) => {
+    const blocksThroughNode = blocksSeen + Number(node.isBlock);
+    if (node.type.name === 'heading') {
+      collectHeading(node, offset, blocksSeen, blocksThroughNode);
+    } else {
+      node.descendants((descendant, position) => {
+        if (descendant.type.name !== 'heading') return true;
+        collectHeading(descendant, offset + position + 1, blocksThroughNode, blocksSeen);
+        return false;
+      });
+    }
+    blocksSeen = blocksThroughNode;
   });
 
   const outline: OutlineItem[] = headings.map((heading, index) => {
@@ -123,30 +129,20 @@ const computeOutlineItems = (doc: ProseMirrorNode, collapsed: Set<string>) => {
       }
     }
 
-    const contentFrom = heading.to;
-    const contentTo = nextIndex < headings.length ? headings[nextIndex].from : doc.content.size;
-
-    let descendantCount = 0;
-    for (let i = index + 1; i < headings.length; i += 1) {
-      if (headings[i].level <= heading.level) {
-        break;
-      }
-      descendantCount += 1;
-    }
-
-    const hiddenBlockCount = countDocLevelBlocks(doc, contentFrom, contentTo);
+    const nextHeading = headings[nextIndex];
 
     return {
       headingId: heading.headingId,
       level: heading.level,
       title: heading.title,
       collapsed: collapsed.has(heading.headingId),
-      descendantCount,
-      hiddenBlockCount,
+      descendantCount: nextIndex - index - 1,
+      hiddenBlockCount:
+        (nextHeading?.blocksStartingBefore ?? blocksSeen) - heading.blocksEndingBeforeBody,
       from: heading.from,
       to: heading.to,
-      contentFrom,
-      contentTo,
+      contentFrom: heading.to,
+      contentTo: nextHeading?.from ?? doc.content.size,
     };
   });
 

@@ -138,20 +138,42 @@ test.describe('collaboration delight', () => {
       'false',
     );
     await expect(page.getByTestId('collaboration-empty-state')).toHaveCount(0);
-    await expect(page.getByTestId('remote-collaborator-empty')).toContainText('Solo');
+    await expect(page.getByTestId('realtime-presence-bar')).toHaveText('On this device');
+    await expect(page.getByTestId('remote-collaborator')).toHaveCount(0);
   });
 
   test('first-run collaboration state can open invite flow', async ({ browser }) => {
     const context = await browser.newContext();
     await enableLocalRealtime(context, 'delight-owner');
     const page = await context.newPage();
+    await page.setViewportSize({ width: 375, height: 812 });
     await page.goto(`/doc/bead-36-first-run-${Date.now()}`);
     await waitForEditor(page);
 
-    await expect(page.getByTestId('collaboration-empty-state')).toContainText('Ready');
-    await page.getByTestId('collaboration-share-shortcut').click();
+    await expect(page.getByTestId('realtime-presence-bar')).toContainText('Shared');
+    await expect(page.getByTestId('invite-access-status')).toHaveText('Owner access');
+    const shareDisclosure = page.getByTestId('topbar-share-button');
+    const inviteShortcut = page.getByTestId('collaboration-share-shortcut');
+    await expect(shareDisclosure).toHaveAttribute('aria-expanded', 'false');
+    await inviteShortcut.click();
+    await expect(shareDisclosure).toHaveAttribute('aria-expanded', 'true');
     await expect(page.getByTestId('share-panel')).toBeVisible();
     await expect(page.getByTestId('invite-email-input')).toBeVisible();
+    await page.getByRole('button', { name: 'Close activity panel' }).click();
+    await expect(shareDisclosure).toHaveAttribute('aria-expanded', 'false');
+    await expect(inviteShortcut).toBeFocused();
+
+    await shareDisclosure.click();
+    await expect(shareDisclosure).toHaveAttribute('aria-expanded', 'true');
+    await page.keyboard.press('Escape');
+    await expect(shareDisclosure).toHaveAttribute('aria-expanded', 'false');
+    await expect(shareDisclosure).toBeFocused();
+
+    await inviteShortcut.click();
+    await expect(shareDisclosure).toHaveAttribute('aria-expanded', 'true');
+    await page.keyboard.press('Escape');
+    await expect(shareDisclosure).toHaveAttribute('aria-expanded', 'false');
+    await expect(inviteShortcut).toBeFocused();
 
     await context.close();
   });
@@ -184,9 +206,8 @@ test.describe('collaboration delight', () => {
       try {
         await readerPage.goto(link);
         await waitForEditor(readerPage);
-        await expect(readerPage.getByTestId('invite-access-status')).toContainText(
-          'Access granted: view',
-        );
+        await expect(readerPage.getByTestId('invite-access-status')).toHaveText('View access');
+        await expect(readerPage.getByTestId('realtime-sync-state')).toHaveText('Read only');
         await expect
           .poll(() => realtimeSnapshot(readerPage))
           .toMatchObject({

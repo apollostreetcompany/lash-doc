@@ -1,11 +1,8 @@
-import { expect, test, type Page } from '@playwright/test';
+import type { Page } from '@playwright/test';
+
+import { expect, test } from './development-loopback-mention-fixture';
 
 test.use({ timezoneId: 'Asia/Tokyo' });
-
-const ready = async (page: Page) =>
-  page.waitForFunction(() =>
-    Boolean((window as unknown as { __lashEditor?: unknown }).__lashEditor),
-  );
 
 const editorJson = async (page: Page) =>
   page.evaluate(() => {
@@ -17,9 +14,9 @@ const editorJson = async (page: Page) =>
 test.describe('real editor mention workflow', () => {
   test('selecting a user suggestion replaces the typed query with an inline mention node', async ({
     page,
+    openSyntheticMentionFixture,
   }) => {
-    await page.goto('/');
-    await ready(page);
+    await openSyntheticMentionFixture(page);
 
     await page.getByTestId('lash-editor-content').click();
     await page.keyboard.type('Draft for @Ada');
@@ -55,10 +52,10 @@ test.describe('real editor mention workflow', () => {
 
   test('selecting a natural-date suggestion inserts a date mention chip in the editor', async ({
     page,
+    openSyntheticMentionFixture,
   }) => {
     await page.clock.setFixedTime(new Date('2026-06-23T00:00:00+09:00'));
-    await page.goto('/');
-    await ready(page);
+    await openSyntheticMentionFixture(page);
 
     await page.getByTestId('lash-editor-content').click();
     await page.keyboard.type('Review @next Friday 3pm');

@@ -20,20 +20,21 @@ const assertPortFree = () => {
   }
 };
 
-const waitForOk = async (pathname) => {
+const waitForOk = async (pathname, marker) => {
   const deadline = Date.now() + 45_000;
   let lastError = '';
   while (Date.now() < deadline) {
     try {
       const response = await fetch(`${baseUrl}${pathname}`, { redirect: 'manual' });
       if (response.ok) {
-        return {
-          pathname,
-          status: response.status,
-          contentType: response.headers.get('content-type'),
-        };
+        const contentType = response.headers.get('content-type');
+        if (contentType?.startsWith('text/html') && (await response.text()).includes(marker)) {
+          return { pathname, status: response.status, contentType };
+        }
+        lastError = `Response did not render ${marker}`;
+      } else {
+        lastError = `${response.status} ${response.statusText}`;
       }
-      lastError = `${response.status} ${response.statusText}`;
     } catch (error) {
       lastError = error instanceof Error ? error.message : String(error);
     }
@@ -71,15 +72,19 @@ child.stderr.on('data', (chunk) => {
 });
 
 try {
-  const home = await waitForOk('/');
-  const dynamicDoc = await waitForOk('/doc/render-smoke');
+  const home = await waitForOk('/', 'data-testid="lash-home"');
+  const dynamicDoc = await waitForOk('/doc/render-smoke', 'data-testid="lash-document-page"');
+  const arbitraryDoc = await waitForOk(
+    `/doc/render-arbitrary-${process.pid}`,
+    'data-testid="lash-document-page"',
+  );
   console.log(
     JSON.stringify(
       {
         ok: true,
         baseUrl,
         command: `pnpm --filter @lash/web exec next start -H 0.0.0.0 -p ${port}`,
-        checks: [home, dynamicDoc],
+        checks: [home, dynamicDoc, arbitraryDoc],
       },
       null,
       2,

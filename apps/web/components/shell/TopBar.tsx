@@ -1,9 +1,7 @@
 /**
  * TopBar — sticky document chrome.
  *
- * Hosts a sidebar toggle (mobile), document title, autosave indicator,
- * collaborator avatar stack, focus/suggest toggles, share CTA, and the
- * right-rail toggle.
+ * Hosts document navigation, focus and suggestion controls, and sharing.
  *
  * Notes: this header lives *inside* the page-level `<main>` landmark, so
  * we deliberately do not claim `role="banner"` — that role is reserved for
@@ -12,56 +10,108 @@
  */
 'use client';
 
-import type { Editor } from '@tiptap/core';
-import type { MouseEvent, ReactNode } from 'react';
+import { useCallback, useEffect, useRef, useState, type MouseEvent, type ReactNode } from 'react';
 
-import { Avatar, AvatarStack, type AvatarTint } from './Avatar';
 import { Icon } from './Icon';
-import { AutosaveIndicator } from '../editor/panels/AutosaveIndicator';
-
-export interface TopBarPeer {
-  actorId: string;
-  label: string;
-}
-
-// Deterministic tint per collaborator so a given person keeps a stable colour.
-const PEER_TINTS: AvatarTint[] = ['coral', 'blue', 'green', 'violet', 'amber'];
-const tintForActor = (actorId: string): AvatarTint => {
-  let hash = 0;
-  for (let i = 0; i < actorId.length; i += 1) hash = (hash * 31 + actorId.charCodeAt(i)) >>> 0;
-  return PEER_TINTS[hash % PEER_TINTS.length];
-};
 
 export interface TopBarProps {
-  editor: Editor | null;
-  /** Live remote collaborators from realtime presence (empty when solo). */
-  peers: TopBarPeer[];
-  docTitle: string;
   focusMode: boolean;
-  suggestMode: boolean;
-  railOpen: boolean;
+  suggestionAvailable?: boolean;
+  /** Whether the mobile navigation disclosure is currently visible. */
+  mobileSidebarExpanded: boolean;
+  /** Whether Share's runtime-specific surface is currently visible. */
+  shareExpanded: boolean;
+  /** Whether the owner-only Document settings surface is visible. */
+  settingsExpanded?: boolean;
+  /** Whether the activity rail is present in the DOM. */
+  shareControlsPresent: boolean;
+  /** The surface opened by Share; omitted controls stay absent until it exists. */
+  shareControlsId?: 'lash-rail' | 'lash-owner-share-dialog';
+  /** Popup semantics for Share when it opens the owner dialog. */
+  shareHasPopup?: 'dialog';
+  /** Whether the viewport-specific Discussion disclosure should be rendered. */
+  mobileDiscussionVisible?: boolean;
+  /** Whether Discussion currently owns the visible activity surface. */
+  discussionExpanded?: boolean;
   onToggleFocusMode: () => void;
-  onToggleSuggestMode: () => void;
-  // Both handlers receive the originating click event so callers can stash
+  onStartSuggestion?: (trigger: HTMLButtonElement) => void;
+  // Rail-opening handlers receive the originating click event so callers can stash
   // `event.currentTarget` for later focus restoration when the drawer closes.
-  onShareClick: (event: MouseEvent<HTMLButtonElement>) => void;
+  onShareClick?: (event: MouseEvent<HTMLButtonElement>) => void;
+  onSettingsClick?: (trigger: HTMLButtonElement) => void;
+  onDiscussionClick?: (event: MouseEvent<HTMLButtonElement>) => void;
   onOpenMobileSidebar?: (event: MouseEvent<HTMLButtonElement>) => void;
   extras?: ReactNode;
 }
 
 export function TopBar({
-  editor,
-  peers,
-  docTitle,
   focusMode,
-  suggestMode,
-  railOpen,
+  suggestionAvailable = false,
+  mobileSidebarExpanded,
+  shareExpanded,
+  settingsExpanded = false,
+  shareControlsPresent,
+  shareControlsId = 'lash-rail',
+  shareHasPopup,
+  mobileDiscussionVisible = false,
+  discussionExpanded = false,
   onToggleFocusMode,
-  onToggleSuggestMode,
+  onStartSuggestion,
   onShareClick,
+  onSettingsClick,
+  onDiscussionClick,
   onOpenMobileSidebar,
   extras,
 }: TopBarProps) {
+  const [mobileToolsOpen, setMobileToolsOpen] = useState(false);
+  const mobileToolsTriggerRef = useRef<HTMLButtonElement | null>(null);
+  const mobileToolsPanelRef = useRef<HTMLDivElement | null>(null);
+
+  const closeMobileTools = useCallback((restoreFocus: boolean) => {
+    setMobileToolsOpen(false);
+    if (restoreFocus) mobileToolsTriggerRef.current?.focus({ preventScroll: true });
+  }, []);
+
+  useEffect(() => {
+    if (!mobileToolsOpen) return;
+    mobileToolsPanelRef.current
+      ?.querySelector<HTMLButtonElement>('button:not([disabled])')
+      ?.focus({ preventScroll: true });
+
+    const handlePointerDown = (event: PointerEvent) => {
+      const target = event.target as Node | null;
+      if (
+        !target ||
+        mobileToolsTriggerRef.current?.contains(target) ||
+        mobileToolsPanelRef.current?.contains(target)
+      ) {
+        return;
+      }
+      closeMobileTools(true);
+    };
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return;
+      event.preventDefault();
+      closeMobileTools(true);
+    };
+    window.addEventListener('pointerdown', handlePointerDown);
+    window.addEventListener('keydown', handleKeyDown);
+    return () => {
+      window.removeEventListener('pointerdown', handlePointerDown);
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [closeMobileTools, mobileToolsOpen]);
+
+  useEffect(() => {
+    if (typeof window.matchMedia !== 'function') return;
+    const media = window.matchMedia('(max-width: 431px)');
+    const handleChange = () => {
+      if (!media.matches) setMobileToolsOpen(false);
+    };
+    media.addEventListener?.('change', handleChange);
+    return () => media.removeEventListener?.('change', handleChange);
+  }, []);
+
   return (
     <header className="lash-topbar" data-testid="lash-topbar">
       {onOpenMobileSidebar ? (
@@ -69,6 +119,8 @@ export function TopBar({
           type="button"
           className="lash-icon-btn lash-topbar-mobile-menu"
           aria-label="Open navigation menu"
+          aria-expanded={mobileSidebarExpanded ? 'true' : 'false'}
+          aria-controls="lash-sidebar"
           onClick={onOpenMobileSidebar}
           data-testid="topbar-mobile-menu"
         >
@@ -76,24 +128,14 @@ export function TopBar({
         </button>
       ) : null}
 
-      <div className="lash-topbar-doc">
-        <Icon name="document" className="lash-topbar-doc-icon" />
-        <span className="lash-topbar-title" data-testid="topbar-doc-title">
-          {docTitle}
-        </span>
-        <span className="lash-topbar-saved">
-          <AutosaveIndicator editor={editor} />
-        </span>
-      </div>
-
       <div className="lash-topbar-actions">
         {extras}
 
         <button
           type="button"
-          className="lash-icon-btn"
+          className="lash-icon-btn lash-topbar-focus-action"
           data-testid="focus-mode-toggle"
-          aria-label="Focus mode"
+          aria-label={focusMode ? 'Exit focus mode' : 'Enter focus mode'}
           aria-pressed={focusMode ? 'true' : 'false'}
           data-active={focusMode ? 'true' : 'false'}
           data-tooltip={focusMode ? 'Exit focus mode' : 'Focus mode'}
@@ -105,45 +147,138 @@ export function TopBar({
           <span className="sr-only">{focusMode ? 'Exit Focus Mode' : 'Enter Focus Mode'}</span>
         </button>
 
-        <button
-          type="button"
-          className="lash-icon-btn"
-          data-testid="suggest-mode-toggle"
-          aria-label="Suggest mode"
-          aria-pressed={suggestMode ? 'true' : 'false'}
-          data-active={suggestMode ? 'true' : 'false'}
-          data-tooltip={suggestMode ? 'Stop suggesting' : 'Suggest mode'}
-          onClick={onToggleSuggestMode}
-        >
-          <Icon name="pencil" />
-          <span className="sr-only">{suggestMode ? 'Suggesting' : 'Suggest'}</span>
-        </button>
+        {onSettingsClick ? (
+          <button
+            type="button"
+            className="lash-icon-btn lash-document-settings-button"
+            data-testid="topbar-document-settings"
+            aria-label="Document settings"
+            aria-haspopup="dialog"
+            aria-expanded={settingsExpanded ? 'true' : 'false'}
+            aria-controls="lash-document-settings-dialog"
+            data-tooltip="Document settings"
+            onClick={(event) => onSettingsClick(event.currentTarget)}
+          >
+            <Icon name="gear" />
+          </button>
+        ) : null}
 
-        {peers.length ? (
-          <AvatarStack>
-            {peers.map((peer) => (
-              <Avatar
-                key={peer.actorId}
-                name={peer.label}
-                tint={tintForActor(peer.actorId)}
-                title={`${peer.label} · in this document`}
-              />
-            ))}
-          </AvatarStack>
+        {suggestionAvailable && onStartSuggestion ? (
+          <button
+            type="button"
+            className="lash-icon-btn lash-topbar-suggest-action"
+            data-testid="suggest-mode-toggle"
+            aria-label="Suggest wording"
+            data-tooltip="Suggest wording"
+            onClick={(event) => onStartSuggestion(event.currentTarget)}
+          >
+            <Icon name="pencil" />
+          </button>
         ) : null}
 
         <button
+          ref={mobileToolsTriggerRef}
           type="button"
-          className="lash-share-button"
-          data-testid="topbar-share-button"
-          aria-label="Share document"
-          aria-expanded={railOpen ? 'true' : 'false'}
-          aria-controls="lash-rail"
-          onClick={onShareClick}
+          className="lash-icon-btn lash-mobile-tools-button"
+          data-testid="topbar-mobile-tools"
+          aria-label="More document tools"
+          aria-expanded={mobileToolsOpen ? 'true' : 'false'}
+          aria-controls="lash-mobile-document-tools"
+          onClick={() => setMobileToolsOpen((open) => !open)}
         >
-          <Icon name="share" />
-          <span className="lash-share-button-label">Share</span>
+          <Icon name="gear" />
         </button>
+
+        {mobileToolsOpen ? (
+          <div
+            ref={mobileToolsPanelRef}
+            id="lash-mobile-document-tools"
+            className="lash-mobile-tools-panel"
+            data-testid="mobile-document-tools-panel"
+            role="group"
+            aria-label="Document tools"
+          >
+            {onSettingsClick ? (
+              <button
+                type="button"
+                className="lash-mobile-tools-action"
+                data-testid="mobile-document-settings"
+                onClick={(event) => {
+                  onSettingsClick(mobileToolsTriggerRef.current ?? event.currentTarget);
+                  closeMobileTools(false);
+                }}
+              >
+                <Icon name="gear" />
+                <span>Document settings</span>
+              </button>
+            ) : null}
+            <button
+              type="button"
+              className="lash-mobile-tools-action"
+              data-testid="mobile-focus-mode-toggle"
+              aria-pressed={focusMode ? 'true' : 'false'}
+              onClick={() => {
+                onToggleFocusMode();
+                closeMobileTools(true);
+              }}
+            >
+              <Icon name={focusMode ? 'minimize' : 'maximize'} />
+              <span>{focusMode ? 'Exit Focus' : 'Focus'}</span>
+            </button>
+            {suggestionAvailable && onStartSuggestion ? (
+              <button
+                type="button"
+                className="lash-mobile-tools-action"
+                data-testid="mobile-suggest-mode-toggle"
+                onClick={(event) => {
+                  onStartSuggestion(mobileToolsTriggerRef.current ?? event.currentTarget);
+                  closeMobileTools(false);
+                }}
+              >
+                <Icon name="pencil" />
+                <span>Suggest wording</span>
+              </button>
+            ) : null}
+          </div>
+        ) : null}
+
+        {mobileDiscussionVisible && onDiscussionClick ? (
+          <button
+            type="button"
+            className="lash-discussion-button"
+            data-testid="topbar-discussion-button"
+            aria-label="Discussion"
+            aria-expanded={discussionExpanded ? 'true' : 'false'}
+            aria-controls={shareControlsPresent ? 'lash-rail' : undefined}
+            onClick={onDiscussionClick}
+          >
+            <span>Discussion</span>
+          </button>
+        ) : null}
+
+        {onShareClick ? (
+          <button
+            type="button"
+            className="lash-share-button"
+            data-testid="topbar-share-button"
+            aria-label="Share document"
+            aria-haspopup={shareHasPopup}
+            aria-expanded={shareExpanded ? 'true' : 'false'}
+            aria-controls={
+              shareHasPopup === 'dialog'
+                ? shareExpanded
+                  ? shareControlsId
+                  : undefined
+                : shareControlsPresent
+                  ? shareControlsId
+                  : undefined
+            }
+            onClick={onShareClick}
+          >
+            <Icon name="share" />
+            <span className="lash-share-button-label">Share</span>
+          </button>
+        ) : null}
       </div>
     </header>
   );

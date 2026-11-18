@@ -1,64 +1,45 @@
 import { expect, test } from '@playwright/test';
 
-// agents.md C.1 (Test ID: chip-autoconvert):
-// Given a pasted URL that points to an internal document
-// When paste completes
-// Then it becomes a chip with title (resolved via resolveDocChip mock).
-test.describe('chip-autoconvert', () => {
-  test('pasted internal-doc URL auto-converts to a chip with resolved title', async ({ page }) => {
-    await page.goto('/');
+import { createDocument, documentEditor, openSource, pasteText } from './document-chip-journey';
 
-    const editor = page.getByTestId('lash-editor-content');
-    await editor.click();
+test('pastes a real document chip and follows it in the same tab after reload', async ({
+  page,
+}) => {
+  const target = await createDocument(page, 'Launch outline');
+  await openSource(page);
+  await pasteText(page, new URL(target, page.url()).href);
 
-    await page.waitForFunction(() => {
-      return Boolean((window as unknown as { __lashEditor?: unknown }).__lashEditor);
-    });
+  const chip = page.getByTestId('lash-chip');
+  await expect(chip).toHaveText(/Launch outline/);
+  await expect(chip).toHaveAttribute('href', target);
+  await expect(chip).toHaveAttribute('data-chip-kind', 'doc');
+  await expect(page.getByTestId('autosave-indicator')).toHaveAttribute('data-status', 'saved');
 
-    // Dispatch a paste event carrying the internal-doc URL as text/plain.
-    await page.evaluate((url) => {
-      const proseMirror = document.querySelector('.ProseMirror');
-      const data: Record<string, string> = { 'text/plain': url };
-      const dataTransfer = { getData: (format: string) => data[format] || '' };
-      const event = new ClipboardEvent('paste', { bubbles: true, cancelable: true });
-      Object.defineProperty(event, 'clipboardData', { value: dataTransfer, writable: false });
-      proseMirror?.dispatchEvent(event);
-    }, 'https://lash.local/doc/test-doc-1');
+  await page.reload();
+  await expect(chip).toHaveText(/Launch outline/);
+  const tabs = page.context().pages().length;
+  await chip.click();
+  await expect(page).toHaveURL(new URL(target, page.url()).href);
+  await expect(documentEditor(page)).toContainText('Writing in the related document.');
+  expect(page.context().pages()).toHaveLength(tabs);
+});
 
-    // The chip node should appear in the DOM.
-    const chip = page.getByTestId('lash-chip').first();
-    await expect(chip).toBeVisible();
-    await expect(chip).toHaveAttribute('data-ref-id', 'test-doc-1');
-    await expect(chip).toHaveAttribute('data-chip-kind', 'doc');
+test('leaves a foreign lookalike, an unknown document, and a token-bearing URL intact', async ({
+  page,
+}) => {
+  const target = await createDocument(page, 'Private research');
+  await openSource(page);
 
-    // Mock resolver populates the display label asynchronously.
-    await expect(chip).toContainText('Internal Doc test-doc-1');
-
-    // Verify it's a `chip` node in the doc (not a plain text/link).
-    const docInfo = await page.evaluate(() => {
-      const editorInstance = (window as unknown as {
-        __lashEditor?: { state: { doc: { toJSON: () => unknown } } };
-      }).__lashEditor;
-      const json = editorInstance?.state.doc.toJSON();
-      const findChip = (node: unknown): unknown => {
-        if (!node || typeof node !== 'object') return null;
-        const n = node as { type?: string; content?: unknown[] };
-        if (n.type === 'chip') return n;
-        if (Array.isArray(n.content)) {
-          for (const child of n.content) {
-            const hit = findChip(child);
-            if (hit) return hit;
-          }
-        }
-        return null;
-      };
-      return findChip(json);
-    });
-
-    expect(docInfo).toBeTruthy();
-    expect((docInfo as { attrs: { refId: string; kind: string } }).attrs.refId).toBe(
-      'test-doc-1',
-    );
-    expect((docInfo as { attrs: { kind: string } }).attrs.kind).toBe('doc');
-  });
+  for (const url of [
+    `https://lash.local.example.test${target}`,
+    new URL('/doc/missing-document', page.url()).href,
+    new URL(`${target}?token=literal-test-token`, page.url()).href,
+  ]) {
+    await pasteText(page, url);
+    await expect(documentEditor(page)).toContainText(url);
+    await expect(page.getByTestId('lash-chip')).toHaveCount(0);
+    await expect(documentEditor(page)).not.toContainText('Private research');
+    await page.keyboard.press('End');
+    await page.keyboard.press('Enter');
+  }
 });

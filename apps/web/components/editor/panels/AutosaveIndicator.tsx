@@ -3,7 +3,7 @@
  *
  * Owned by M1/B3 (agents.md H.1): autosave-indicator + autosave-latency.
  *
- *   - 500 ms-after-idle flush triggered by editor `transaction` events
+ *   - 350 ms-after-idle flush triggered by editor `transaction` events
  *   - Debounce + cancel-on-fast-typing semantics
  *   - "Saving…" / "All changes saved" copy with accessible live-region
  *   - hover surfacing the last-saved timestamp (via `title` attribute)
@@ -16,17 +16,34 @@
 import type { Editor } from '@tiptap/core';
 import { useEffect, useState } from 'react';
 
-import { formatRelativeSavedAt, useAutosave } from '../../../lib/autosave';
+import {
+  formatRelativeSavedAt,
+  useAutosave,
+  type AutosaveFlushController,
+  type AutosaveSaveContext,
+  type AutosaveSaveResult,
+} from '../../../lib/autosave';
 
 export interface AutosaveIndicatorProps {
   editor: Editor | null;
+  onSave: (context: AutosaveSaveContext) => AutosaveSaveResult;
+  onControllerChange?: (controller: AutosaveFlushController | null) => void;
 }
 
 const RELATIVE_REFRESH_MS = 5_000;
 
-export function AutosaveIndicator({ editor }: AutosaveIndicatorProps) {
-  const { status, lastSavedAt } = useAutosave(editor);
+export function AutosaveIndicator({ editor, onSave, onControllerChange }: AutosaveIndicatorProps) {
+  const { status, lastSavedAt, flushVerified } = useAutosave(editor, { onSave });
   const [nowMs, setNowMs] = useState<number>(() => Date.now());
+
+  useEffect(() => {
+    if (!onControllerChange) return;
+    onControllerChange({
+      getStatus: () => status,
+      flushVerified,
+    });
+    return () => onControllerChange(null);
+  }, [flushVerified, onControllerChange, status]);
 
   // Tick the relative timestamp every 5s so "12s ago" stays roughly accurate
   // while the user pauses on the indicator. Only runs once a save has landed.
@@ -36,16 +53,21 @@ export function AutosaveIndicator({ editor }: AutosaveIndicatorProps) {
     return () => clearInterval(id);
   }, [lastSavedAt]);
 
-  let label = '';
+  let visibleLabel = '';
+  let announcement = '';
   if (status === 'saving') {
-    label = 'Saving…';
+    visibleLabel = 'Saving…';
+    announcement = visibleLabel;
   } else if (status === 'error') {
-    label = 'Save failed';
+    visibleLabel = 'Save failed';
+    announcement = visibleLabel;
   } else if (status === 'pending') {
-    label = 'Unsaved changes';
+    visibleLabel = 'Unsaved changes';
+    announcement = visibleLabel;
   } else if (status === 'saved') {
     const rel = formatRelativeSavedAt(lastSavedAt, nowMs);
-    label = rel ? `All changes saved · ${rel}` : 'All changes saved';
+    visibleLabel = rel ? `All changes saved · ${rel}` : 'All changes saved';
+    announcement = 'All changes saved';
   }
 
   return (
@@ -59,16 +81,16 @@ export function AutosaveIndicator({ editor }: AutosaveIndicatorProps) {
        * inserted together with its first content is frequently not announced.
        */}
       <span data-testid="autosave-live-region" className="sr-only" role="status" aria-live="polite">
-        {label}
+        {announcement}
       </span>
       {status === 'idle' ? null : (
         <span
           data-testid="autosave-indicator"
           data-status={status}
-          className="lash-autosave-indicator"
+          className="lash-autosave-indicator lash-document-status-item"
           title={lastSavedAt ?? undefined}
         >
-          {label}
+          {visibleLabel}
         </span>
       )}
     </>

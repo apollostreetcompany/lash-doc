@@ -1,0 +1,250 @@
+.shell {
+  display: flex;
+  min-height: 100dvh;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  color: var(--color-text-primary, #1f2328);
+  background: var(--color-app-bg, #f4f5f7);
+}
+
+.statusCard {
+  max-width: 420px;
+  margin: 0;
+  padding: 28px 32px;
+  text-align: center;
+  background: var(--color-paper, #fff);
+  border: 1px solid var(--color-border, #e5e7eb);
+  border-radius: 12px;
+  box-shadow: var(--shadow-sm, 0 1px 3px rgba(15, 17, 21, 0.08));
+}
+
+.statusCard p {
+  margin: 0 0 16px;
+}
+
+.retryButton,
+.primaryButton {
+  display: inline-flex;
+  min-height: 40px;
+  align-items: center;
+  justify-content: center;
+  padding: 0 16px;
+  color: #fff;
+  font: inherit;
+  font-weight: 650;
+  text-decoration: none;
+  cursor: pointer;
+  background: #27272a;
+  border: 1px solid #27272a;
+  border-radius: 8px;
+}
+
+.primaryButton:disabled {
+  cursor: wait;
+  opacity: 0.62;
+}
+
+.documentShell {
+  min-height: 100dvh;
+  color: var(--color-text-primary, #1f2328);
+  background: var(--color-app-bg, #f4f5f7);
+}
+
+.publicHeader {
+  display: flex;
+  min-height: 56px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 0 24px;
+  background: var(--color-paper, #fff);
+  border-bottom: 1px solid var(--color-border, #e5e7eb);
+}
+
+.brand {
+  font-weight: 700;
+}
+
+.accessStatus {
+  color: var(--color-text-secondary, #57606a);
+  font-size: 0.875rem;
+}
+
+.document {
+  width: min(760px, calc(100% - 32px));
+  margin: 24px auto;
+  padding: clamp(32px, 7vw, 72px);
+  background: var(--color-paper, #fff);
+  border: 1px solid var(--color-border, #e5e7eb);
+  border-radius: 8px;
+}
+
+.title {
+  margin: 0 0 32px;
+  font-size: clamp(2rem, 5vw, 2.75rem);
+  line-height: 1.12;
+}
+
+.body {
+  font-family: var(--font-serif, Georgia, serif);
+  font-size: 1.0625rem;
+  line-height: 1.68;
+}
+
+.body p {
+  margin: 0 0 1em;
+}
+
+.body h2,
+.body h3,
+.body h4,
+.body h5,
+.body h6 {
+  margin: 1.7em 0 0.6em;
+  line-height: 1.25;
+}
+
+.tableScroller {
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+.tableScroller table {
+  border-collapse: collapse;
+}
+
+.tableScroller td,
+.tableScroller th {
+  padding: 8px 12px;
+  text-align: left;
+  border: 1px solid var(--color-border, #e5e7eb);
+}
+
+.mediaPlaceholder {
+  color: var(--color-text-secondary, #57606a);
+  font-style: italic;
+}
+
+.comments {
+  width: min(760px, calc(100% - 32px));
+  margin: 0 auto 32px;
+  padding: 28px 32px 32px;
+  background: var(--color-paper, #fff);
+  border: 1px solid var(--color-border, #e5e7eb);
+  border-radius: 8px;
+}
+
+.commentsHeading,
+.commentMeta {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.commentsHeading {
+  padding-bottom: 18px;
+  border-bottom: 1px solid var(--color-border, #e5e7eb);
+}
+
+.commentsHeading h2 {
+  margin: 0;
+  font-size: 1.2rem;
+}
+
+.commentsHeading span,
+.commentMeta time,
+.commentMuted {
+  color: var(--color-text-secondary, #57606a);
+  font-size: 0.875rem;
+}
+
+.commentList {
+  padding: 0;
+  margin: 0;
+  list-style: none;
+}
+
+.comment {
+  padding: 20px 0;
+  border-bottom: 1px solid var(--color-border, #e5e7eb);
+}
+
+.commentMeta strong {
+  font-size: 0.875rem;
+}
+
+.comment p {
+  margin: 8px 0 0;
+  line-height: 1.55;
+  white-space: pre-wrap;
+}
+
+.composer {
+  display: grid;
+  gap: 10px;
+  padding-top: 22px;
+}
+
+.commentLabel {
+  font-size: 0.9rem;
+  font-weight: 650;
+}
+
+.composer textarea {
+  width: 100%;
+  min-height: 104px;
+  padding: 12px 14px;
+  color: inherit;
+  font: inherit;
+  line-height: 1.5;
+  resize: vertical;
+  background: #fff;
+  border: 1px solid #c9cdd3;
+  border-radius: 8px;
+}
+
+.composer textarea:focus-visible {
+  border-color: #52525b;
+  outline: 3px solid rgba(82, 82, 91, 0.18);
+  outline-offset: 1px;
+}
+
+.composer .primaryButton {
+  justify-self: end;
+}
+
+.commentStatus {
+  margin: 0;
+  color: var(--color-text-secondary, #57606a);
+  font-size: 0.875rem;
+}
+
+@media (max-width: 600px) {
+  .publicHeader {
+    padding: 0 16px;
+  }
+
+  .document {
+    width: 100%;
+    margin: 0;
+    padding: 32px 20px;
+    border: 0;
+    border-radius: 0;
+  }
+
+  .comments {
+    width: 100%;
+    margin: 12px 0 0;
+    padding: 24px 20px 32px;
+    border-right: 0;
+    border-bottom: 0;
+    border-left: 0;
+    border-radius: 0;
+  }
+
+  .composer .primaryButton {
+    width: 100%;
+  }
+}

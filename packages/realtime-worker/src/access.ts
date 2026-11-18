@@ -1,5 +1,6 @@
 export type RealtimeCapability = 'doc.read' | 'doc.edit';
 export type RealtimeInviteScope = 'view' | 'comment' | 'suggest' | 'edit';
+export const REALTIME_PROTOCOL_VERSION = 2 as const;
 
 export type RealtimeInviteToken = {
   jti: string;
@@ -13,6 +14,7 @@ export type RealtimeInviteToken = {
 };
 
 export interface RealtimeSessionGrant {
+  protocolVersion: typeof REALTIME_PROTOCOL_VERSION;
   actorId: string;
   documentId: string;
   capabilities: RealtimeCapability[];
@@ -26,7 +28,8 @@ export type RealtimeAccessFailure =
   | 'expired'
   | 'revoked'
   | 'document-mismatch'
-  | 'scope-mismatch';
+  | 'scope-mismatch'
+  | 'protocol-error';
 
 export type RealtimeAccessResult =
   | { ok: true; grant: RealtimeSessionGrant }
@@ -46,7 +49,10 @@ export interface RealtimeInviteRequirement {
 
 export type RealtimeInviteResult =
   | { ok: true; token: RealtimeInviteToken }
-  | { ok: false; reason: Exclude<RealtimeAccessFailure, 'scope-mismatch'> };
+  | {
+      ok: false;
+      reason: Exclude<RealtimeAccessFailure, 'scope-mismatch' | 'protocol-error'>;
+    };
 
 const encoder = new TextEncoder();
 const TOKEN_SEPARATOR = '.';
@@ -112,6 +118,7 @@ const canonicalGrant = (grant: RealtimeSessionGrant) =>
     documentId: grant.documentId,
     expiresAt: grant.expiresAt,
     issuedAt: grant.issuedAt,
+    protocolVersion: grant.protocolVersion,
     scope: grant.scope ?? null,
   });
 
@@ -147,6 +154,7 @@ const parseGrant = (payload: string): RealtimeSessionGrant | null => {
   if (!parsed || typeof parsed !== 'object') return null;
   const grant = parsed as Partial<RealtimeSessionGrant>;
   if (
+    grant.protocolVersion !== REALTIME_PROTOCOL_VERSION ||
     typeof grant.actorId !== 'string' ||
     typeof grant.documentId !== 'string' ||
     !Array.isArray(grant.capabilities) ||
@@ -161,6 +169,7 @@ const parseGrant = (payload: string): RealtimeSessionGrant | null => {
   );
   if (capabilities.length !== grant.capabilities.length) return null;
   return {
+    protocolVersion: REALTIME_PROTOCOL_VERSION,
     actorId: grant.actorId,
     documentId: grant.documentId,
     capabilities,
@@ -226,6 +235,7 @@ export const createDefaultRealtimeGrant = (
   documentId: string,
   issuedAt = new Date(),
 ): RealtimeSessionGrant => ({
+  protocolVersion: REALTIME_PROTOCOL_VERSION,
   actorId: normalizeActorId(actorId),
   documentId,
   capabilities: ['doc.read', 'doc.edit'],
@@ -234,7 +244,7 @@ export const createDefaultRealtimeGrant = (
 });
 
 export const realtimeCapabilitiesForScope = (scope: RealtimeInviteScope): RealtimeCapability[] =>
-  scope === 'view' ? ['doc.read'] : ['doc.read', 'doc.edit'];
+  scope === 'edit' ? ['doc.read', 'doc.edit'] : ['doc.read'];
 
 export const createRealtimeGrantForScope = (
   actorId: string,
@@ -242,6 +252,7 @@ export const createRealtimeGrantForScope = (
   scope: RealtimeInviteScope,
   issuedAt = new Date(),
 ): RealtimeSessionGrant => ({
+  protocolVersion: REALTIME_PROTOCOL_VERSION,
   actorId: normalizeActorId(actorId),
   documentId,
   scope,

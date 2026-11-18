@@ -1,5 +1,28 @@
 # Lash v1 Release Notes
 
+## Collaborative writing candidate
+
+Lash can take a local draft into a shared document. The owner can invite a named
+editor, co-edit the title and body, review anchored feedback and suggestions,
+restore an earlier version, and revoke the invitation.
+
+- **Write and return.** Documents lists recent drafts on this device and supports
+  title search. Markdown transfer preserves supported rich structure and bounded
+  embedded images. Local history preserves formatting when restoring a version.
+- **Review a change.** Replies and suggestion decisions survive reopening the
+  document. Shared History lets both editors compare versions. Owners can
+  restore an earlier body as a new version.
+- **Revise a selection.** On browsers with a ready on-device language model,
+  writers can review the proposed wording in context, edit it, and apply it
+  to the selected passage. The interface reports when the model is unavailable.
+- **Run locally.** `make dev-collab` starts a two-account workspace with a local
+  inbox. See the [setup and walkthrough](README.md).
+
+The candidate has been exercised on a compiled local web server with two
+independently authenticated browsers. Public rollout and the human 4.5/5
+qualification are separate release milestones.
+
+
 ## 2026-05-16 v1
 
 Lash v1 covers the local collaborative-editor acceptance stack in `agents.md`. Riddle remains optional and deferred; this release does not add Lash-Riddle integration code.

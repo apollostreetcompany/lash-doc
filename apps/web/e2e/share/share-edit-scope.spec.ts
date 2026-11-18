@@ -1,7 +1,9 @@
 import { expect, test } from '@playwright/test';
 
-test('share-edit-scope', async ({ page }) => {
-  await page.goto('/');
+import { openDevelopmentLoopbackShareFixture } from './development-loopback-fixture';
+
+test('share-edit-scope development fixture maps edit capabilities', async ({ page }) => {
+  await openDevelopmentLoopbackShareFixture(page);
   await page.getByTestId('share-create-edit').click();
 
   await expect(page.getByTestId('share-validation')).toContainText('Access granted: edit');

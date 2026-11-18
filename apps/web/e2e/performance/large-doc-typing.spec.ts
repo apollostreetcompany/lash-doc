@@ -1,181 +1,211 @@
 import { expect, test, type Page } from '@playwright/test';
 
-type LashTestWindow = Window & {
-  __lashEditor?: {
-    commands: {
-      focus: (position?: 'start' | 'end') => boolean;
-      setContent: (content: unknown, emitUpdate?: boolean) => boolean;
-    };
-    getText: (options?: { blockSeparator?: string }) => string;
-  };
-  __lashLargeDocPerf?: {
-    eventWorkSamples: number[];
-    longTasks: number[];
+const editor = '.ProseMirror[contenteditable="true"]';
+const probe = ' Large document typing probe.';
+const lifecycle = ['keydown', 'beforeinput', 'input'];
+
+type TextNode = { type: 'text'; text: string };
+type Block = {
+  type: 'paragraph' | 'heading';
+  attrs?: { headingId: string; level: number };
+  content: TextNode[];
+};
+type Body = { type: 'doc'; content: Block[] };
+type Envelope = { revision: number; writeId: string; doc: Body };
+type TraceEvent = {
+  name: string;
+  ph: string;
+  pid: number;
+  tid: number;
+  ts: number;
+  dur?: number;
+  args?: { data?: { type?: string } };
+};
+type TimingWindow = Window & {
+  lashTiming?: {
+    observer: PerformanceObserver;
+    tasks: PerformanceEntry[];
+    inputs: string[];
   };
 };
 
-type LargeDocMetrics = {
-  label: string;
-  eventSampleCount: number;
-  eventWorkP95Ms: number;
-  eventWorkMaxMs: number;
-  longTasks: number;
-  typedTextPresent: boolean;
-  p95BudgetMs: number;
-};
-
-const TYPED_TEXT = ' Large document typing probe.';
-
-const word = (index: number) => `word${index.toString(36)}`;
-
-const largeDocumentContent = (wordCount: number) => {
-  const wordsPerBlock = 100;
-  const blockCount = Math.ceil(wordCount / wordsPerBlock);
+function fixture(words: number): Body {
   let nextWord = 0;
   return {
     type: 'doc',
-    content: Array.from({ length: blockCount }, (_, blockIndex) => {
-      const text = Array.from({ length: wordsPerBlock }, () => word(nextWord++)).join(' ');
-      if (blockIndex % 12 === 0) {
-        return {
-          type: 'heading',
-          attrs: { level: blockIndex % 30 === 0 ? 1 : 2 },
-          content: [{ type: 'text', text }],
-        };
-      }
-      return {
-        type: 'paragraph',
-        content: [{ type: 'text', text }],
-      };
+    content: Array.from({ length: words / 100 }, (_, block): Block => {
+      const text = Array.from({ length: 100 }, () => 'word' + (nextWord++).toString(36)).join(' ');
+      const content: TextNode[] = [{ type: 'text', text }];
+      return block % 12 === 0
+        ? {
+            type: 'heading',
+            attrs: { headingId: 'section-' + block, level: block % 30 === 0 ? 1 : 2 },
+            content,
+          }
+        : { type: 'paragraph', content };
     }),
   };
-};
+}
 
-const installTypingObserver = async (page: Page) => {
-  await page.evaluate(() => {
-    const win = window as LashTestWindow;
-    const eventWorkSamples: number[] = [];
-    const longTasks: number[] = [];
+const textBlocks = (body: Body) => body.content.map(({ content }) => content[0].text);
+const readEnvelope = (page: Page, key: string) =>
+  page.evaluate((key): Envelope => JSON.parse(localStorage.getItem(key) ?? 'null'), key);
+const p95 = (samples: number[]) =>
+  [...samples].sort((a, b) => a - b)[Math.ceil(samples.length * 0.95) - 1];
 
-    if ('PerformanceObserver' in window) {
-      try {
-        const eventObserver = new PerformanceObserver((list) => {
-          for (const rawEntry of list.getEntries()) {
-            const entry = rawEntry as PerformanceEntry & {
-              processingStart?: number;
-              processingEnd?: number;
-            };
-            if (
-              (entry.name === 'keydown' ||
-                entry.name === 'beforeinput' ||
-                entry.name === 'input') &&
-              typeof entry.processingStart === 'number' &&
-              typeof entry.processingEnd === 'number'
-            ) {
-              eventWorkSamples.push(entry.processingEnd - entry.processingStart);
-            }
-          }
-        });
-        eventObserver.observe({
-          type: 'event',
-          buffered: true,
-          durationThreshold: 0,
-        } as PerformanceObserverInit);
-
-        const longTaskObserver = new PerformanceObserver((list) => {
-          for (const entry of list.getEntries()) {
-            longTasks.push(entry.duration);
-          }
-        });
-        longTaskObserver.observe({ entryTypes: ['longtask'] });
-      } catch {
-        // The Event Timing and Long Task APIs are Chromium-only; Chromium is the gate here.
-      }
-    }
-
-    win.__lashLargeDocPerf = { eventWorkSamples, longTasks };
-  });
-};
-
-const seedLargeDocument = async (page: Page, wordCount: number) => {
-  await page.evaluate((content) => {
-    const editor = (window as LashTestWindow).__lashEditor;
-    if (!editor) throw new Error('Lash editor test hook is unavailable');
-    editor.commands.setContent(content, false);
-  }, largeDocumentContent(wordCount));
-};
-
-const ciP95Budget = (wordCount: number) => {
-  if (process.env.CI && wordCount >= 50_000) return 16;
-  return 8;
-};
-
-const measureTyping = async (
-  page: Page,
-  label: string,
-  p95BudgetMs: number,
-): Promise<LargeDocMetrics> => {
-  await page.evaluate(() => {
-    const editor = (window as LashTestWindow).__lashEditor;
-    if (!editor) throw new Error('Lash editor test hook is unavailable');
-    editor.commands.focus('end');
-  });
-
-  await installTypingObserver(page);
-  await page.keyboard.type(TYPED_TEXT, { delay: 0 });
-  await page.waitForTimeout(150);
-
-  return page.evaluate(
-    ({ expectedText, scenario }) => {
-      const win = window as LashTestWindow;
-      const eventWorkSamples = win.__lashLargeDocPerf?.eventWorkSamples ?? [];
-      return {
-        label: scenario.label,
-        eventSampleCount: eventWorkSamples.length,
-        eventWorkP95Ms: percentile(eventWorkSamples, 95),
-        eventWorkMaxMs: Math.max(...eventWorkSamples, 0),
-        longTasks: win.__lashLargeDocPerf?.longTasks.length ?? 0,
-        typedTextPresent:
-          win.__lashEditor?.getText({ blockSeparator: '\n' }).includes(expectedText.trim()) ??
-          false,
-        p95BudgetMs: scenario.p95BudgetMs,
-      } satisfies LargeDocMetrics;
-
-      function percentile(values: number[], percentileValue: number): number {
-        const sorted = [...values].sort((left, right) => left - right);
-        const index = Math.min(
-          sorted.length - 1,
-          Math.max(0, Math.ceil((percentileValue / 100) * sorted.length) - 1),
-        );
-        return sorted[index] ?? 0;
-      }
-    },
-    { expectedText: TYPED_TEXT, scenario: { label, p95BudgetMs } },
-  );
-};
-
-test.describe('large document typing performance', () => {
-  for (const scenario of [
-    { label: '10k-word document', words: 10_000 },
-    { label: '50k-word document', words: 50_000 },
-  ]) {
-    test(`${scenario.label} stays under the typing budget`, async ({ page }) => {
-      await page.goto(`/doc/perf-${scenario.words}-${Date.now()}`);
-      await page.waitForFunction(() => Boolean((window as LashTestWindow).__lashEditor));
-      await seedLargeDocument(page, scenario.words);
-      await page.waitForTimeout(250);
-
-      const metrics = await measureTyping(page, scenario.label, ciP95Budget(scenario.words));
-      console.info('large-doc-typing metrics', JSON.stringify(metrics));
-
-      expect(metrics.typedTextPresent, JSON.stringify(metrics)).toBe(true);
-      expect(metrics.eventSampleCount, JSON.stringify(metrics)).toBeGreaterThanOrEqual(
-        Math.floor(TYPED_TEXT.length * 0.9),
+for (const words of [10_000, 50_000]) {
+  test(
+    words.toLocaleString('en-US') + '-word typing stays within the editor budget',
+    async ({ context, page }) => {
+      const documentId = 'large-doc-' + words;
+      const key = 'lash:body:' + documentId;
+      const doc = fixture(words);
+      await page.addInitScript(
+        ({ documentId, key, doc }) => {
+          localStorage.setItem(
+            key,
+            JSON.stringify({
+              documentId,
+              doc,
+              version: 1,
+              schemaVersion: 'lash-schema-v1',
+              revision: 1,
+              writeId: 'large-doc-fixture',
+              savedAt: '2026-01-01T00:00:00.000Z',
+            }),
+          );
+        },
+        { documentId, key, doc },
       );
-      expect(metrics.eventWorkP95Ms, JSON.stringify(metrics)).toBeLessThan(metrics.p95BudgetMs);
-      expect(metrics.eventWorkMaxMs, JSON.stringify(metrics)).toBeLessThan(50);
-      // Large-document rendering tasks are logged for future virtualization
-      // work; Bead 32's release gate is the per-input p95/max event budget.
-    });
-  }
-});
+      await page.goto('/doc/' + documentId);
+      await expect(page.locator('[data-body-mutation-locked="false"] ' + editor)).toBeVisible();
+      await expect(page.locator('.lash-app')).toHaveAttribute('data-entrance', 'false');
+
+      const blocks = page.locator(editor + ' > *');
+      await expect(blocks).toHaveCount(words / 100);
+      await blocks.last().click();
+      await blocks.last().evaluate((terminal) => {
+        const text = terminal.lastChild;
+        const selection = window.getSelection();
+        if (!(text instanceof Text) || !selection) throw new Error('Missing editor selection.');
+        selection.collapse(text, text.length);
+      });
+      await page.evaluate(
+        () => new Promise<void>((resolve) => requestAnimationFrame(() => resolve())),
+      );
+
+      // A real edit and undo of one character normalize the seed through the app's save path.
+      await page.keyboard.type('x');
+      await page.keyboard.press('Backspace');
+      const saved = page.locator('[data-testid="autosave-indicator"][data-status="saved"]');
+      await expect(saved).toBeVisible();
+      const baseline = await readEnvelope(page, key);
+      expect(baseline.revision).toBeGreaterThan(1);
+      expect(textBlocks(baseline.doc)).toEqual(textBlocks(doc));
+      const expected = structuredClone(baseline.doc);
+      expected.content[expected.content.length - 1].content[0].text += probe;
+
+      await page.evaluate(async () => {
+        await new Promise<void>((resolve) =>
+          requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
+        );
+        const tasks: PerformanceEntry[] = [];
+        const inputs: string[] = [];
+        const observer = new PerformanceObserver((list) => tasks.push(...list.getEntries()));
+        observer.observe({ type: 'longtask' });
+        document.querySelector('.ProseMirror')?.addEventListener('input', (event) => {
+          if (event instanceof InputEvent && event.isTrusted) inputs.push(event.data ?? '');
+        });
+        (window as TimingWindow).lashTiming = { observer, tasks, inputs };
+      });
+
+      // Event Timing omits inputs below its presentation threshold. CDP records
+      // every dispatch, including the fast keys the SLO is meant to protect.
+      const cdp = await context.newCDPSession(page);
+      const events: TraceEvent[] = [];
+      cdp.on('Tracing.dataCollected', ({ value }) =>
+        events.push(...(value as unknown as TraceEvent[])),
+      );
+      const completedTrace = new Promise<void>((resolve) =>
+        cdp.once('Tracing.tracingComplete', () => resolve()),
+      );
+      await cdp.send('Tracing.start', {
+        transferMode: 'ReportEvents',
+        traceConfig: { includedCategories: ['devtools.timeline', 'blink.user_timing'] },
+      });
+      try {
+        await page.evaluate(() => performance.mark('lash-typing-start'));
+        await page.keyboard.type(probe);
+        await page.evaluate(async () => {
+          await new Promise<void>((resolve) =>
+            requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
+          );
+          performance.mark('lash-typing-end');
+        });
+      } finally {
+        await cdp.send('Tracing.end');
+        await completedTrace;
+        await cdp.detach();
+      }
+
+      const start = events.find(({ name }) => name === 'lash-typing-start');
+      const end = events.find(({ name }) => name === 'lash-typing-end');
+      if (!start || !end) throw new Error('Missing typing trace markers.');
+      const slices = events
+        .filter(
+          (event) =>
+            event.name === 'EventDispatch' &&
+            event.ph === 'X' &&
+            event.pid === start.pid &&
+            event.tid === start.tid &&
+            event.ts >= start.ts &&
+            event.ts < end.ts &&
+            lifecycle.includes(event.args?.data?.type ?? ''),
+        )
+        .sort((first, second) => first.ts - second.ts);
+      expect(slices.map(({ args }) => args?.data?.type)).toEqual(
+        Array.from(probe).flatMap(() => lifecycle),
+      );
+      const perKey = Array.from(probe, (_character, keyIndex) =>
+        Math.max(
+          ...slices
+            .slice(keyIndex * lifecycle.length, (keyIndex + 1) * lifecycle.length)
+            .map(({ dur }) => (dur ?? Number.POSITIVE_INFINITY) / 1000),
+        ),
+      );
+
+      const { inputs, longTasks } = await page.evaluate(() => {
+        const timing = (window as TimingWindow).lashTiming;
+        if (!timing) throw new Error('Missing typing observer.');
+        const start = performance.getEntriesByName('lash-typing-start')[0].startTime;
+        const end = performance.getEntriesByName('lash-typing-end')[0].startTime;
+        const longTasks = [...timing.tasks, ...timing.observer.takeRecords()]
+          .filter((task) => task.startTime < end && task.startTime + task.duration > start)
+          .map((task) => task.duration);
+        timing.observer.disconnect();
+        return { inputs: timing.inputs, longTasks };
+      });
+      const metrics = {
+        words,
+        keys: perKey.length,
+        p95: p95(perKey),
+        max: Math.max(...perKey),
+        longTasks,
+      };
+      console.info('large-doc typing metrics', JSON.stringify(metrics));
+      expect(inputs).toEqual(Array.from(probe));
+      expect(metrics.p95).toBeLessThan(8);
+      expect(metrics.max).toBeLessThan(50);
+      expect(metrics.longTasks).toEqual([]);
+
+      await expect(blocks).toHaveText(textBlocks(expected));
+      await expect
+        .poll(async () => (await readEnvelope(page, key)).revision)
+        .toBeGreaterThan(baseline.revision);
+      await expect(saved).toBeVisible();
+      const final = await readEnvelope(page, key);
+      expect(final.writeId).not.toBe(baseline.writeId);
+      expect(final.doc).toEqual(expected);
+    },
+  );
+}

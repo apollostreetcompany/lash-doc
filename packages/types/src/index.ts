@@ -13,6 +13,8 @@
 
 // ---------- minimal exports (preserved across iterations) ----------
 
+export * from './sharedHistory';
+
 export type DocumentId = string & { readonly brand: unique symbol };
 
 export interface LashUser {
@@ -157,9 +159,7 @@ export type EditorOp =
  *  one of ipHash | ua" at compile time so `audit: {}` cannot typecheck. When
  *  no IP is genuinely available (e.g., system-actor migrations), set `ua` to
  *  a stable migration tag and use the `system:` actor type. */
-export type HistoryAudit =
-  | { ipHash: string; ua?: string }
-  | { ipHash?: string; ua: string };
+export type HistoryAudit = { ipHash: string; ua?: string } | { ipHash?: string; ua: string };
 
 export interface HistoryEntry {
   /** uuid */
@@ -278,6 +278,427 @@ export interface RevocationRecord {
   revokedBy: string;
   reason?: string;
 }
+
+// ---------- J13: authenticated document promotion ----------
+
+/**
+ * Frozen v1 snapshot promoted from local-only storage into one authoritative
+ * realtime room.
+ *
+ * Runtime boundaries must validate exact keys, NFC-normalize `title`, and
+ * canonicalize `body` before accepting this TypeScript-only contract.
+ * `bodySha256` is SHA-256 over the UTF-8 canonical body JSON.
+ * `initialUpdateSha256` is SHA-256 over the decoded base64 Yjs update.
+ *
+ * `snapshotSha256` is SHA-256 over the UTF-8 bytes returned by this package's
+ * `canonicalize` function for the projection
+ * `{version,title,bodySha256,initialUpdateSha256,adjuncts}`.
+ * Every SHA-256 field is unpadded base64url (43 characters).
+ */
+export interface DocumentPromotionSnapshotV1 {
+  version: 1;
+  title: string;
+  /** Canonical ProseMirror JSON at the promotion boundary. */
+  body: unknown;
+  bodySha256: string;
+  /** Standard base64-encoded Yjs full-state update. */
+  initialUpdate: string;
+  initialUpdateSha256: string;
+  /** Promotion cannot silently import unsupported collaborative adjuncts. */
+  adjuncts: {
+    comments: 0;
+    suggestions: 0;
+  };
+  snapshotSha256: string;
+}
+
+/**
+ * Server-authenticated Worker management request. `ownerPrincipalId` is a
+ * server-derived `account:v1:<43 base64url>` pseudonym, never an email or raw
+ * identity-provider subject.
+ */
+export interface DocumentPromotionManagementRequestV1 {
+  version: 1;
+  roomId: string;
+  ownerPrincipalId: string;
+  idempotencyHash: string;
+  /**
+   * `false` is a lookup-only recovery probe and must never create durable
+   * state. Only the current derivation-key candidate may send `true`.
+   */
+  createIfMissing: boolean;
+  snapshot: DocumentPromotionSnapshotV1;
+}
+
+export interface DocumentPromotionSuccessV1 {
+  ok: true;
+  version: 1;
+  roomId: string;
+  ownerPrincipalId: string;
+  aclVersion: 1;
+  publicPolicy: 'restricted';
+  publicPolicyVersion: 1;
+  snapshotSha256: string;
+  created: boolean;
+}
+
+export type DocumentPromotionTerminalErrorCodeV1 =
+  | 'promotion-disabled'
+  | 'invalid-request'
+  | 'unauthorized'
+  | 'upgrade-required'
+  | 'replay-detected'
+  | 'promotion-not-found'
+  | 'owner-mismatch'
+  | 'promotion-conflict';
+
+export type DocumentPromotionRetryableErrorCodeV1 = 'readback-failed' | 'internal-error';
+
+export type DocumentPromotionFailureV1 =
+  | {
+      ok: false;
+      version: 1;
+      error: DocumentPromotionTerminalErrorCodeV1;
+      retryable: false;
+    }
+  | {
+      ok: false;
+      version: 1;
+      error: DocumentPromotionRetryableErrorCodeV1;
+      retryable: true;
+    };
+
+export type DocumentPromotionResultV1 = DocumentPromotionSuccessV1 | DocumentPromotionFailureV1;
+
+export interface DocumentPromotionCandidateV2 {
+  kind: 'current' | 'retained';
+  derivationVersion: string;
+  roomId: string;
+}
+
+/**
+ * Stable claim-index request used to serialize document promotion across room
+ * derivation-key rotations. `localDocumentId` is private control-plane input:
+ * it must never be logged, audited, or returned.
+ */
+export interface DocumentClaimPromotionRequestV2 {
+  version: 2;
+  claimId: string;
+  ownerPrincipalId: string;
+  localDocumentId: string;
+  idempotencyHash: string;
+  candidates: [
+    DocumentPromotionCandidateV2 & { kind: 'current' },
+    ...(DocumentPromotionCandidateV2 & { kind: 'retained' })[],
+  ];
+  snapshot: DocumentPromotionSnapshotV1;
+}
+
+export interface DocumentClaimPromotionSuccessV2 {
+  ok: true;
+  version: 2;
+  claimId: string;
+  roomId: string;
+  ownerPrincipalId: string;
+  aclVersion: 1;
+  publicPolicy: 'restricted';
+  publicPolicyVersion: 1;
+  snapshotSha256: string;
+  /** True only when this request created the authoritative room promotion. */
+  created: boolean;
+}
+
+export type DocumentClaimPromotionTerminalErrorCodeV2 =
+  | DocumentPromotionTerminalErrorCodeV1
+  | 'claim-conflict';
+
+export type DocumentClaimPromotionFailureV2 =
+  | {
+      ok: false;
+      version: 2;
+      error: DocumentClaimPromotionTerminalErrorCodeV2;
+      retryable: false;
+    }
+  | {
+      ok: false;
+      version: 2;
+      error: DocumentPromotionRetryableErrorCodeV1;
+      retryable: true;
+    };
+
+export type DocumentClaimPromotionResultV2 =
+  | DocumentClaimPromotionSuccessV2
+  | DocumentClaimPromotionFailureV2;
+
+// ---------- J13: authenticated owner reopen ----------
+
+export interface OwnerSessionManagementRequestV1 {
+  version: 1;
+  claimId: string;
+  ownerPrincipalId: string;
+  localDocumentId: string;
+  actorId: string;
+  protocolVersion: 3;
+}
+
+export interface OwnerSessionManagementSuccessV1 {
+  ok: true;
+  version: 1;
+  claimId: string;
+  roomId: string;
+  ownerPrincipalId: string;
+  promotionSnapshotSha256: string;
+  grant: {
+    source: 'owner';
+    capabilities: ['doc.read', 'doc.edit'];
+    aclVersion: number;
+    protocolVersion: 3;
+  };
+  socket: {
+    path: string;
+    ticket: string;
+    expiresAt: string;
+  };
+}
+
+export type OwnerSessionManagementFailureV1 =
+  | {
+      ok: false;
+      version: 1;
+      error: 'claim-not-found' | 'claim-conflict' | 'owner-mismatch' | 'not-shareable';
+      retryable: false;
+    }
+  | {
+      ok: false;
+      version: 1;
+      error: 'readback-failed' | 'internal-error';
+      retryable: true;
+    };
+
+export type OwnerSessionManagementResultV1 =
+  | OwnerSessionManagementSuccessV1
+  | OwnerSessionManagementFailureV1;
+
+// ---------- J13: anonymous public read session ----------
+
+export type PublicDocumentAccessModeV1 = 'read' | 'comment';
+
+export interface PublicControlSessionRequestV1 {
+  version: 1;
+  roomId: string;
+  actorId: string;
+  protocolVersion: 4;
+  browserOrigin: string;
+  rateKey: string;
+}
+
+export interface PublicControlSessionSuccessV1 {
+  ok: true;
+  version: 1;
+  authorization: {
+    roomId: string;
+    mode: PublicDocumentAccessModeV1;
+    policyVersion: number;
+    cutoffGeneration: number;
+  };
+  grant: {
+    source: 'public';
+    capabilities: ['doc.read'];
+    protocolVersion: 4;
+  };
+  socket: {
+    path: string;
+    protocol: 'lash-realtime-v4';
+    ticketProtocol: string;
+    expiresAt: string;
+  };
+}
+
+export type PublicControlSessionFailureV1 =
+  | {
+      ok: false;
+      version: 1;
+      error:
+        | 'invalid-request'
+        | 'unauthorized'
+        | 'document-unavailable'
+        | 'replay-detected'
+        | 'protocol-mismatch';
+      retryable: false;
+    }
+  | {
+      ok: false;
+      version: 1;
+      error: 'rate-limited' | 'readback-failed' | 'internal-error';
+      retryable: true;
+    };
+
+export type PublicControlSessionResultV1 =
+  | PublicControlSessionSuccessV1
+  | PublicControlSessionFailureV1;
+
+export interface PublicRoomReadyFrameV1 {
+  type: 'room-ready';
+  roomId: string;
+  protocolVersion: 4;
+  mode: PublicDocumentAccessModeV1;
+  policyVersion: number;
+  cutoffGeneration: number;
+  highWaterSequence: number;
+}
+
+export interface PublicRoomHydrationCompleteFrameV1 {
+  type: 'room-hydration-complete';
+  roomId: string;
+  protocolVersion: 4;
+  mode: PublicDocumentAccessModeV1;
+  policyVersion: number;
+  cutoffGeneration: number;
+  highWaterSequence: number;
+  persistedUpdates: number;
+}
+
+// ---------- J13: typed public comments ----------
+
+export interface PublicCommentDtoV1 {
+  id: string;
+  sequence: number;
+  anchor: { kind: 'document' };
+  body: string;
+  author: { label: string };
+  createdAt: string;
+}
+
+export interface PublicCommentAuthorizationV1 {
+  roomId: string;
+  mode: 'comment';
+  policyVersion: number;
+  cutoffGeneration: number;
+}
+
+export interface PublicCommentListRequestV1 {
+  version: 1;
+  roomId: string;
+  expectedPolicyVersion: number;
+  expectedCutoffGeneration: number;
+  beforeSequence: number | null;
+  limit: 50;
+  rateKey: string;
+}
+
+export interface PublicCommentCreateRequestV1 {
+  version: 1;
+  roomId: string;
+  commenterPrincipalId: string;
+  commenterAlias: string;
+  mutationId: string;
+  expectedPolicyVersion: number;
+  expectedCutoffGeneration: number;
+  body: string;
+}
+
+export interface PublicCommentListSuccessV1 {
+  ok: true;
+  version: 1;
+  authorization: PublicCommentAuthorizationV1;
+  comments: PublicCommentDtoV1[];
+  nextBeforeSequence: number | null;
+}
+
+export interface PublicCommentCreateSuccessV1 {
+  ok: true;
+  version: 1;
+  created: boolean;
+  authorization: PublicCommentAuthorizationV1;
+  comment: PublicCommentDtoV1;
+}
+
+export type PublicCommentFailureV1 =
+  | {
+      ok: false;
+      version: 1;
+      error:
+        | 'invalid-request'
+        | 'unauthorized'
+        | 'public-comment-disabled'
+        | 'replay-detected'
+        | 'public-access-changed'
+        | 'idempotency-conflict';
+      retryable: false;
+    }
+  | {
+      ok: false;
+      version: 1;
+      error: 'rate-limited' | 'readback-failed' | 'internal-error';
+      retryable: true;
+    };
+
+export type PublicCommentListResultV1 = PublicCommentListSuccessV1 | PublicCommentFailureV1;
+export type PublicCommentCreateResultV1 = PublicCommentCreateSuccessV1 | PublicCommentFailureV1;
+
+export interface PublicCommentModerationRequestV1 {
+  version: 1;
+  claimId: string;
+  ownerPrincipalId: string;
+  localDocumentId: string;
+  commentId: string;
+  action: 'hide';
+  mutationId: string;
+  expectedPolicyVersion: number;
+  expectedCutoffGeneration: number;
+}
+
+export interface PublicCommentModerationSuccessV1 {
+  ok: true;
+  version: 1;
+  claimId: string;
+  roomId: string;
+  commentId: string;
+  state: 'hidden';
+  changed: boolean;
+  policyVersion: number;
+  cutoffGeneration: number;
+  moderatedAt: string;
+}
+
+export type PublicCommentModerationFailureV1 =
+  | {
+      ok: false;
+      version: 1;
+      error:
+        | 'invalid-request'
+        | 'unauthorized'
+        | 'promotion-disabled'
+        | 'claim-not-found'
+        | 'comment-not-found'
+        | 'claim-conflict'
+        | 'owner-mismatch'
+        | 'not-shareable'
+        | 'replay-detected';
+      retryable: false;
+    }
+  | {
+      ok: false;
+      version: 1;
+      error: 'policy-conflict';
+      retryable: false;
+      state: {
+        mode: 'restricted' | 'read' | 'comment';
+        policyVersion: number;
+        cutoffGeneration: number;
+        publicPath: string | null;
+      };
+    }
+  | {
+      ok: false;
+      version: 1;
+      error: 'readback-failed' | 'internal-error';
+      retryable: true;
+    };
+
+export type PublicCommentModerationResultV1 =
+  | PublicCommentModerationSuccessV1
+  | PublicCommentModerationFailureV1;
 
 // ---------- M3: MentionResolveResult (discriminated union for RBAC safety) ----------
 

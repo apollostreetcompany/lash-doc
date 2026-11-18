@@ -32,6 +32,7 @@ import { Plugin, PluginKey, TextSelection } from '@tiptap/pm/state';
 import StarterKitExtension from '@tiptap/starter-kit';
 import type * as Y from 'yjs';
 
+import { createEmptyDocumentInvitationExtensions } from '../extensions/empty-document-invitation';
 import { LashHeading } from '../extensions/heading';
 import { LashImage, type LashImageUploader } from '../extensions/image';
 import {
@@ -194,6 +195,7 @@ export const buildBaseExtensions = (options?: LashSchemaOptions): Extensions => 
       linkOnPaste: true,
       HTMLAttributes: { rel: 'noopener noreferrer' },
     }),
+    ...createEmptyDocumentInvitationExtensions(),
     LashKeyboardShortcuts.configure(options ?? {}),
     LashTableNavigation,
     Extension.create({

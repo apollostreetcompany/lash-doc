@@ -1,7 +1,9 @@
 import { expect, test } from '@playwright/test';
 
-test('share-audit', async ({ page }) => {
-  await page.goto('/');
+import { openDevelopmentLoopbackShareFixture } from './development-loopback-fixture';
+
+test('share-audit development fixture records create and access mechanics', async ({ page }) => {
+  await openDevelopmentLoopbackShareFixture(page);
   await page.getByTestId('share-create-comment').click();
 
   await expect(page.getByTestId('share-audit-count')).toContainText('2 audit events');

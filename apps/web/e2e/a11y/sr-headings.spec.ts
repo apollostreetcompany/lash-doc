@@ -47,7 +47,7 @@ test('sr-headings', async ({ page }) => {
   const alpha = outline?.find((item) => item.title === 'Section Alpha');
   expect(alpha).toBeTruthy();
 
-  const editorRegion = page.getByRole('region', { name: 'Document editor' });
+  const editorRegion = page.getByRole('region', { name: 'Writing canvas' });
   await expect(
     editorRegion.getByRole('heading', { level: 1, name: 'Accessibility Title' }),
   ).toBeVisible();

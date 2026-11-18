@@ -3,34 +3,57 @@
  */
 'use client';
 
-import { createAnchor, mapAnchor, type ChatMessage, type ChatThread } from '@lash/doc-chat';
+import {
+  createAnchor,
+  isReviewId,
+  mapAnchor,
+  parseChatThreads,
+  type ChatAnchor,
+  type ChatMessage,
+  type ChatThreadStatus,
+  type ReviewMutation,
+  type StoredChatThread,
+} from '@lash/doc-chat';
 import type { DocumentId } from '@lash/types';
 import type { Editor } from '@tiptap/core';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type * as Y from 'yjs';
+import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
+import {
+  captureChatAnchorRange,
+  projectChatDocumentText,
+  resolveChatAnchorRange,
+  type ChatDocumentText,
+} from './chatAnchorPositions';
+import type { ChatRealtimeStore } from '../../../lib/realtimeChatStore';
 import { Icon } from '../../shell/Icon';
 
+export type { ChatRealtimeStore } from '../../../lib/realtimeChatStore';
+
+export type RequestDocumentNavigation = (navigateToTarget: () => void) => void;
+
 export interface ChatPanelProps {
+  showTestAiReply?: boolean;
   editor: Editor | null;
   docId: DocumentId;
   baseVersion: string | null;
   currentText: string;
-  realtimeDoc?: Y.Doc | null;
+  mutationEnabled: boolean;
+  mutationUnavailableReason?: string;
+  realtimeStore?: ChatRealtimeStore | null;
+  actorId?: string;
+  runDocumentMutation(mutate: () => void): boolean;
+  requestDocumentNavigation?: RequestDocumentNavigation;
+  onThreadCountChange?: (count: number) => void;
+  suggestionComposer?: ReactNode;
+  renderSuggestion?: (thread: StoredChatThread, stale: boolean) => ReactNode;
   open?: boolean;
 }
 
 type ChatFilter = 'all' | 'author' | 'ai';
-type ThreadStatus = 'open' | 'resolved';
-type LocalThread = ChatThread & {
-  historyText: string;
-  status: ThreadStatus;
-  resolvedAt: string | null;
-  updatedAt: string;
-};
+type LocalThread = StoredChatThread;
 type ThreadView = {
   thread: LocalThread;
-  mappedAnchor: ReturnType<typeof mapAnchor>;
+  mappedAnchor: ChatAnchor;
 };
 type AnchorMarker = {
   threadId: string;
@@ -38,10 +61,14 @@ type AnchorMarker = {
   left: number;
   label: string;
 };
+type NewThreadDraft = {
+  anchor: ChatAnchor;
+  quote: string;
+  historyText: string;
+};
 
 const LOCAL_USER = { type: 'user', id: 'local-user' } as const;
 const AI_USER = { type: 'ai', id: 'ai-doc-chat', label: 'AI Doc Chat' } as const;
-const CHAT_THREADS_YMAP = 'lash:chat-threads';
 
 const selectedText = (editor: Editor | null): string => {
   if (!editor) return '';
@@ -50,19 +77,16 @@ const selectedText = (editor: Editor | null): string => {
   return editor.state.doc.textBetween(from, to, '\n');
 };
 
-const threadMatchesFilter = (thread: LocalThread, filter: ChatFilter) => {
+const threadMatchesFilter = (thread: LocalThread, filter: ChatFilter, actorId: string) => {
   if (filter === 'all') return true;
   if (filter === 'author') {
-    return thread.messages.some((message) => message.author.id === LOCAL_USER.id);
+    return thread.messages.some((message) => message.author.id === actorId);
   }
   return thread.messages.some((message) => message.author.type === 'ai');
 };
 
 const domId = (value: string) => value.replace(/[^A-Za-z0-9_-]/g, '-');
 const threadStorageKey = (docId: DocumentId) => `lash:chat-threads:${docId}`;
-const threadYMapPrefix = (docId: DocumentId) => `${String(docId)}:`;
-const threadYMapKey = (docId: DocumentId, threadId: string) =>
-  `${threadYMapPrefix(docId)}${threadId}`;
 const nowIso = () => new Date().toISOString();
 
 const createLocalId = (prefix: string) => {
@@ -72,42 +96,33 @@ const createLocalId = (prefix: string) => {
   return `${prefix}:${Date.now().toString(36)}:${Math.random().toString(36).slice(2)}`;
 };
 
-const docPositionForTextOffset = (editor: Editor, offset: number) => {
-  const doc = editor.state.doc;
-  const target = Math.max(0, offset);
-  for (let pos = 1; pos <= doc.content.size; pos += 1) {
-    if (doc.textBetween(0, pos, '\n').length >= target) {
-      return pos;
-    }
+const mapThreadAnchor = (
+  thread: LocalThread,
+  editor: Editor | null,
+  projection: ChatDocumentText | null,
+  currentText: string,
+  baseVersion: string | null,
+): ChatAnchor => {
+  const { anchor, historyText } = thread;
+  if (thread.proposal?.status === 'accepted') return { ...anchor, orphaned: true };
+  if (anchor.relativeRange) {
+    const range = editor && resolveChatAnchorRange(editor, anchor.relativeRange);
+    const mapped = range && projection?.toTextRange(range);
+    return mapped ? { ...anchor, ...mapped, orphaned: false } : { ...anchor, orphaned: true };
   }
-  return doc.content.size;
-};
-
-const docRangeForText = (editor: Editor, text: string, preferredOffset: number) => {
-  if (!text) return null;
-  const doc = editor.state.doc;
-  const maxSpan = text.length + 6;
-  const findInWindow = (start: number, end: number) => {
-    for (let from = start; from <= end; from += 1) {
-      const maxTo = Math.min(doc.content.size, from + maxSpan);
-      for (let to = from + 1; to <= maxTo; to += 1) {
-        if (doc.textBetween(from, to, '\n') === text) {
-          return { from, to };
-        }
-      }
-    }
-    return null;
-  };
-  const preferred = docPositionForTextOffset(editor, preferredOffset);
-  const localWindow = Math.max(32, text.length * 2);
-  const local = findInWindow(
-    Math.max(1, preferred - localWindow),
-    Math.min(doc.content.size, preferred + localWindow),
-  );
-  if (local) {
-    return local;
+  if (
+    historyText === currentText &&
+    currentText.slice(anchor.from, anchor.to) === anchor.token.text
+  ) {
+    return { ...anchor, orphaned: false };
   }
-  return findInWindow(1, doc.content.size);
+  return mapAnchor({
+    anchor,
+    baseDoc: { text: historyText },
+    ops: [],
+    currentDoc: { text: currentText },
+    targetVersion: baseVersion ?? anchor.baseVersion,
+  });
 };
 
 const scrollSelectionIntoView = () => {
@@ -124,124 +139,23 @@ const scrollSelectionIntoView = () => {
 const sameThreads = (left: LocalThread[], right: LocalThread[]) =>
   JSON.stringify(left) === JSON.stringify(right);
 
-const isObject = (value: unknown): value is Record<string, unknown> =>
-  Boolean(value) && typeof value === 'object';
-
-const normalizeAuthor = (value: unknown): ChatMessage['author'] | null => {
-  if (!isObject(value)) return null;
-  const type = value.type;
-  const id = value.id;
-  if (typeof id !== 'string') return null;
-  if (type === 'user' || type === 'system') return { type, id };
-  if (type === 'ai') {
-    return {
-      type,
-      id,
-      label: typeof value.label === 'string' ? value.label : undefined,
-    };
-  }
-  return null;
-};
-
-const normalizeMessage = (value: unknown): ChatMessage | null => {
-  if (!isObject(value)) return null;
-  const author = normalizeAuthor(value.author);
-  if (
-    !author ||
-    typeof value.id !== 'string' ||
-    typeof value.threadId !== 'string' ||
-    typeof value.ts !== 'string' ||
-    typeof value.body !== 'string'
-  ) {
-    return null;
-  }
-  return {
-    id: value.id,
-    threadId: value.threadId,
-    author,
-    ts: value.ts,
-    body: value.body,
-    citations: Array.isArray(value.citations)
-      ? (value.citations as ChatMessage['citations'])
-      : undefined,
-  };
-};
-
-const normalizeThread = (value: unknown, docId: DocumentId): LocalThread | null => {
-  if (!isObject(value)) return null;
-  if (typeof value.id !== 'string' || !isObject(value.anchor) || !Array.isArray(value.messages)) {
-    return null;
-  }
-  const messages = value.messages
-    .map(normalizeMessage)
-    .filter((item): item is ChatMessage => Boolean(item));
-  const status = value.status === 'resolved' ? 'resolved' : 'open';
-  return {
-    id: value.id,
-    docId,
-    anchor: value.anchor as unknown as LocalThread['anchor'],
-    messages,
-    filters: isObject(value.filters) ? (value.filters as LocalThread['filters']) : {},
-    historyText: typeof value.historyText === 'string' ? value.historyText : '',
-    status,
-    resolvedAt:
-      status === 'resolved' && typeof value.resolvedAt === 'string' ? value.resolvedAt : null,
-    updatedAt: typeof value.updatedAt === 'string' ? value.updatedAt : nowIso(),
-  };
-};
-
-const parseThreads = (value: string | null | undefined, docId: DocumentId): LocalThread[] => {
-  if (!value) return [];
-  try {
-    const parsed = JSON.parse(value) as unknown;
-    if (!Array.isArray(parsed)) return [];
-    return parsed
-      .map((item) => normalizeThread(item, docId))
-      .filter((item): item is LocalThread => Boolean(item));
-  } catch {
-    return [];
-  }
-};
-
 const readThreadsFromStorage = (docId: DocumentId) => {
   if (typeof window === 'undefined') return [];
   try {
-    return parseThreads(window.localStorage.getItem(threadStorageKey(docId)), docId);
+    return parseChatThreads(window.localStorage.getItem(threadStorageKey(docId)), docId);
   } catch {
     return [];
   }
 };
 
 const writeThreadsToStorage = (docId: DocumentId, threads: LocalThread[]) => {
-  if (typeof window === 'undefined') return;
+  if (typeof window === 'undefined') return false;
   try {
     window.localStorage.setItem(threadStorageKey(docId), JSON.stringify(threads));
+    return true;
   } catch {
-    // Best-effort local durability; realtime persistence still carries online docs.
+    return false;
   }
-};
-
-const readThreadsFromYMap = (map: Y.Map<string> | null, docId: DocumentId) =>
-  map
-    ? Array.from(map.entries())
-        .filter(([key]) => key.startsWith(threadYMapPrefix(docId)))
-        .map(([, value]) => parseThreads(`[${value}]`, docId)[0])
-        .filter((thread): thread is LocalThread => Boolean(thread))
-        .sort(
-          (left, right) =>
-            left.updatedAt.localeCompare(right.updatedAt) || left.id.localeCompare(right.id),
-        )
-    : [];
-
-const writeThreadsToYMap = (
-  map: Y.Map<string> | null,
-  docId: DocumentId,
-  threads: LocalThread[],
-) => {
-  if (!map) return;
-  threads.forEach((thread) => {
-    map.set(threadYMapKey(docId, thread.id), JSON.stringify(thread));
-  });
 };
 
 export function ChatPanel({
@@ -249,7 +163,16 @@ export function ChatPanel({
   docId,
   baseVersion,
   currentText,
-  realtimeDoc,
+  mutationEnabled,
+  mutationUnavailableReason = 'This shared access is read-only. Existing threads remain available to read and navigate.',
+  realtimeStore,
+  actorId = LOCAL_USER.id,
+  runDocumentMutation,
+  requestDocumentNavigation,
+  onThreadCountChange,
+  suggestionComposer,
+  renderSuggestion,
+  showTestAiReply = false,
   open = true,
 }: ChatPanelProps) {
   const [threads, setThreads] = useState<LocalThread[]>([]);
@@ -257,96 +180,135 @@ export function ChatPanel({
   const [replyDrafts, setReplyDrafts] = useState<Record<string, string>>({});
   const [activeThreadId, setActiveThreadId] = useState<string | null>(null);
   const [anchorJumpStatus, setAnchorJumpStatus] = useState('');
+  const [postStatus, setPostStatus] = useState('');
+  const [postError, setPostError] = useState('');
+  const [reviewReady, setReviewReady] = useState(false);
+  const [sendingReview, setSendingReview] = useState(false);
+  const [newThreadDraft, setNewThreadDraft] = useState<NewThreadDraft | null>(null);
+  const [newThreadBody, setNewThreadBody] = useState('');
   const threadsRef = useRef<LocalThread[]>([]);
-  const yThreadsMap = useMemo(
-    () => realtimeDoc?.getMap<string>(CHAT_THREADS_YMAP) ?? null,
-    [realtimeDoc],
-  );
+  const createThreadButtonRef = useRef<HTMLButtonElement>(null);
+  const newThreadTextareaRef = useRef<HTMLTextAreaElement>(null);
+  const pendingThreadFocusRef = useRef<string | null>(null);
+  const pendingThreadIdRef = useRef<string | null>(null);
+  const reviewInFlightRef = useRef(false);
 
-  const publishThreads = useCallback(
-    (nextThreads: LocalThread[], options: { persist: boolean } = { persist: true }) => {
-      threadsRef.current = nextThreads;
-      setThreads((current) => (sameThreads(current, nextThreads) ? current : nextThreads));
-      if (!options.persist) return;
-      writeThreadsToStorage(docId, nextThreads);
-      writeThreadsToYMap(yThreadsMap, docId, nextThreads);
-    },
-    [docId, yThreadsMap],
-  );
+  const publishThreads = useCallback((nextThreads: LocalThread[]) => {
+    threadsRef.current = nextThreads;
+    setThreads((current) => (sameThreads(current, nextThreads) ? current : nextThreads));
+  }, []);
 
   useEffect(() => {
-    const storedThreads = readThreadsFromStorage(docId);
-    const yThreadsExist =
-      yThreadsMap &&
-      Array.from(yThreadsMap.keys()).some((key) => key.startsWith(threadYMapPrefix(docId)));
-    const initialThreads = yThreadsExist ? readThreadsFromYMap(yThreadsMap, docId) : storedThreads;
-    publishThreads(initialThreads, { persist: false });
-    if (yThreadsMap && !yThreadsExist && storedThreads.length) {
-      writeThreadsToYMap(yThreadsMap, docId, storedThreads);
+    if (realtimeStore) {
+      const handleRemoteThreads = () => {
+        publishThreads(realtimeStore.readThreads(docId));
+        setReviewReady(realtimeStore.isReady());
+      };
+      handleRemoteThreads();
+      return realtimeStore.subscribe(handleRemoteThreads);
     }
-
+    setReviewReady(false);
+    publishThreads(readThreadsFromStorage(docId));
     const handleStorage = (event: StorageEvent) => {
-      if (event.key !== threadStorageKey(docId) || yThreadsMap) return;
-      publishThreads(parseThreads(event.newValue, docId), { persist: false });
+      if (event.key !== threadStorageKey(docId)) return;
+      publishThreads(parseChatThreads(event.newValue, docId));
     };
     window.addEventListener('storage', handleStorage);
+    return () => window.removeEventListener('storage', handleStorage);
+  }, [docId, publishThreads, realtimeStore]);
 
-    const handleRemoteThreads = (event: Y.YMapEvent<string>) => {
-      if (![...event.keysChanged].some((key) => key.startsWith(threadYMapPrefix(docId)))) return;
-      const nextThreads = readThreadsFromYMap(yThreadsMap, docId);
-      writeThreadsToStorage(docId, nextThreads);
-      publishThreads(nextThreads, { persist: false });
-    };
-    yThreadsMap?.observe(handleRemoteThreads);
+  useEffect(() => {
+    onThreadCountChange?.(threads.length);
+  }, [onThreadCountChange, threads.length]);
 
-    return () => {
-      window.removeEventListener('storage', handleStorage);
-      yThreadsMap?.unobserve(handleRemoteThreads);
-    };
-  }, [docId, publishThreads, yThreadsMap]);
+  const updateLocalThreads = (update: (current: LocalThread[]) => LocalThread[]) => {
+    const nextThreads = update(threadsRef.current);
+    let saved = false;
+    const applied = runDocumentMutation(() => {
+      saved = writeThreadsToStorage(docId, nextThreads);
+    });
+    if (applied && saved) publishThreads(nextThreads);
+    else setPostError('Lash could not save this discussion change. Try again.');
+    return applied && saved;
+  };
 
-  const updateThreads = useCallback(
-    (updater: (current: LocalThread[]) => LocalThread[]) => {
-      publishThreads(updater(threadsRef.current));
-    },
-    [publishThreads],
-  );
+  const submitReview = async (mutation: ReviewMutation) => {
+    if (!realtimeStore || !mutationEnabled || reviewInFlightRef.current) return false;
+    reviewInFlightRef.current = true;
+    setSendingReview(true);
+    setPostError('');
+    try {
+      const result = await realtimeStore.submit(mutation);
+      if (!result.ok) setPostError(result.message);
+      return result.ok;
+    } finally {
+      reviewInFlightRef.current = false;
+      setSendingReview(false);
+    }
+  };
 
+  const canMutateThreads = mutationEnabled && (!realtimeStore || reviewReady);
+  const chatActionsDisabled = !canMutateThreads || sendingReview;
   const selectionText = selectedText(editor);
+  const showSelectionGuide =
+    canMutateThreads && Boolean(editor && !editor.isDestroyed) && !selectionText && !newThreadDraft;
   const visibleThreads = useMemo(
-    () => threads.filter((thread) => threadMatchesFilter(thread, filter)),
-    [filter, threads],
+    () => threads.filter((thread) => threadMatchesFilter(thread, filter, actorId)),
+    [actorId, filter, threads],
+  );
+  const editorDoc = editor?.state.doc;
+  const hasVisibleThreads = visibleThreads.length > 0;
+  const projection = useMemo(
+    () =>
+      open && hasVisibleThreads && editor && editorDoc ? projectChatDocumentText(editor) : null,
+    [editor, editorDoc, hasVisibleThreads, open],
   );
   const threadViews = useMemo(
     () =>
       visibleThreads.map((thread) => ({
         thread,
-        mappedAnchor: mapAnchor({
-          anchor: thread.anchor,
-          baseDoc: { text: thread.historyText },
-          ops: [],
-          currentDoc: { text: currentText },
-          targetVersion: baseVersion ?? thread.anchor.baseVersion,
-        }),
+        mappedAnchor: mapThreadAnchor(
+          thread,
+          editor,
+          projection,
+          projection?.text ?? currentText,
+          baseVersion,
+        ),
       })),
-    [baseVersion, currentText, visibleThreads],
+    [baseVersion, currentText, editor, projection, visibleThreads],
   ) satisfies ThreadView[];
   const [anchorMarkers, setAnchorMarkers] = useState<AnchorMarker[]>([]);
 
   useEffect(() => {
-    if (!editor || !open || !threadViews.length) {
+    if (newThreadDraft) {
+      newThreadTextareaRef.current?.focus();
+    }
+  }, [newThreadDraft]);
+
+  useEffect(() => {
+    setNewThreadDraft(null);
+    setNewThreadBody('');
+    setPostStatus('');
+    setPostError('');
+    setReplyDrafts({});
+    pendingThreadFocusRef.current = null;
+    pendingThreadIdRef.current = null;
+  }, [docId]);
+
+  useEffect(() => {
+    if (!editor || !projection || !open || !threadViews.length) {
       setAnchorMarkers([]);
       return;
     }
     let frame: number | null = null;
     const updateMarkers = () => {
+      if (editor.isDestroyed || editor.state.doc !== editorDoc) return;
       const nextMarkers = threadViews.flatMap(({ thread, mappedAnchor }) => {
         if (mappedAnchor.orphaned) return [];
+        const range = projection.toEditorRange(mappedAnchor);
+        if (!range) return [];
         try {
-          const targetText = currentText.slice(mappedAnchor.from, mappedAnchor.to);
-          const range = docRangeForText(editor, targetText, mappedAnchor.from);
-          const from = range?.from ?? docPositionForTextOffset(editor, mappedAnchor.from);
-          const coords = editor.view.coordsAtPos(from);
+          const coords = editor.view.coordsAtPos(range.from);
           return [
             {
               threadId: thread.id,
@@ -381,55 +343,126 @@ export function ChatPanel({
       editor.off('transaction', scheduleUpdate);
       editor.off('selectionUpdate', scheduleUpdate);
     };
-  }, [currentText, editor, open, threadViews]);
+  }, [editor, editorDoc, open, projection, threadViews]);
   const threadViewsById = useMemo(
     () => new Map(threadViews.map((view) => [view.thread.id, view])),
     [threadViews],
   );
 
+  useEffect(() => {
+    const threadId = pendingThreadFocusRef.current;
+    if (!threadId) return;
+    const thread = document.getElementById(`chat-thread-${domId(threadId)}`);
+    if (!thread) return;
+    pendingThreadFocusRef.current = null;
+    thread.focus();
+  }, [activeThreadId, threadViews]);
+
   if (!open) return null;
 
-  const createThread = () => {
-    if (!selectionText || !baseVersion) return;
-    const from = currentText.indexOf(selectionText);
-    if (from < 0) return;
-    const anchor = createAnchor({
-      baseVersion,
-      docText: currentText,
-      from,
-      to: from + selectionText.length,
+  const openThreadDraft = () => {
+    if (chatActionsDisabled || !editor || editor.isDestroyed || (!baseVersion && !realtimeStore)) {
+      return;
+    }
+    const documentText = projectChatDocumentText(editor);
+    const textRange = documentText.toTextRange(editor.state.selection);
+    const editorRange = textRange && documentText.toEditorRange(textRange);
+    const relativeRange =
+      realtimeStore && editorRange ? captureChatAnchorRange(editor, editorRange) : null;
+    if (!textRange || !editorRange || (realtimeStore && !relativeRange)) {
+      setPostError('This selection is unavailable. Select the text again.');
+      return;
+    }
+    setNewThreadDraft({
+      anchor: {
+        ...createAnchor({
+          baseVersion: realtimeStore ? null : baseVersion,
+          docText: documentText.text,
+          ...textRange,
+        }),
+        ...(relativeRange ? { relativeRange } : {}),
+      },
+      quote: documentText.text.slice(textRange.from, textRange.to),
+      historyText: realtimeStore ? '' : documentText.text,
     });
-    updateThreads((items) => {
-      const id = createLocalId('thread');
-      const ts = nowIso();
+    setNewThreadBody('');
+    setPostError('');
+    setPostStatus('');
+  };
+
+  const cancelThreadDraft = () => {
+    setNewThreadDraft(null);
+    setNewThreadBody('');
+    setPostError('');
+    pendingThreadIdRef.current = null;
+    window.requestAnimationFrame(() => createThreadButtonRef.current?.focus());
+  };
+
+  const focusDocumentForSelection = () => {
+    if (!editor || editor.isDestroyed) return;
+    const focusEditor = () => {
+      if (editor.isDestroyed) return;
+      editor.commands.focus();
+    };
+    if (requestDocumentNavigation) {
+      requestDocumentNavigation(focusEditor);
+      return;
+    }
+    focusEditor();
+  };
+
+  const createThread = async () => {
+    const body = newThreadBody.trim();
+    if (chatActionsDisabled || !newThreadDraft || !body) return;
+    const id =
+      pendingThreadIdRef.current ?? (realtimeStore ? crypto.randomUUID() : createLocalId('thread'));
+    pendingThreadIdRef.current = id;
+    const ts = nowIso();
+    const createLocalThread = (items: LocalThread[]): LocalThread[] => {
       const message: ChatMessage = {
         id: createLocalId('message'),
         threadId: id,
         author: LOCAL_USER,
         ts,
-        body: `Thread on "${selectionText}"`,
+        body,
       };
       return [
         ...items,
         {
           id,
           docId,
-          anchor,
+          anchor: newThreadDraft.anchor,
           messages: [message],
           filters: {},
-          historyText: currentText,
+          historyText: newThreadDraft.historyText,
           status: 'open',
           resolvedAt: null,
           updatedAt: ts,
         },
       ];
-    });
+    };
+    const created = realtimeStore
+      ? await submitReview({
+          type: 'create',
+          threadId: id,
+          anchor: { ...newThreadDraft.anchor, baseVersion: null },
+          body,
+        })
+      : updateLocalThreads(createLocalThread);
+    if (!created) return;
+    pendingThreadFocusRef.current = id;
+    setActiveThreadId(id);
+    setFilter('all');
+    setPostStatus('Comment posted.');
+    setNewThreadDraft(null);
+    setNewThreadBody('');
+    pendingThreadIdRef.current = null;
   };
 
-  const addReply = (threadId: string, author: ChatMessage['author'], body: string) => {
+  const addLocalReply = (threadId: string, author: ChatMessage['author'], body: string) => {
     const trimmed = body.trim();
-    if (!trimmed) return;
-    updateThreads((items) =>
+    if (!trimmed || chatActionsDisabled || realtimeStore) return false;
+    return updateLocalThreads((items) =>
       items.map((thread) => {
         if (thread.id !== threadId) return thread;
         const ts = nowIso();
@@ -451,17 +484,25 @@ export function ChatPanel({
     );
   };
 
-  const addUserReply = (threadId: string, body: string) => {
-    addReply(threadId, LOCAL_USER, body);
-    setReplyDrafts((drafts) => ({ ...drafts, [threadId]: '' }));
+  const addUserReply = async (threadId: string, body: string) => {
+    if (chatActionsDisabled || !body.trim()) return;
+    const added = realtimeStore
+      ? await submitReview({ type: 'reply', threadId, body })
+      : addLocalReply(threadId, LOCAL_USER, body);
+    if (added) setReplyDrafts((drafts) => ({ ...drafts, [threadId]: '' }));
   };
 
   const addAiReply = (threadId: string) => {
-    addReply(threadId, AI_USER, 'AI reply with current document context.');
+    if (showTestAiReply && !realtimeStore) addLocalReply(threadId, AI_USER, 'Fixture AI reply.');
   };
 
-  const setThreadStatus = (threadId: string, status: ThreadStatus) => {
-    updateThreads((items) =>
+  const setThreadStatus = async (threadId: string, status: ChatThreadStatus) => {
+    if (chatActionsDisabled) return;
+    if (realtimeStore) {
+      await submitReview({ type: 'status', threadId, status });
+      return;
+    }
+    updateLocalThreads((items) =>
       items.map((thread) => {
         if (thread.id !== threadId) return thread;
         const ts = nowIso();
@@ -484,14 +525,30 @@ export function ChatPanel({
       setAnchorJumpStatus(`Document target for ${thread.anchor.token.text} is unavailable.`);
       return;
     }
-    const targetText =
-      currentText.slice(mappedAnchor.from, mappedAnchor.to) || thread.anchor.token.text;
-    const range = docRangeForText(editor, targetText, mappedAnchor.from);
-    const from = range?.from ?? docPositionForTextOffset(editor, mappedAnchor.from);
-    const to = range?.to ?? Math.max(from + 1, docPositionForTextOffset(editor, mappedAnchor.to));
-    editor.chain().focus().setTextSelection({ from, to }).run();
-    scrollSelectionIntoView();
-    setAnchorJumpStatus(`Selected ${thread.anchor.token.text} in the document.`);
+    const selectDocumentTarget = () => {
+      if (editor.isDestroyed) return;
+      const documentText =
+        editor.state.doc === editorDoc && projection ? projection : projectChatDocumentText(editor);
+      const liveAnchor = mapThreadAnchor(
+        thread,
+        editor,
+        documentText,
+        documentText.text,
+        baseVersion,
+      );
+      const range = !liveAnchor.orphaned && documentText.toEditorRange(liveAnchor);
+      if (!range || !editor.chain().focus().setTextSelection(range).run()) {
+        setAnchorJumpStatus(`Document target for ${thread.anchor.token.text} is unavailable.`);
+        return;
+      }
+      scrollSelectionIntoView();
+      setAnchorJumpStatus(`Selected ${thread.anchor.token.text} in the document.`);
+    };
+    if (requestDocumentNavigation) {
+      requestDocumentNavigation(selectDocumentTarget);
+      return;
+    }
+    selectDocumentTarget();
   };
 
   return (
@@ -520,51 +577,151 @@ export function ChatPanel({
         );
       })}
       <div className="chat-panel-header">
-        <h2 className="chat-panel-title">Doc Chat</h2>
         <span className="chat-panel-count" data-testid="chat-count">
           {visibleThreads.length} {visibleThreads.length === 1 ? 'thread' : 'threads'}
         </span>
       </div>
 
+      {!mutationEnabled ? (
+        <p role="status" data-testid="chat-mutation-unavailable">
+          {mutationUnavailableReason}
+        </p>
+      ) : realtimeStore && !reviewReady ? (
+        <p role="status" data-testid="chat-connection-unavailable">
+          Shared discussion is unavailable on this connection.
+        </p>
+      ) : null}
+
       <div className="chat-controls">
-        <button
-          type="button"
-          className="chat-action-button"
-          data-testid="chat-create-thread"
-          disabled={!selectionText || !baseVersion}
-          onClick={createThread}
-        >
-          New thread
-        </button>
-        <button
-          type="button"
-          className="chat-filter-button"
-          data-testid="chat-filter-author"
-          data-active={filter === 'author' ? 'true' : 'false'}
-          onClick={() => setFilter('author')}
-        >
-          local-user
-        </button>
-        <button
-          type="button"
-          className="chat-filter-button"
-          data-testid="chat-filter-ai"
-          data-active={filter === 'ai' ? 'true' : 'false'}
-          onClick={() => setFilter('ai')}
-        >
-          AI
-        </button>
-        <button
-          type="button"
-          className="chat-filter-button"
-          data-testid="chat-filter-clear"
-          onClick={() => setFilter('all')}
-        >
-          All
-        </button>
+        {showSelectionGuide ? (
+          <div className="chat-selection-guide" data-testid="chat-selection-guide">
+            <p>Select text in the document to start a comment.</p>
+            <button
+              type="button"
+              className="chat-action-button chat-selection-action"
+              data-testid="chat-select-document-text"
+              onClick={focusDocumentForSelection}
+            >
+              Select text in document
+            </button>
+          </div>
+        ) : (
+          <button
+            ref={createThreadButtonRef}
+            type="button"
+            className="chat-action-button"
+            data-testid="chat-create-thread"
+            disabled={
+              chatActionsDisabled ||
+              !selectionText ||
+              (!realtimeStore && !baseVersion) ||
+              Boolean(newThreadDraft)
+            }
+            aria-expanded={Boolean(newThreadDraft)}
+            aria-controls="chat-new-thread-composer"
+            onClick={openThreadDraft}
+          >
+            Add comment
+          </button>
+        )}
+        {threads.length ? (
+          <>
+            <button
+              type="button"
+              className="chat-filter-button"
+              data-testid="chat-filter-author"
+              data-active={filter === 'author' ? 'true' : 'false'}
+              onClick={() => setFilter('author')}
+            >
+              {realtimeStore ? 'My threads' : LOCAL_USER.id}
+            </button>
+            <button
+              type="button"
+              className="chat-filter-button"
+              data-testid="chat-filter-ai"
+              data-active={filter === 'ai' ? 'true' : 'false'}
+              onClick={() => setFilter('ai')}
+            >
+              AI
+            </button>
+            <button
+              type="button"
+              className="chat-filter-button"
+              data-testid="chat-filter-clear"
+              onClick={() => setFilter('all')}
+            >
+              All
+            </button>
+          </>
+        ) : null}
       </div>
+      {newThreadDraft ? (
+        <form
+          id="chat-new-thread-composer"
+          className="chat-new-thread-composer"
+          data-testid="chat-new-thread-composer"
+          onSubmit={(event) => {
+            event.preventDefault();
+            void createThread();
+          }}
+        >
+          <div className="chat-new-thread-context">
+            <span className="chat-context-label">Selected text</span>
+            <blockquote
+              id="chat-new-thread-quote"
+              className="chat-new-thread-quote"
+              data-testid="chat-new-thread-quote"
+            >
+              {newThreadDraft.quote}
+            </blockquote>
+          </div>
+          <label className="chat-new-thread-label" htmlFor="chat-new-thread-comment">
+            Comment
+          </label>
+          <textarea
+            ref={newThreadTextareaRef}
+            id="chat-new-thread-comment"
+            className="chat-new-thread-textarea"
+            data-testid="chat-new-thread-textarea"
+            aria-describedby="chat-new-thread-quote"
+            placeholder="Write your comment"
+            rows={3}
+            disabled={chatActionsDisabled}
+            value={newThreadBody}
+            onChange={(event) => setNewThreadBody(event.target.value)}
+          />
+          <div className="chat-new-thread-actions">
+            <button
+              type="button"
+              className="chat-action-button"
+              data-testid="chat-cancel-thread"
+              disabled={sendingReview}
+              onClick={cancelThreadDraft}
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              className="chat-action-button"
+              data-testid="chat-post-thread"
+              disabled={chatActionsDisabled || !newThreadBody.trim()}
+            >
+              {sendingReview ? 'Posting…' : 'Post comment'}
+            </button>
+          </div>
+        </form>
+      ) : null}
+      {suggestionComposer}
+      {postError ? (
+        <p role="alert" data-testid="chat-post-error">
+          {postError}
+        </p>
+      ) : null}
       <p className="sr-only" aria-live="polite" data-testid="chat-anchor-jump-status">
         {anchorJumpStatus}
+      </p>
+      <p className="sr-only" role="status" aria-live="polite" data-testid="chat-post-status">
+        {postStatus}
       </p>
 
       {threadViews.length ? (
@@ -574,13 +731,18 @@ export function ChatPanel({
           aria-label="Document chat threads"
         >
           {threadViews.map(({ thread, mappedAnchor }) => {
-            const currentContext = mappedAnchor.orphaned
-              ? 'Context lost'
-              : currentText.slice(mappedAnchor.from, mappedAnchor.to);
+            const accepted = thread.proposal?.status === 'accepted';
+            const currentContext = accepted
+              ? thread.proposal?.replacement || 'Original text removed'
+              : mappedAnchor.orphaned
+                ? 'Context lost'
+                : (projection?.text ?? currentText).slice(mappedAnchor.from, mappedAnchor.to);
             const threadDomId = `chat-thread-${domId(thread.id)}`;
             const threadTitleId = `chat-thread-title-${domId(thread.id)}`;
             const threadTitle = `Thread on ${thread.anchor.token.text}`;
             const replyDraft = replyDrafts[thread.id] ?? '';
+            const threadActionsDisabled =
+              chatActionsDisabled || Boolean(realtimeStore && !isReviewId(thread.id));
             return (
               <li key={thread.id}>
                 <article
@@ -601,7 +763,7 @@ export function ChatPanel({
                     <span className="chat-thread-status" data-testid="chat-thread-status">
                       {thread.status === 'resolved' ? 'Resolved' : 'Open'}
                     </span>
-                    {mappedAnchor.orphaned ? (
+                    {accepted ? null : mappedAnchor.orphaned ? (
                       <span className="chat-orphan" data-testid="chat-orphaned">
                         Orphaned
                       </span>
@@ -617,34 +779,48 @@ export function ChatPanel({
                     </span>
                     <div className="chat-anchor-copy">
                       <span className="chat-context-label">
-                        {mappedAnchor.orphaned ? 'Detached target' : 'Current target'}
+                        {accepted
+                          ? 'Accepted wording'
+                          : mappedAnchor.orphaned
+                            ? 'Detached target'
+                            : 'Current target'}
                       </span>
                       <p className="chat-anchor-quote" data-testid="chat-current-target">
                         {currentContext}
                       </p>
                     </div>
-                    <button
-                      type="button"
-                      className="chat-anchor-jump"
-                      data-testid="chat-jump-anchor"
-                      disabled={mappedAnchor.orphaned}
-                      aria-label={`Show document target for thread on ${thread.anchor.token.text}`}
-                      onClick={() => jumpToMappedAnchor(mappedAnchor, thread)}
-                    >
-                      <Icon name="eye" />
-                      <span>Show</span>
-                    </button>
+                    {!accepted ? (
+                      <button
+                        type="button"
+                        className="chat-anchor-jump"
+                        data-testid="chat-jump-anchor"
+                        disabled={mappedAnchor.orphaned}
+                        aria-label={`Show document target for thread on ${thread.anchor.token.text}`}
+                        onClick={() => jumpToMappedAnchor(mappedAnchor, thread)}
+                      >
+                        <Icon name="eye" />
+                        <span>Show</span>
+                      </button>
+                    ) : null}
                   </div>
-                  <div className="chat-context-grid" data-testid="chat-context-grid">
-                    <div>
-                      <span className="chat-context-label">History</span>
-                      <p data-testid="chat-history-context">{thread.anchor.token.text}</p>
+                  {renderSuggestion?.(
+                    thread,
+                    Boolean(mappedAnchor.orphaned) || currentContext !== thread.anchor.token.text,
+                  )}
+                  {!accepted ? (
+                    <div className="chat-context-grid" data-testid="chat-context-grid">
+                      <div>
+                        <span className="chat-context-label">
+                          {thread.anchor.baseVersion ? 'History' : 'Original selection'}
+                        </span>
+                        <p data-testid="chat-history-context">{thread.anchor.token.text}</p>
+                      </div>
+                      <div>
+                        <span className="chat-context-label">Current</span>
+                        <p data-testid="chat-current-context">{currentContext}</p>
+                      </div>
                     </div>
-                    <div>
-                      <span className="chat-context-label">Current</span>
-                      <p data-testid="chat-current-context">{currentContext}</p>
-                    </div>
-                  </div>
+                  ) : null}
                   <ul
                     className="chat-message-list"
                     aria-label={`Messages for ${thread.anchor.token.text}`}
@@ -665,6 +841,7 @@ export function ChatPanel({
                       className="chat-reply-input"
                       data-testid="chat-reply-input"
                       aria-label={`Reply to thread on ${thread.anchor.token.text}`}
+                      disabled={threadActionsDisabled}
                       value={replyDraft}
                       onChange={(event) =>
                         setReplyDrafts((drafts) => ({
@@ -677,8 +854,8 @@ export function ChatPanel({
                       type="button"
                       className="chat-action-button"
                       data-testid="chat-add-reply"
-                      disabled={!replyDraft.trim()}
-                      onClick={() => addUserReply(thread.id, replyDraft)}
+                      disabled={threadActionsDisabled || !replyDraft.trim()}
+                      onClick={() => void addUserReply(thread.id, replyDraft)}
                     >
                       Reply
                     </button>
@@ -689,7 +866,8 @@ export function ChatPanel({
                         type="button"
                         className="chat-action-button"
                         data-testid="chat-reopen-thread"
-                        onClick={() => setThreadStatus(thread.id, 'open')}
+                        disabled={threadActionsDisabled}
+                        onClick={() => void setThreadStatus(thread.id, 'open')}
                       >
                         Reopen
                       </button>
@@ -698,27 +876,31 @@ export function ChatPanel({
                         type="button"
                         className="chat-action-button"
                         data-testid="chat-resolve-thread"
-                        onClick={() => setThreadStatus(thread.id, 'resolved')}
+                        disabled={threadActionsDisabled}
+                        onClick={() => void setThreadStatus(thread.id, 'resolved')}
                       >
                         Resolve
                       </button>
                     )}
-                    <button
-                      type="button"
-                      className="chat-action-button"
-                      data-testid="chat-add-ai"
-                      aria-label={`Add AI reply to thread on ${thread.anchor.token.text}`}
-                      onClick={() => addAiReply(thread.id)}
-                    >
-                      Add AI reply
-                    </button>
+                    {showTestAiReply && !realtimeStore ? (
+                      <button
+                        type="button"
+                        className="chat-action-button"
+                        data-testid="chat-add-ai"
+                        aria-label={`Add AI reply to thread on ${thread.anchor.token.text}`}
+                        disabled={threadActionsDisabled}
+                        onClick={() => addAiReply(thread.id)}
+                      >
+                        Add test AI reply
+                      </button>
+                    ) : null}
                   </div>
                 </article>
               </li>
             );
           })}
         </ol>
-      ) : (
+      ) : showSelectionGuide ? null : (
         <p className="chat-empty" data-testid="chat-empty">
           No threads.
         </p>

@@ -2,8 +2,17 @@
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
     "composite": true,
-    "lib": ["ES2022"],
-    "moduleResolution": "Bundler"
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "moduleResolution": "Bundler",
+    "rootDir": ".."
   },
-  "include": ["src/**/*.ts", "src/**/*.d.ts"]
+  "include": [
+    "src/**/*.ts",
+    "src/**/*.d.ts",
+    "../doc-chat/src/**/*.ts",
+    "../editor-core/src/**/*.ts",
+    "../mentions/src/**/*.ts",
+    "../rbac/src/**/*.ts",
+    "../types/src/**/*.ts"
+  ]
 }

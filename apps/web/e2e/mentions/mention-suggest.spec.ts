@@ -1,10 +1,6 @@
-import { expect, test, type Page } from '@playwright/test';
+import type { Page } from '@playwright/test';
 
-const ready = async (page: Page) =>
-  page.waitForFunction(() =>
-    Boolean((window as unknown as { __lashEditor?: unknown }).__lashEditor),
-  );
-
+import { expect, test } from './development-loopback-mention-fixture';
 const setEditorText = async (page: Page, text: string) =>
   page.evaluate((nextText) => {
     const editor = (window as unknown as { __lashEditor: import('@tiptap/core').Editor })
@@ -13,9 +9,8 @@ const setEditorText = async (page: Page, text: string) =>
     editor.commands.focus('end');
   }, text);
 
-test('mention-suggest', async ({ page }) => {
-  await page.goto('/');
-  await ready(page);
+test('mention-suggest', async ({ page, openSyntheticMentionFixture }) => {
+  await openSyntheticMentionFixture(page);
 
   await page.getByTestId('lash-editor-content').click();
   await page.keyboard.type('@Ada');

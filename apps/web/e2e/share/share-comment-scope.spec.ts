@@ -1,7 +1,9 @@
 import { expect, test } from '@playwright/test';
 
-test('share-comment-scope', async ({ page }) => {
-  await page.goto('/');
+import { openDevelopmentLoopbackShareFixture } from './development-loopback-fixture';
+
+test('share-comment-scope development fixture maps comment capabilities', async ({ page }) => {
+  await openDevelopmentLoopbackShareFixture(page);
   await page.getByTestId('share-create-comment').click();
 
   await expect(page.getByTestId('share-validation')).toContainText('Access granted: comment');

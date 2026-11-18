@@ -1,4 +1,20 @@
-import { expect, test } from '@playwright/test';
+import { expect, test, type Page } from '@playwright/test';
+
+type LashTestWindow = Window & {
+  __lashEditor?: import('@tiptap/core').Editor;
+};
+
+const waitForEditor = async (page: Page) => {
+  await page.waitForFunction(() => Boolean((window as LashTestWindow).__lashEditor));
+  await expect(page.locator('.lash-app')).toHaveAttribute('data-entrance', 'false');
+};
+
+const durationInMilliseconds = (value: string) => {
+  const trimmed = value.trim();
+  if (trimmed.endsWith('ms')) return Number.parseFloat(trimmed);
+  if (trimmed.endsWith('s')) return Number.parseFloat(trimmed) * 1000;
+  return Number.NaN;
+};
 
 test.describe('focus-mode-a11y', () => {
   test('hides chrome while keeping landmarks available', async ({ page }) => {
@@ -17,5 +33,69 @@ test.describe('focus-mode-a11y', () => {
     await expect(page.locator('[data-testid="lash-outline-panel"]')).toHaveCount(0);
     await expect(heading).toBeVisible();
     await expect(page.getByRole('main')).toBeVisible();
+  });
+});
+
+test.describe('focus-mode-a11y mobile', () => {
+  test.use({
+    viewport: { width: 375, height: 812 },
+    hasTouch: true,
+  });
+
+  test('keeps the title, editor region, and stateful exit action discoverable', async ({
+    page,
+  }) => {
+    await page.emulateMedia({ reducedMotion: 'reduce' });
+    await page.goto('/');
+    await waitForEditor(page);
+
+    const shell = page.getByTestId('lash-editor-shell');
+    const tools = page.getByRole('button', { name: 'More document tools' });
+    await expect(tools).toHaveAttribute('aria-expanded', 'false');
+    await tools.tap();
+    const enter = page.getByTestId('mobile-focus-mode-toggle');
+    await expect(enter).toHaveAttribute('aria-pressed', 'false');
+    expect(
+      await enter.evaluate((button) => (button as HTMLButtonElement).tabIndex),
+    ).toBeGreaterThanOrEqual(0);
+
+    await enter.tap();
+    await expect(shell).toHaveAttribute('data-focus-mode', 'true');
+
+    const exit = page.getByRole('button', { name: 'Exit focus mode' });
+    await expect(exit).toBeVisible();
+    await expect(exit).toHaveAttribute('aria-pressed', 'true');
+    await expect(page.getByRole('textbox', { name: 'Document title' })).toBeVisible();
+    await expect(shell.getByRole('region', { name: 'Writing canvas' })).toBeVisible();
+
+    const reducedMotionDurations = await page.evaluate(() => {
+      const selectors = ['.lash-app', '.lash-topbar', '.lash-doc-paper'];
+      return selectors.map((selector) => {
+        const element = document.querySelector<HTMLElement>(selector);
+        if (!element) throw new Error(`Missing reduced-motion target: ${selector}`);
+        const style = getComputedStyle(element);
+        return {
+          selector,
+          animationDuration: style.animationDuration,
+          transitionDuration: style.transitionDuration,
+        };
+      });
+    });
+    for (const row of reducedMotionDurations) {
+      for (const duration of `${row.animationDuration},${row.transitionDuration}`.split(',')) {
+        expect(
+          durationInMilliseconds(duration),
+          `${row.selector} duration ${duration}`,
+        ).toBeLessThanOrEqual(0.01);
+      }
+    }
+
+    await exit.focus();
+    await expect(exit).toBeFocused();
+    await page.keyboard.press('Enter');
+    await expect(shell).toHaveAttribute('data-focus-mode', 'false');
+    await expect(page.getByRole('button', { name: 'More document tools' })).toBeVisible();
+    await expect(page.getByRole('textbox', { name: 'Document title' })).toBeVisible();
+    await expect(shell.getByRole('region', { name: 'Writing canvas' })).toBeVisible();
   });
 });

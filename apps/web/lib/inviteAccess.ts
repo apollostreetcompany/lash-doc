@@ -10,6 +10,8 @@ import { createDocumentId, type RevocationRecord, type ShareScope } from '@lash/
 const INVITE_RECORDS_KEY = 'lash:invite-records:v1';
 const INVITE_REVOCATIONS_KEY = 'lash:invite-revocations:v1';
 const LOCAL_INVITE_SECRET = 'lash-local-invite-secret';
+const VALIDATED_INVITE_VERSION = 1 as const;
+const MAX_INVITE_TOKEN_LENGTH = 16_384;
 
 type InviteStatus = 'active' | 'revoked' | 'expired';
 
@@ -26,9 +28,31 @@ export type InviteRecord = {
   status: InviteStatus;
 };
 
+export type CreateInviteRecordResult =
+  | { ok: true; record: InviteRecord }
+  | { ok: false; reason: 'commit-rejected' | 'storage-conflict' };
+
 export type InviteAccess =
   | { ok: true; scope: ShareScope; email?: string; token: string }
-  | { ok: false; reason: 'expired' | 'invalid' | 'revoked' | 'document-mismatch' };
+  | {
+      ok: false;
+      reason: 'expired' | 'invalid' | 'revoked' | 'document-mismatch' | 'unavailable';
+    };
+
+export type InviteAuthority = 'unavailable' | 'development-loopback';
+
+export type ValidatedInviteCredential = {
+  version: typeof VALIDATED_INVITE_VERSION;
+  authority: 'configured' | 'development-loopback';
+  documentId: string;
+  token: string;
+  validatedAt: string;
+};
+
+export type InviteFragmentCredential =
+  | { state: 'absent' }
+  | { state: 'invalid' }
+  | { state: 'valid'; token: string };
 
 const redactionPolicy = {
   sha: 'local-redaction-v1',
@@ -75,16 +99,32 @@ const createLocalSigner = (storage: Storage) =>
     audit: createAuditLog({ adapter: 'memory' }),
   });
 
-const normalizeInviteRecords = (storage: Storage): InviteRecord[] =>
-  readJsonArray<InviteRecord>(storage, INVITE_RECORDS_KEY).map((record) => ({
+const normalizeInviteRecordList = (records: InviteRecord[], now: string): InviteRecord[] =>
+  records.map((record) => ({
     ...record,
     status:
       record.revokedAt !== null
         ? 'revoked'
-        : record.expiresAt && record.expiresAt <= new Date().toISOString()
+        : record.expiresAt && record.expiresAt <= now
           ? 'expired'
           : 'active',
   }));
+
+const parseInviteRecordRevision = (raw: string | null, now: string): InviteRecord[] | null => {
+  if (raw === null) return [];
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    return Array.isArray(parsed) ? normalizeInviteRecordList(parsed as InviteRecord[], now) : null;
+  } catch {
+    return null;
+  }
+};
+
+const normalizeInviteRecords = (storage: Storage): InviteRecord[] =>
+  normalizeInviteRecordList(
+    readJsonArray<InviteRecord>(storage, INVITE_RECORDS_KEY),
+    new Date().toISOString(),
+  );
 
 const saveInviteRecords = (storage: Storage, records: InviteRecord[]) => {
   writeJsonArray(storage, INVITE_RECORDS_KEY, records);
@@ -99,45 +139,84 @@ export const expiryForOption = (option: 'never' | '7d' | 'expired') => {
   return new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
 };
 
-export const createInviteRecord = async (input: {
-  storage: Storage;
-  docId: string;
-  email: string;
-  scope: ShareScope;
-  expiresAt: string | null;
-  origin: string;
-}): Promise<InviteRecord> => {
-  const signer = createLocalSigner(input.storage);
+export const createInviteRecord = async (
+  input: {
+    storage: Storage;
+    docId: string;
+    email: string;
+    scope: ShareScope;
+    expiresAt: string | null;
+    origin: string;
+    authority: 'development-loopback';
+  },
+  options: {
+    commitGuard: () => boolean;
+  },
+): Promise<CreateInviteRecordResult> => {
+  const authority = input.authority;
+  const storage = input.storage;
+  const docId = input.docId;
+  const email = input.email;
+  const scope = input.scope;
+  const expiresAt = input.expiresAt;
+  const origin = input.origin;
+  let commitGuard: () => boolean;
+  let initialRevision: string | null;
+  try {
+    commitGuard = options.commitGuard;
+    initialRevision = storage.getItem(INVITE_RECORDS_KEY);
+  } catch {
+    return { ok: false, reason: 'storage-conflict' };
+  }
+  if (authority !== 'development-loopback') {
+    throw new Error('Local invite issuance is restricted to the development loopback fixture.');
+  }
+  const signer = createLocalSigner(storage);
   const createdAt = new Date().toISOString();
   const token = await signer.sign({
-    docId: createDocumentId(input.docId),
-    scope: input.scope,
-    expiresAt: input.expiresAt,
+    docId: createDocumentId(docId),
+    scope,
+    expiresAt,
     issuedBy: 'local-user',
     redactionPolicy: redactionPolicy.sha,
     redactionPolicyVersion: redactionPolicy.version,
   });
-  const link = `${input.origin}/doc/${encodeURIComponent(input.docId)}#invite=${encodeURIComponent(
+  const link = `${origin}/doc/${encodeURIComponent(docId)}#invite=${encodeURIComponent(
     token.token,
   )}`;
   const record: InviteRecord = {
     jti: token.jti,
-    docId: input.docId,
-    email: input.email,
-    scope: input.scope,
+    docId,
+    email,
+    scope,
     token: token.token,
     link,
-    expiresAt: input.expiresAt,
+    expiresAt,
     createdAt,
     revokedAt: null,
-    status: input.expiresAt && input.expiresAt <= createdAt ? 'expired' : 'active',
+    status: expiresAt && expiresAt <= createdAt ? 'expired' : 'active',
   };
-  const records = normalizeInviteRecords(input.storage).filter(
-    (existing) => existing.jti !== record.jti,
-  );
+  const initialRecords = parseInviteRecordRevision(initialRevision, createdAt);
+  if (!initialRecords) return { ok: false, reason: 'storage-conflict' };
+  const records = initialRecords.filter((existing) => existing.jti !== record.jti);
   records.push(record);
-  saveInviteRecords(input.storage, records);
-  return record;
+  const preparedStorageValue = JSON.stringify(records);
+  let allowed = false;
+  try {
+    allowed = commitGuard() === true;
+  } catch {
+    allowed = false;
+  }
+  if (!allowed) return { ok: false, reason: 'commit-rejected' };
+  try {
+    if (storage.getItem(INVITE_RECORDS_KEY) !== initialRevision) {
+      return { ok: false, reason: 'storage-conflict' };
+    }
+    storage.setItem(INVITE_RECORDS_KEY, preparedStorageValue);
+  } catch {
+    return { ok: false, reason: 'storage-conflict' };
+  }
+  return { ok: true, record };
 };
 
 export const revokeInviteRecord = async (storage: Storage, jti: string, reason = 'revoked') => {
@@ -156,18 +235,132 @@ export const revokeInviteRecord = async (storage: Storage, jti: string, reason =
   );
 };
 
-export const inviteTokenFromLocation = (location: Location) => {
+export const legacyInviteCredentialKey = (docId: string) => `lash:invite-token:${docId}`;
+
+export const validatedInviteCredentialKey = (docId: string) => `lash:validated-invite:v1:${docId}`;
+
+const decodeFragmentComponent = (value: string) => {
+  try {
+    return decodeURIComponent(value.replaceAll('+', ' '));
+  } catch {
+    return null;
+  }
+};
+
+export const readInviteFragmentCredential = (
+  location: Pick<Location, 'hash'>,
+): InviteFragmentCredential => {
+  const hash = location.hash.startsWith('#') ? location.hash.slice(1) : location.hash;
+  const inviteParts = hash.split('&').filter((part) => {
+    const separator = part.indexOf('=');
+    const rawKey = separator === -1 ? part : part.slice(0, separator);
+    return decodeFragmentComponent(rawKey) === 'invite';
+  });
+  if (inviteParts.length === 0) return { state: 'absent' };
+  if (inviteParts.length !== 1) return { state: 'invalid' };
+  const separator = inviteParts[0].indexOf('=');
+  if (separator === -1) return { state: 'invalid' };
+  const token = decodeFragmentComponent(inviteParts[0].slice(separator + 1));
+  if (!token || token.length > MAX_INVITE_TOKEN_LENGTH) return { state: 'invalid' };
+  return { state: 'valid', token };
+};
+
+export const inviteTokenFromLocation = (location: Pick<Location, 'hash'>) => {
+  const credential = readInviteFragmentCredential(location);
+  return credential.state === 'valid' ? credential.token : null;
+};
+
+export const scrubInviteFragment = (
+  location: Pick<Location, 'hash' | 'pathname' | 'search'>,
+  history: Pick<History, 'replaceState'>,
+) => {
   const hash = location.hash.startsWith('#') ? location.hash.slice(1) : location.hash;
   const params = new URLSearchParams(hash);
-  return params.get('invite');
+  if (!params.has('invite')) return;
+  params.delete('invite');
+  const nextHash = params.toString();
+  history.replaceState(
+    null,
+    '',
+    `${location.pathname}${location.search}${nextHash ? `#${nextHash}` : ''}`,
+  );
+};
+
+const isValidatedInviteCredential = (
+  value: unknown,
+  documentId: string,
+): value is ValidatedInviteCredential => {
+  if (!value || typeof value !== 'object') return false;
+  const candidate = value as Partial<ValidatedInviteCredential>;
+  return (
+    candidate.version === VALIDATED_INVITE_VERSION &&
+    (candidate.authority === 'configured' || candidate.authority === 'development-loopback') &&
+    candidate.documentId === documentId &&
+    typeof candidate.token === 'string' &&
+    candidate.token.length > 0 &&
+    candidate.token.length <= MAX_INVITE_TOKEN_LENGTH &&
+    typeof candidate.validatedAt === 'string' &&
+    Number.isFinite(Date.parse(candidate.validatedAt))
+  );
+};
+
+export const readValidatedInviteCredential = (
+  storage: Storage | undefined,
+  documentId: string,
+): ValidatedInviteCredential | null => {
+  if (!storage) return null;
+  const key = validatedInviteCredentialKey(documentId);
+  try {
+    const raw = storage.getItem(key);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as unknown;
+    if (isValidatedInviteCredential(parsed, documentId)) return parsed;
+    storage.removeItem(key);
+  } catch {
+    try {
+      storage.removeItem(key);
+    } catch {
+      // Credential cleanup is best-effort in privacy-restricted browsers.
+    }
+  }
+  return null;
+};
+
+export const writeValidatedInviteCredential = (
+  storage: Storage | undefined,
+  credential: ValidatedInviteCredential,
+) => {
+  if (!storage || !isValidatedInviteCredential(credential, credential.documentId)) return;
+  storage.setItem(validatedInviteCredentialKey(credential.documentId), JSON.stringify(credential));
+};
+
+export const clearLegacyInviteCredential = (storage: Storage | undefined, documentId: string) => {
+  try {
+    storage?.removeItem(legacyInviteCredentialKey(documentId));
+  } catch {
+    // Do not let unavailable session storage weaken the access decision.
+  }
+};
+
+export const clearRoomInviteCredentials = (storage: Storage | undefined, documentId: string) => {
+  try {
+    storage?.removeItem(legacyInviteCredentialKey(documentId));
+    storage?.removeItem(validatedInviteCredentialKey(documentId));
+  } catch {
+    // The controller still drops its in-memory credential and fails closed.
+  }
 };
 
 export const validateInviteAccess = async (
-  storage: Storage,
+  storage: Storage | undefined,
   docId: string,
   token: string | null,
+  authority: InviteAuthority = 'unavailable',
 ): Promise<InviteAccess | null> => {
   if (!token) return null;
+  if (authority !== 'development-loopback' || !storage) {
+    return { ok: false, reason: 'unavailable' };
+  }
   const signer = createLocalSigner(storage);
   const result = await signer.validate(token);
   if (!result.ok) return { ok: false, reason: result.reason };

@@ -9,6 +9,10 @@ test('blame-gutter', async ({ page }) => {
   await page.getByTestId('lash-editor-content').click();
   await page.keyboard.type('Blame starts here');
 
+  await page.getByTestId('topbar-discussion-button').click();
+  await page.getByTestId('rail-tab-history').click();
+  await page.getByTestId('history-authorship-toggle').click();
+
   await expect(page.getByTestId('blame-gutter')).toBeVisible();
   await expect(page.getByTestId('blame-line')).toHaveCount(1);
   await expect(page.getByTestId('blame-line').first()).toContainText('local-user');

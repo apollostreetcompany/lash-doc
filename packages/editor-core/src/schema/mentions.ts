@@ -30,18 +30,22 @@ const LashMention = Node.create({
     return {
       kind: {
         default: 'user',
+        rendered: false,
         parseHTML: (element) => element.getAttribute('data-kind') ?? 'user',
       },
       refId: {
         default: '',
+        rendered: false,
         parseHTML: (element) => element.getAttribute('data-ref-id') ?? '',
       },
       display: {
         default: '',
+        rendered: false,
         parseHTML: (element) => element.getAttribute('data-display') ?? '',
       },
       iso: {
         default: null,
+        rendered: false,
         parseHTML: (element) => element.getAttribute('data-iso'),
       },
     };
@@ -52,8 +56,10 @@ const LashMention = Node.create({
   },
 
   renderHTML({ HTMLAttributes, node }) {
-    const iso = typeof node.attrs.iso === 'string' ? node.attrs.iso : undefined;
-    const display = String(node.attrs.display ?? '');
+    const hidden = node.attrs.kind === 'group';
+    const iso =
+      node.attrs.kind === 'date' && typeof node.attrs.iso === 'string' ? node.attrs.iso : undefined;
+    const label = visibleMentionLabel(node.attrs);
     return [
       'span',
       mergeAttributes(HTMLAttributes, {
@@ -61,18 +67,29 @@ const LashMention = Node.create({
         'data-testid': 'lash-inline-mention',
         'data-type': 'mention',
         'data-kind': node.attrs.kind,
-        'data-ref-id': node.attrs.refId,
-        'data-display': display,
+        ...(!hidden
+          ? {
+              'data-ref-id': node.attrs.refId,
+              'data-display': node.attrs.display,
+            }
+          : {}),
         ...(iso ? { 'data-iso': iso } : {}),
-        title: iso ?? display,
+        title: iso ?? label,
       }),
-      `@${display}`,
+      label,
     ];
   },
 
   renderText({ node }) {
-    return `@${String(node.attrs.display ?? '')}`;
+    return visibleMentionLabel(node.attrs);
   },
 });
+
+export const visibleMentionLabel = (attrs: Readonly<Record<string, unknown>>): string => {
+  // There is no account-backed group directory in the editor. A persisted
+  // label is not proof that the current reader can see the group.
+  if (attrs.kind === 'group') return '@hidden-group';
+  return typeof attrs.display === 'string' && attrs.display ? `@${attrs.display}` : '';
+};
 
 export const buildMentionExtensions = (_options?: LashMentionOptions): Extensions => [LashMention];

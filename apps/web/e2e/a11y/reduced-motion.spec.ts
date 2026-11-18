@@ -9,8 +9,6 @@ import { expect, test } from '@playwright/test';
  * audited; elements that aren't mounted in the current layout are
  * skipped.
  */
-test.use({ reducedMotion: 'reduce' });
-
 const TARGETS = ['.lash-sidebar', '.lash-topbar', '.lash-doc-paper', '.lash-rail'];
 
 // Browsers may return time values in different forms (`0s`, `0ms`,
@@ -32,9 +30,7 @@ const isAllZero = (value: string) =>
     .every((seconds) => Number.isFinite(seconds) && seconds <= ZERO_THRESHOLD_SECONDS);
 
 test('reduced motion zeroes animations', async ({ page }) => {
-  // `test.use({ reducedMotion })` should already set this on the context,
-  // but emulateMedia explicitly guarantees the page-level state too —
-  // some Playwright + WebKit/Chromium combinations need both.
+  // Reduced motion is a page media emulation, not a Playwright fixture option.
   await page.emulateMedia({ reducedMotion: 'reduce' });
   await page.goto('/');
   await page.waitForSelector('[data-testid="lash-editor-content"]');

@@ -1,5 +1,7 @@
 import { expect, test, type Page } from '@playwright/test';
 
+import { enableAiFixture } from './enable-ai-fixture';
+
 const ready = async (page: Page) =>
   page.waitForFunction(() =>
     Boolean((window as unknown as { __lashEditor?: unknown }).__lashEditor),
@@ -13,18 +15,25 @@ const selectDraft = async (page: Page) =>
   });
 
 test('ai-labeling', async ({ page }) => {
+  await enableAiFixture(page);
   await page.goto('/');
   await ready(page);
 
   await page.getByTestId('lash-editor-content').click();
   await page.keyboard.type('draft text');
+  await page.getByTestId('topbar-discussion-button').click();
+  await page.getByTestId('rail-tab-history').click();
   await expect(page.getByTestId('history-version')).toHaveCount(1, { timeout: 5000 });
 
   await selectDraft(page);
+  await page.getByTestId('rail-tab-ai').click();
+  await expect(page.getByTestId('rail-tab-ai')).toHaveAttribute('aria-selected', 'true');
+  await expect(page.getByRole('tabpanel', { name: 'AI' })).toBeVisible();
   await page.getByTestId('ai-improve-button').click();
   await page.getByTestId('ai-accept-button').click();
 
-  await expect(page.getByTestId('ai-label')).toContainText('AI Editor');
+  await expect(page.getByTestId('rail-tab-ai')).toHaveAccessibleName('AI');
+  await page.getByTestId('rail-tab-history').click();
   await expect(page.getByTestId('history-diff-insert')).toHaveAttribute(
     'data-author-id',
     'ai-editor',

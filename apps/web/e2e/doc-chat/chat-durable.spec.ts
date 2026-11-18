@@ -3,6 +3,8 @@ import type { Editor } from '@tiptap/core';
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
 import { once } from 'node:events';
 
+import { selectDiscussionTab } from '../discussion-tabs';
+
 type LashTestWindow = Window & {
   __lashEditor?: Editor;
 };
@@ -33,12 +35,11 @@ const seedEmptyDoc = async (page: Page) => {
 };
 
 const typeIntoEditor = async (page: Page, text: string) => {
-  await page.evaluate(() => {
+  await page.evaluate((content) => {
     const editor = (window as LashTestWindow).__lashEditor;
     if (!editor) throw new Error('Lash editor test hook is unavailable');
-    editor.commands.focus('end');
-  });
-  await page.keyboard.type(text);
+    editor.chain().focus('end').insertContent(content).run();
+  }, text);
   await expect.poll(() => editorText(page)).toContain(text);
 };
 
@@ -60,6 +61,8 @@ const selectText = async (page: Page, needle: string) => {
 const createThreadWithReply = async (page: Page, reply: string) => {
   await expect(page.getByTestId('chat-create-thread')).toBeEnabled();
   await page.getByTestId('chat-create-thread').click();
+  await page.getByTestId('chat-new-thread-textarea').fill('Please review this target.');
+  await page.getByTestId('chat-post-thread').click();
   await expect(page.getByTestId('chat-thread')).toHaveCount(1);
   await expect(page.getByTestId('chat-anchor-row')).toBeVisible();
   await expect(page.getByTestId('chat-current-target')).toContainText('target');
@@ -184,8 +187,10 @@ test.describe('durable comments', () => {
     await page.goto(`/doc/${docId}`);
     await seedEmptyDoc(page);
     await typeIntoEditor(page, 'Durable target thread');
+    await selectDiscussionTab(page, 'history');
     await expect(page.getByTestId('history-version').first()).toBeVisible();
 
+    await selectDiscussionTab(page, 'chat');
     await selectText(page, 'target');
     await createThreadWithReply(page, 'Please check this wording');
     await expectAnchorJumpSelects(page, 'target');
@@ -194,12 +199,13 @@ test.describe('durable comments', () => {
 
     await page.reload();
     await waitForEditor(page);
+    await selectDiscussionTab(page, 'chat');
     await expect(page.getByTestId('chat-thread')).toHaveCount(1);
     await expect(page.getByTestId('chat-anchor-row')).toBeVisible();
-    await expect(page.getByTestId('chat-current-target')).toContainText('Context lost');
-    await expect(page.getByTestId('chat-orphaned')).toContainText('Orphaned');
-    await expect(page.getByTestId('chat-document-anchor-marker')).toHaveCount(0);
-    await expect(page.getByTestId('chat-jump-anchor')).toBeDisabled();
+    await expect(page.getByTestId('chat-current-target')).toContainText('target');
+    await expect(page.getByTestId('chat-orphaned')).toHaveCount(0);
+    await expect(page.getByTestId('chat-document-anchor-marker')).toBeVisible();
+    await expectAnchorJumpSelects(page, 'target');
     await expect(
       page.getByTestId('chat-message').filter({ hasText: 'Please check this wording' }),
     ).toBeVisible();
@@ -216,9 +222,11 @@ test.describe('durable comments', () => {
       await typeIntoEditor(clients.pageA, 'Shared target section');
       await expect.poll(() => editorText(clients.pageB)).toContain('Shared target section');
 
+      await selectDiscussionTab(clients.pageA, 'chat');
       await selectText(clients.pageA, 'target');
       await createThreadWithReply(clients.pageA, 'Remote reviewer can see this');
 
+      await selectDiscussionTab(clients.pageB, 'chat');
       await expect(clients.pageB.getByTestId('chat-thread')).toHaveCount(1);
       await expect(clients.pageB.getByTestId('chat-anchor-row')).toBeVisible();
       await expect(clients.pageB.getByTestId('chat-current-target')).toContainText('target');

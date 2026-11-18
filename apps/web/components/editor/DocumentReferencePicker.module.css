@@ -1,0 +1,40 @@
+.popup {
+  position: fixed;
+  z-index: 45;
+  visibility: hidden;
+  width: min(20rem, calc(100vw - 16px));
+  max-height: min(18rem, 45vh);
+  overflow: auto;
+  padding: 0.25rem;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-paper);
+  color: var(--color-text-primary);
+  box-shadow: var(--shadow-popover);
+}
+
+.option {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  width: 100%;
+  min-height: 2.75rem;
+  padding: 0.5rem 0.75rem;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  overflow-wrap: anywhere;
+}
+
+.option[aria-selected='true'],
+.option:hover {
+  background: var(--color-info-bg);
+}
+
+.kind {
+  color: var(--color-text-secondary);
+  font-size: var(--text-caption);
+}
