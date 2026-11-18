@@ -14,13 +14,31 @@ const openFreshDocument = async (page: Page, suffix: string) => {
   await expect(editor).toHaveAttribute('contenteditable', 'true');
   await editor.click();
   await page.keyboard.type(documentText);
-  await expect(editor).toContainText(documentText);
+  await expect(editor).toHaveText(documentText);
+  await expect(page.getByTestId('autosave-indicator')).toHaveAttribute('data-status', 'saved');
 
   await page.keyboard.down('Shift');
   for (let index = 0; index < selectedQuote.length; index += 1) {
     await page.keyboard.press('ArrowLeft');
   }
   await page.keyboard.up('Shift');
+  await expect
+    .poll(() =>
+      editor.evaluate((element) => {
+        const selection = window.getSelection();
+        if (!selection?.rangeCount) return null;
+        const range = selection.getRangeAt(0);
+        if (!element.contains(range.commonAncestorContainer)) return null;
+        const prefix = document.createRange();
+        prefix.selectNodeContents(element);
+        prefix.setEnd(range.startContainer, range.startOffset);
+        return { selected: selection.toString(), prefix: prefix.toString() };
+      }),
+    )
+    .toEqual({
+      selected: selectedQuote,
+      prefix: documentText.slice(0, -selectedQuote.length),
+    });
   await page.getByRole('button', { name: 'Discussion', exact: true }).click();
   await expect(page.getByTestId('rail-tab-chat')).toHaveAttribute('aria-selected', 'true');
   await expect(page.getByTestId('doc-chat-panel')).toBeVisible();
