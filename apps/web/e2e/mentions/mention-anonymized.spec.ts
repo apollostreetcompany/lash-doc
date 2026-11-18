@@ -1,13 +1,7 @@
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test } from './development-loopback-mention-fixture';
 
-const ready = async (page: Page) =>
-  page.waitForFunction(() =>
-    Boolean((window as unknown as { __lashEditor?: unknown }).__lashEditor),
-  );
-
-test('mention-anonymized', async ({ page }) => {
-  await page.goto('/');
-  await ready(page);
+test('mention-anonymized', async ({ page, openSyntheticMentionFixture }) => {
+  await openSyntheticMentionFixture(page);
 
   await page.getByTestId('lash-editor-content').click();
   await page.keyboard.type('@Secret');

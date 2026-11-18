@@ -1,63 +1,29 @@
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test } from '@playwright/test';
 
-const SAMPLE_DOCUMENT = `
-  <h1>Chapter One</h1>
-  <p>Opening paragraph.</p>
-  <h2>Section Alpha</h2>
-  <p>Alpha body one.</p>
-  <p>Alpha body two.</p>
-  <h3>Deep Dive</h3>
-  <p>Nested insight.</p>
-  <h2>Section Beta</h2>
-  <p>Beta body.</p>
-`;
-
-const loadDocument = async (page: Page) => {
-  await page.waitForFunction(() => {
-    return Boolean(
-      (window as unknown as { __lashEditor?: unknown }).__lashEditor,
-    );
-  });
-
-  await page.evaluate((html) => {
-    const editor = (window as unknown as { __lashEditor?: { commands: { setContent: (content: string) => void } } }).__lashEditor;
-    editor?.commands.setContent(html);
-  }, SAMPLE_DOCUMENT);
-
-  await page.waitForFunction(() => {
-    const outline = (window as unknown as { __lashOutlineItems?: Array<{ title: string }> }).__lashOutlineItems;
-    return Array.isArray(outline) && outline.some((item) => item.title === 'Section Alpha');
-  });
-
-  const outline = await page.evaluate<
-    Array<{ headingId: string; title: string }> | undefined
-  >(() => {
-    return (window as unknown as { __lashOutlineItems?: Array<{ headingId: string; title: string }> }).__lashOutlineItems;
-  });
-
-  const target = outline?.find((item) => item.title === 'Section Alpha');
-  return target?.headingId;
-};
+import { seedOutlineDocument } from './seed-outline-document';
 
 test.describe('outline-collapse-basic', () => {
   test('collapses descendants and updates outline state', async ({ page }) => {
     await page.goto('/');
+    const { editor, outline } = await seedOutlineDocument(page);
 
-    const headingId = await loadDocument(page);
-    expect(headingId).toBeTruthy();
-
-    const alphaParagraph = page.getByText('Alpha body one.', { exact: true });
+    const alphaParagraph = editor.getByText('Alpha body one.', { exact: true });
+    const nestedParagraph = editor.getByText('Nested insight.', { exact: true });
     await expect(alphaParagraph).toBeVisible();
+    await expect(nestedParagraph).toBeVisible();
 
-    await page.getByTestId(`outline-toggle-${headingId}`).click();
+    await outline.getByRole('button', { name: 'Collapse Section Alpha' }).click();
 
-    await expect(alphaParagraph).not.toBeVisible();
+    await expect(alphaParagraph).toBeHidden();
+    await expect(nestedParagraph).toBeHidden();
+    await expect(editor.getByText('Beta body.', { exact: true })).toBeVisible();
 
-    const outlineEntry = page.locator(`.outline-entry[data-heading-id="${headingId}"]`);
-    await expect(outlineEntry).toHaveAttribute('data-collapsed', 'true');
-    await expect(page.getByTestId(`outline-toggle-${headingId}`)).toHaveAttribute('aria-expanded', 'false');
-
-    const meta = outlineEntry.locator('.outline-meta');
-    await expect(meta).toHaveText(/sections ·/);
+    const expand = outline.getByRole('button', { name: 'Expand Section Alpha' });
+    await expect(expand).toHaveAttribute('aria-expanded', 'false');
+    const entry = outline.getByRole('listitem').filter({
+      has: page.getByRole('button', { name: 'Jump to Section Alpha' }),
+    });
+    await expect(entry).toHaveAttribute('data-collapsed', 'true');
+    await expect(entry.locator('.outline-meta')).toHaveText(/sections ·/);
   });
 });

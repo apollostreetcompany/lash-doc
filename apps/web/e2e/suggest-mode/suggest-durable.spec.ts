@@ -1,73 +1,45 @@
-import { expect, test } from '@playwright/test';
+import { expect, test, type Page } from '@playwright/test';
 
-type LashTestWindow = Window & {
-  __lashEditor?: {
-    commands: {
-      focus: (position?: 'start' | 'end') => boolean;
-      setContent: (content: string) => boolean;
-    };
-  };
-};
+import { body, editorFor, proposal, proposeWording, wording } from './suggestion-flow';
 
-const waitForEditor = async (page: import('@playwright/test').Page) => {
-  await page.waitForFunction(() => Boolean((window as LashTestWindow).__lashEditor));
-  await expect(page.getByTestId('lash-editor-content')).toBeVisible();
-};
+async function openSuggestions(page: Page) {
+  await page.getByRole('button', { name: 'Suggest wording' }).click();
+}
 
-const seedEmptyDoc = async (page: import('@playwright/test').Page) => {
-  await waitForEditor(page);
-  await page.evaluate(() => {
-    const editor = (window as LashTestWindow).__lashEditor;
-    if (!editor) throw new Error('Lash editor test hook is unavailable');
-    editor.commands.setContent('<p></p>');
-  });
-};
+const reminder = 'Reminder: ';
 
-test.describe('durable suggestions', () => {
-  test('accepted suggestion resolution survives reload', async ({ page }) => {
-    const docId = `bead-35-suggestion-accept-${Date.now()}`;
-    await page.goto(`/doc/${docId}`);
-    await seedEmptyDoc(page);
+for (const input of ['typing', 'pasting'] as const) {
+  test(`remembers the moved selection and accepted decision after ${input} and reload`, async ({
+    page,
+  }) => {
+    await page.goto(`/doc/suggestion-durable-${input}`);
+    const editor = await proposeWording(page);
+    await expect(editor).toHaveText(body);
 
-    await page.getByTestId('suggest-mode-toggle').click();
-    await page.getByTestId('lash-editor-content').click();
-    await page.keyboard.type('Accepted durable suggestion');
+    if (input === 'pasting') {
+      await page.context().grantPermissions(['clipboard-read', 'clipboard-write']);
+      await page.evaluate((text) => navigator.clipboard.writeText(text), reminder);
+    }
 
-    await expect(page.getByTestId('history-suggestion-status')).toContainText('Pending suggestion');
-    await page.getByTestId('suggest-accept-button').click();
-
-    await expect(page.getByTestId('history-suggestion-status')).toContainText(
-      'Accepted suggestion',
-    );
-    await expect(page.getByTestId('suggestion-resolution-row')).toContainText('accepted');
+    await editor.getByText(body, { exact: true }).click();
+    await page.keyboard.press('Home');
+    if (input === 'pasting') {
+      await page.keyboard.press('ControlOrMeta+v');
+    } else {
+      await page.keyboard.type(reminder);
+    }
+    await expect(editor).toHaveText(reminder + body);
+    await expect(page.getByTestId('autosave-indicator')).toHaveAttribute('data-status', 'saved');
 
     await page.reload();
-    await waitForEditor(page);
-    await expect(page.getByTestId('suggestion-resolution-row')).toContainText('accepted');
-  });
-
-  test('rejected suggestion resolution survives reload', async ({ page }) => {
-    const docId = `bead-35-suggestion-reject-${Date.now()}`;
-    await page.goto(`/doc/${docId}`);
-    await seedEmptyDoc(page);
-
-    const editor = page.getByTestId('lash-editor-content');
-    await editor.click();
-    await page.keyboard.type('Keep');
-    await expect(page.getByTestId('history-version')).toHaveCount(1);
-
-    await page.getByTestId('suggest-mode-toggle').click();
-    await editor.click();
-    await page.keyboard.type(' remove');
-    await expect(page.getByTestId('history-suggestion-status')).toContainText('Pending suggestion');
-
-    await page.getByTestId('suggest-reject-button').click();
-    await expect(editor).toContainText('Keep');
-    await expect(editor).not.toContainText('remove');
-    await expect(page.getByTestId('suggestion-resolution-row')).toContainText('rejected');
+    await expect(editorFor(page)).toHaveText(reminder + body);
+    await openSuggestions(page);
+    await page.getByRole('button', { name: 'Accept suggestion' }).click();
+    await expect(page.getByTestId('suggestion-status')).toHaveText('Suggestion accepted');
 
     await page.reload();
-    await waitForEditor(page);
-    await expect(page.getByTestId('suggestion-resolution-row')).toContainText('rejected');
+    await openSuggestions(page);
+    await expect(editorFor(page)).toHaveText(`${reminder}${wording} once, then ${proposal}`);
+    await expect(page.getByTestId('suggestion-status')).toHaveText('Suggestion accepted');
   });
-});
+}

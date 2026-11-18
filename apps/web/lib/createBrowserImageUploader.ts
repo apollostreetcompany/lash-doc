@@ -1,68 +1,86 @@
-import type { LashImageUploader } from '@lash/editor-core';
+import {
+  hasImageSignature,
+  ImageUploadError,
+  isSupportedImageType,
+  MAX_IMAGE_FILE_BYTES,
+  type LashImageUploader,
+} from '@lash/editor-core';
 
 interface UploadMockControls {
   failNext?: boolean;
-  mode?: 'alwaysFail' | 'alwaysSucceed';
-  nextUrl?: string;
-  nextWidth?: number;
-  delayMs?: number;
 }
 
-let uploadCounter = 0;
+const MAX_IMAGE_EDGE = 4_096;
+const MAX_IMAGE_PIXELS = 12_000_000;
 
-export const createBrowserImageUploader = (): LashImageUploader => {
-  return {
-    upload(file, onProgress) {
-      uploadCounter += 1;
-      const globalControls = (typeof window !== 'undefined'
-        ? ((window as unknown as { __lashImageUploadMock?: UploadMockControls }).__lashImageUploadMock ?? {})
-        : {}) as UploadMockControls;
-
-      const shouldFail = Boolean(globalControls.failNext) || globalControls.mode === 'alwaysFail';
-      if (globalControls.failNext) {
-        globalControls.failNext = false;
+const readImageBytes = (file: File) =>
+  new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.addEventListener('load', () => {
+      if (typeof reader.result !== 'string') {
+        reject(new Error('Could not read this file. Try again.'));
+        return;
       }
+      resolve(reader.result);
+    });
+    reader.addEventListener('error', () =>
+      reject(new Error('Could not read this file. Try again.')),
+    );
+    reader.addEventListener('abort', () =>
+      reject(new Error('Could not read this file. Try again.')),
+    );
+    reader.readAsDataURL(file);
+  });
 
-      const delay = Math.max(globalControls.delayMs ?? 160, 60);
-      const targetWidth =
-        typeof globalControls.nextWidth === 'number'
-          ? globalControls.nextWidth
-          : Math.min(800, Math.max(240, Math.round(file.size / 12) + 320));
-      const url =
-        globalControls.nextUrl ?? `https://assets.lash.dev/mock/image-${uploadCounter}.png`;
+export const createBrowserImageUploader = (): LashImageUploader => ({
+  async upload(file, onProgress) {
+    if (!isSupportedImageType(file.type)) {
+      throw new ImageUploadError('Choose a PNG, JPEG, GIF, WebP, or AVIF image.', false);
+    }
+    if (!file.size || file.size > MAX_IMAGE_FILE_BYTES) {
+      throw new ImageUploadError('Choose a nonempty image up to 256 KiB.', false);
+    }
+    if (
+      process.env.NODE_ENV !== 'production' ||
+      process.env.NEXT_PUBLIC_LASH_TEST_HOOKS === 'true'
+    ) {
+      const controls = (window as Window & { __lashImageUploadMock?: UploadMockControls })
+        .__lashImageUploadMock;
+      if (controls?.failNext) {
+        controls.failNext = false;
+        throw new Error('Could not read this file. Try again.');
+      }
+    }
 
-      let progress = 0;
+    const source = await readImageBytes(file);
+    const base64 = source.slice(source.indexOf(',') + 1);
+    if (!hasImageSignature(file.type, atob(base64))) {
+      throw new ImageUploadError('The file does not match its image format.', false);
+    }
+    onProgress(0.5);
 
-      return new Promise<{ src: string; width: number }>((resolve, reject) => {
-        const tick = () => {
-          progress = Math.min(progress + 0.25, 0.95);
-          onProgress(progress);
-        };
-
-        const interval = typeof window !== 'undefined' ? window.setInterval(tick, delay / 4) : null;
-
-        const finalize = () => {
-          if (interval !== null) {
-            window.clearInterval(interval);
-          }
-        };
-
-        if (shouldFail) {
-          window.setTimeout(() => {
-            finalize();
-            reject(new Error('Mock upload failed'));
-          }, delay);
-          return;
-        }
-
-        window.setTimeout(() => {
-          finalize();
-          onProgress(1);
-          resolve({ src: url, width: targetWidth });
-        }, delay);
-      });
-    },
-  };
-};
-
-export type { UploadMockControls };
+    // The browser checks that the actual bytes decode and supplies the natural
+    // dimensions, including orientation. No object URL is saved or shared.
+    const image = new Image();
+    image.src = source;
+    try {
+      await image.decode();
+    } catch {
+      throw new ImageUploadError('Could not open this image. Choose another file.', false);
+    }
+    const { naturalWidth: width, naturalHeight: height } = image;
+    if (
+      !width ||
+      !height ||
+      width > MAX_IMAGE_EDGE ||
+      height > MAX_IMAGE_EDGE ||
+      width * height > MAX_IMAGE_PIXELS
+    ) {
+      throw new ImageUploadError(
+        'Choose an image up to 4,096 pixels per side and 12 megapixels.',
+        false,
+      );
+    }
+    return { src: source, width: Math.min(width, 960) };
+  },
+});

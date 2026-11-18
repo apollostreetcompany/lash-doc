@@ -2,17 +2,18 @@ import { expect, test, type Page } from '@playwright/test';
 
 type LashTestWindow = Window & {
   __lashEditor?: {
+    readonly isEditable: boolean;
     commands: {
       setContent: (content: string) => boolean;
     };
   };
-  __lashOutlineItems?: Array<{ headingId: string; title: string }>;
 };
 
+const SECTION_ALPHA_HEADING_ID = 'fixture-section-alpha';
 const SAMPLE_DOCUMENT = `
   <h1>Chapter One</h1>
   <p>Opening paragraph.</p>
-  <h2>Section Alpha</h2>
+  <h2 data-heading-id="${SECTION_ALPHA_HEADING_ID}">Section Alpha</h2>
   <p>Alpha body one.</p>
   <h2>Section Beta</h2>
   <p>Beta body.</p>
@@ -31,30 +32,22 @@ const clearDocState = async (page: Page, docIds: string[]) => {
   }, docIds);
 };
 
-const waitForEditor = async (page: Page) => {
-  await page.waitForFunction(() => Boolean((window as LashTestWindow).__lashEditor), undefined, {
-    timeout: 5_000,
-  });
-  await expect(page.locator('.ProseMirror')).toBeVisible();
-};
-
 const loadOutlineFixture = async (page: Page) => {
-  await waitForEditor(page);
-  await page.evaluate((html) => {
+  await expect(page.locator('.ProseMirror[contenteditable="true"]')).toBeVisible();
+  await page.waitForFunction(
+    () => (window as LashTestWindow).__lashEditor?.isEditable === true,
+    undefined,
+    { timeout: 5_000 },
+  );
+  const applied = await page.evaluate((html) => {
     const editor = (window as LashTestWindow).__lashEditor;
     if (!editor) throw new Error('Lash editor test hook is unavailable');
-    editor.commands.setContent(html);
+    return editor.commands.setContent(html);
   }, SAMPLE_DOCUMENT);
-  await page.waitForFunction(() => {
-    const outline = (window as LashTestWindow).__lashOutlineItems;
-    return Array.isArray(outline) && outline.some((item) => item.title === 'Section Alpha');
-  });
-  const headingId = await page.evaluate(() => {
-    const outline = (window as LashTestWindow).__lashOutlineItems;
-    return outline?.find((item) => item.title === 'Section Alpha')?.headingId ?? null;
-  });
-  if (!headingId) throw new Error('Section Alpha heading id did not load');
-  return headingId;
+  expect(applied).toBe(true);
+  const sectionAlpha = page.locator(`.outline-entry[data-heading-id="${SECTION_ALPHA_HEADING_ID}"]`);
+  await expect(sectionAlpha).toContainText('Section Alpha');
+  return sectionAlpha;
 };
 
 test.describe('real document identity', () => {
@@ -66,12 +59,16 @@ test.describe('real document identity', () => {
     await page.goto(docUrl(alpha));
     await expect(page.getByTestId('lash-doc-title-input')).toBeVisible();
     await page.getByTestId('lash-doc-title-input').fill('Alpha brief');
-    await expect(page.getByTestId('topbar-doc-title')).toHaveText('Alpha brief');
+    await expect(page.getByTestId('document-open-select').locator('option:checked')).toHaveText(
+      'Alpha brief',
+    );
 
     await page.goto(docUrl(beta));
     await expect(page.getByTestId('lash-doc-title-input')).toHaveValue('Untitled document');
     await page.getByTestId('lash-doc-title-input').fill('Beta brief');
-    await expect(page.getByTestId('topbar-doc-title')).toHaveText('Beta brief');
+    await expect(page.getByTestId('document-open-select').locator('option:checked')).toHaveText(
+      'Beta brief',
+    );
 
     await page.goto(docUrl(alpha));
     await expect(page.getByTestId('lash-doc-title-input')).toHaveValue('Alpha brief');
@@ -89,10 +86,11 @@ test.describe('real document identity', () => {
 
     await expect(page).toHaveURL(/\/doc\/doc-[a-z0-9-]+$/);
     const createdPath = new URL(page.url()).pathname;
-    await expect(page.getByTestId('lash-doc-route')).toHaveText(createdPath);
+    await expect(page.getByTestId('document-open-select')).toHaveValue(createdPath);
 
     await page.reload();
-    await expect(page.getByTestId('lash-doc-route')).toHaveText(createdPath);
+    await expect(page).toHaveURL(new RegExp(`${createdPath}$`));
+    await expect(page.getByTestId('document-open-select')).toHaveValue(createdPath);
   });
 
   test('opens an existing document from the document switcher', async ({ page }) => {
@@ -122,17 +120,13 @@ test.describe('real document identity', () => {
     await clearDocState(page, [alpha, beta]);
 
     await page.goto(docUrl(alpha));
-    const alphaHeadingId = await loadOutlineFixture(page);
-    await page.getByTestId(`outline-toggle-${alphaHeadingId}`).click();
-    await expect(
-      page.locator(`.outline-entry[data-heading-id="${alphaHeadingId}"]`),
-    ).toHaveAttribute('data-collapsed', 'true');
+    const alphaSection = await loadOutlineFixture(page);
+    await alphaSection.getByTestId(`outline-toggle-${SECTION_ALPHA_HEADING_ID}`).click();
+    await expect(alphaSection).toHaveAttribute('data-collapsed', 'true');
 
     await page.goto(docUrl(beta));
-    const betaHeadingId = await loadOutlineFixture(page);
+    const betaSection = await loadOutlineFixture(page);
     await expect(page.getByText('Alpha body one.', { exact: true })).toBeVisible();
-    await expect(
-      page.locator(`.outline-entry[data-heading-id="${betaHeadingId}"]`),
-    ).toHaveAttribute('data-collapsed', 'false');
+    await expect(betaSection).toHaveAttribute('data-collapsed', 'false');
   });
 });

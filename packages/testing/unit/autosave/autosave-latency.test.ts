@@ -12,7 +12,8 @@
  *      window elapses.
  *   2. Stays quiet when no transactions arrive (no spurious saves).
  *   3. Re-arms after a save lands when more edits come in.
- *   4. Honors the configured debounce window for the < 500 ms SLO.
+ *   4. Keeps the default debounce below the SLO so persistence and rendering
+ *      have measurable headroom.
  */
 
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
@@ -70,21 +71,21 @@ describe('autosave-latency', () => {
     expect(onSave).not.toHaveBeenCalled();
   });
 
-  test('flushes within the 500 ms SLO window after the last transaction', async () => {
+  test('reserves persistence and render headroom under the 500 ms SLO by default', async () => {
     const onSave = vi.fn();
     const scheduler = createAutosaveScheduler({
-      debounceMs: 500,
       onSave,
       getDocJson: () => ({ type: 'doc' }),
     });
 
     scheduler.notify();
 
-    // At 499ms after the last notify, no save yet.
-    await vi.advanceTimersByTimeAsync(499);
+    // The default debounce is 350ms, leaving 150ms for the durable write and
+    // visible React transition before the strict 500ms product boundary.
+    await vi.advanceTimersByTimeAsync(349);
     expect(onSave).not.toHaveBeenCalled();
 
-    // At 501ms, the save has fired — within SLO.
+    // At 351ms, the save has fired.
     await vi.advanceTimersByTimeAsync(2);
     expect(onSave).toHaveBeenCalledTimes(1);
   });
@@ -151,5 +152,47 @@ describe('autosave-latency', () => {
     await vi.advanceTimersByTimeAsync(1_000);
     expect(onSave).not.toHaveBeenCalled();
     expect(scheduler.getStatus()).toBe('idle');
+  });
+
+  test('flushPending() persists dirty work once and leaves idle cleanup quiet', async () => {
+    const onSave = vi.fn();
+    const scheduler = createAutosaveScheduler({
+      debounceMs: 500,
+      onSave,
+      getDocJson: () => ({ type: 'doc', content: [] }),
+    });
+
+    await scheduler.flushPending();
+    expect(onSave).not.toHaveBeenCalled();
+
+    scheduler.notify();
+    await scheduler.flushPending();
+    expect(onSave).toHaveBeenCalledTimes(1);
+    expect(scheduler.getStatus()).toBe('saved');
+
+    await scheduler.flushPending();
+    expect(onSave).toHaveBeenCalledTimes(1);
+  });
+
+  test('a rejected callback stays in error and preserves the last successful timestamp', async () => {
+    let shouldReject = false;
+    const scheduler = createAutosaveScheduler({
+      debounceMs: 500,
+      now: () => new Date(shouldReject ? '2026-07-18T00:00:01.000Z' : '2026-07-18T00:00:00.000Z'),
+      onSave: () => {
+        if (shouldReject) throw new Error('storage unavailable');
+      },
+    });
+
+    scheduler.notify();
+    await scheduler.flushPending();
+    expect(scheduler.getStatus()).toBe('saved');
+    expect(scheduler.getLastSavedAt()).toBe('2026-07-18T00:00:00.000Z');
+
+    shouldReject = true;
+    scheduler.notify();
+    await scheduler.flushPending();
+    expect(scheduler.getStatus()).toBe('error');
+    expect(scheduler.getLastSavedAt()).toBe('2026-07-18T00:00:00.000Z');
   });
 });

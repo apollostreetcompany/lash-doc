@@ -1,0 +1,483 @@
+import { createHash, createHmac } from 'node:crypto';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+
+import {
+  namedEditPath,
+  type NamedEditOperation,
+} from '../../../../apps/web/lib/namedEdit/contract';
+import { handleNamedEdit } from '../../../../apps/web/lib/namedEdit/routeHandler';
+import { encryptNamedEditValue } from '../../../../apps/web/lib/namedEdit/serverCrypto';
+import { NextRequest } from '../../../../apps/web/node_modules/next/server.js';
+import {
+  namedEditFailure,
+  namedEditResponse,
+  parseNamedEditCommand,
+} from '../../../realtime-worker/src/namedEdit';
+
+const auth = vi.hoisted(() => ({ principal: vi.fn() }));
+vi.mock('../../../../apps/web/node_modules/server-only/index.js', () => ({}));
+vi.mock('../../../../apps/web/lib/auth/serverPrincipal', () => ({
+  requireServerAccountPrincipal: auth.principal,
+}));
+vi.mock('../../../../apps/web/lib/auth/serverClient', () => ({
+  createRouteSupabaseClientSession: () => ({
+    client: {},
+    applyTo: (response: Response) => response,
+  }),
+}));
+
+const origin = 'https://lash.test';
+const workerOrigin = 'https://worker.test';
+const roomId = `doc-v1-${'a'.repeat(64)}`;
+const owner = `account:v1:${'o'.repeat(43)}`;
+const member = `account:v1:${'m'.repeat(43)}`;
+const actorId = `named-${'a'.repeat(32)}`;
+const inviteId = 'b0a763bd-aced-4ea4-8f28-a1a15548baf8';
+const controlSecret = 'local synthetic control key required to exercise HMAC';
+const testKey = Buffer.alloc(32, 44).toString('base64url');
+
+const configure = () => {
+  vi.stubEnv('LASH_NAMED_EDIT_PHASE', 'enabled');
+  vi.stubEnv('LASH_NAMED_COMMENT_PHASE', 'enabled');
+  vi.stubEnv('LASH_NAMED_EDIT_KEY', testKey);
+  vi.stubEnv('LASH_REALTIME_WORKER_HTTP_URL', workerOrigin);
+  vi.stubEnv('LASH_WORKER_CONTROL_SECRET_CURRENT', controlSecret);
+  vi.stubEnv('LASH_DOCUMENT_ID_DERIVATION_KEYS', `v1:${testKey}`);
+  vi.stubEnv('NEXT_PUBLIC_SUPABASE_URL', 'https://auth.test');
+  vi.stubEnv('NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY', 'synthetic-publishable-key');
+  vi.stubEnv('LASH_SITE_ORIGIN', origin);
+};
+
+const post = (operation: NamedEditOperation, body: Record<string, unknown>, cookie?: string) =>
+  handleNamedEdit(
+    new NextRequest(origin + namedEditPath(roomId, operation), {
+      method: 'POST',
+      headers: {
+        host: 'lash.test',
+        origin,
+        'content-type': 'application/json',
+        'sec-fetch-site': 'same-origin',
+        'sec-fetch-mode': 'cors',
+        'sec-fetch-dest': 'empty',
+        ...(cookie ? { cookie } : {}),
+      },
+      body: JSON.stringify({ version: 1, ...body }),
+    }),
+    roomId,
+    operation,
+  );
+
+describe('named edit browser and Worker contract', () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.unstubAllGlobals();
+    auth.principal.mockReset();
+  });
+
+  it('fails closed when the phase is disabled and refuses browser-supplied grant fields', async () => {
+    configure();
+    const worker = vi.fn();
+    vi.stubGlobal('fetch', worker);
+    vi.stubEnv('LASH_NAMED_EDIT_PHASE', 'disabled');
+    expect((await post('list', {})).status).toBe(404);
+    vi.stubEnv('LASH_NAMED_EDIT_PHASE', 'enabled');
+    expect(
+      (await post('issue', { email: 'editor@example.test', inviteId, role: 'owner' })).status,
+    ).toBe(400);
+    expect((await post('session', { token: null, email: 'editor@example.test' })).status).toBe(400);
+    expect(auth.principal).not.toHaveBeenCalled();
+    expect(worker).not.toHaveBeenCalled();
+  });
+
+  it('makes a disabled Worker terminal for named sessions and keeps transient failures retryable', async () => {
+    configure();
+    auth.principal.mockResolvedValue({ id: member, email: 'member@example.test' });
+    const worker = vi.fn()
+      .mockResolvedValueOnce(namedEditResponse(namedEditFailure('named-edit-disabled')))
+      .mockResolvedValueOnce(namedEditResponse(namedEditFailure('internal-error')));
+    vi.stubGlobal('fetch', worker);
+
+    const disabled = await post('session', { token: null });
+    expect(disabled.status).toBe(404);
+    expect(await disabled.json()).toEqual({ ok: false, version: 1, error: 'unavailable' });
+
+    const unavailable = await post('session', { token: null });
+    expect(unavailable.status).toBe(503);
+    expect(await unavailable.json()).toEqual({
+      ok: false,
+      version: 1,
+      error: 'temporarily-unavailable',
+    });
+  });
+
+  it('classifies a malformed successful Worker grant without returning its contents', async () => {
+    configure();
+    auth.principal.mockResolvedValue({ id: member, email: 'member@example.test' });
+    const worker = vi.fn()
+      .mockResolvedValueOnce(Response.json({
+        ok: true,
+        version: 1,
+        session: {
+          roomId: `doc-v1-${'b'.repeat(64)}`,
+          actorId,
+          source: 'named',
+          role: 'edit',
+          protocolVersion: 5,
+          capabilities: ['doc.read', 'doc.edit'],
+          socketProtocol: 'lash-realtime-v5',
+          ticketProtocol: `lash-named-ticket.${'t'.repeat(43)}`,
+          expiresAt: new Date(Date.now() + 60_000).toISOString(),
+        },
+      }))
+      .mockResolvedValueOnce(new Response('unexpected upstream payload', { status: 200 }))
+      .mockResolvedValueOnce(namedEditResponse(namedEditFailure('unauthorized')))
+      .mockResolvedValueOnce(namedEditResponse(namedEditFailure('invalid-request')))
+      .mockResolvedValueOnce(new Response(new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(new TextEncoder().encode('{"ok":true,'));
+          controller.error(new TypeError('Connection reset'));
+        },
+      }), { status: 200, headers: { 'content-type': 'application/json' } }));
+    vi.stubGlobal('fetch', worker);
+
+    for (let attempt = 0; attempt < 4; attempt++) {
+      const invalid = await post('session', { token: null });
+      expect(invalid.status).toBe(502);
+      expect(await invalid.json()).toEqual({ ok: false, version: 1, error: 'invalid-response' });
+    }
+    expect((await post('session', { token: null })).status).toBe(503);
+  });
+
+  it('commits only encrypted email and a hash to Worker, then carries the raw token only in a continuation cookie', async () => {
+    configure();
+    const email = 'recipient@example.test';
+    let invitedDigest: string | null = null;
+    let invitedTokenHash: string | null = null;
+    const worker = vi.fn(async (url: string, request: RequestInit) => {
+      const path = new URL(url).pathname;
+      const headers = new Headers(request.headers);
+      const operation = path.split('/').at(-1) as NamedEditOperation;
+      const raw = String(request.body);
+      const bodyHash = createHash('sha256').update(raw).digest('base64url');
+      expect(headers.get('x-lash-control-body-sha256')).toBe(bodyHash);
+      const signed = [
+        'lash-worker-control:v2',
+        'POST',
+        path,
+        bodyHash,
+        headers.get('x-lash-control-request-id'),
+        headers.get('x-lash-control-principal-id'),
+        headers.get('x-lash-control-expires-at'),
+      ].join('\n');
+      expect(headers.get('authorization')).toBe(
+        `Lash-Control v2:${createHmac('sha256', controlSecret).update(signed).digest('base64url')}`,
+      );
+      expect(raw).not.toContain(email);
+      const command = parseNamedEditCommand(operation, JSON.parse(raw));
+      if (command?.action === 'issue') {
+        expect(headers.get('x-lash-control-principal-id')).toBe(owner);
+        invitedDigest = command.emailDigest;
+        invitedTokenHash = command.tokenHash;
+        return namedEditResponse({
+          ok: true,
+          version: 1,
+          invite: {
+            inviteId,
+            emailCiphertext: command.emailCiphertext,
+            role: 'edit',
+            status: 'pending',
+            expiresAt: new Date(Date.now() + 86_400_000).toISOString(),
+          },
+        });
+      }
+      expect(command?.action).toBe('session');
+      if (command?.action === 'session' && command.tokenHash) {
+        expect(command.tokenHash).toBe(invitedTokenHash);
+        expect(command.emailDigest).toBe(invitedDigest);
+      }
+      expect(headers.get('x-lash-control-principal-id')).toBe(member);
+      return namedEditResponse({
+        ok: true,
+        version: 1,
+        session: {
+          roomId,
+          actorId,
+          source: 'named',
+          role: 'edit',
+          protocolVersion: 5,
+          capabilities: ['doc.read', 'doc.edit'],
+          socketProtocol: 'lash-realtime-v5',
+          ticketProtocol: `lash-named-ticket.${'t'.repeat(43)}`,
+          expiresAt: new Date(Date.now() + 60_000).toISOString(),
+        },
+      });
+    });
+    vi.stubGlobal('fetch', worker);
+    auth.principal.mockResolvedValue({ id: owner, email: 'owner@example.test' });
+    const issued = await post('issue', { email, inviteId });
+    const issueBody = await issued.json();
+    expect(issued.status).toBe(200);
+    expect(issueBody).toMatchObject({ ok: true, version: 1, invite: { email, inviteId } });
+    const token: string = issueBody.token;
+    expect(token).toHaveLength(43);
+    expect(worker.mock.calls[0]?.[1].body).not.toContain(token);
+
+    auth.principal.mockRejectedValue({ code: 'verified-account-required' });
+    const pending = await post('session', { accept: true, token });
+    expect(pending.status).toBe(401);
+    expect(await pending.json()).toEqual({ ok: false, version: 1, error: 'sign-in-required' });
+    const cookie = pending.headers.get('set-cookie') ?? '';
+    expect(cookie).toContain('HttpOnly');
+    expect(cookie).toContain('Secure');
+    expect(cookie).toContain(`Path=${namedEditPath(roomId, 'session')}`);
+    expect(cookie).not.toContain(token);
+    expect(worker).toHaveBeenCalledTimes(1);
+
+    const cookiePair = cookie.split(';')[0];
+    auth.principal.mockResolvedValue({ id: member, email: ' Recipient@EXAMPLE.test ' });
+    const accepted = await post('session', { accept: true, token: null }, cookiePair);
+    expect(accepted.status).toBe(200);
+    expect(await accepted.json()).toEqual({ ok: true, version: 1 });
+    expect(accepted.headers.get('set-cookie')).toContain('Max-Age=0');
+
+    const reopened = await post('session', { token: null }, cookiePair);
+    expect(reopened.status).toBe(200);
+    expect(JSON.parse(String(worker.mock.calls.at(-1)?.[1].body))).toEqual({
+      browserOrigin: origin,
+      emailDigest: null,
+      tokenHash: null,
+      version: 1,
+    });
+    expect(await reopened.json()).toMatchObject({
+      ok: true,
+      version: 1,
+      session: {
+        roomId,
+        actorId,
+        socketUrl: `wss://worker.test/api/realtime/rooms/${roomId}/socket?protocolVersion=5&actorId=${actorId}`,
+      },
+    });
+  });
+
+  it('acknowledges Comment acceptance with the legacy receipt and reopens with a v6 session', async () => {
+    configure();
+    const email = 'reviewer@example.test';
+    auth.principal.mockResolvedValue({ id: owner, email: 'owner@example.test' });
+    const worker = vi.fn(async (url: string, request: RequestInit) => {
+      const requestBody = String(request.body);
+      const input = JSON.parse(requestBody);
+      expect(requestBody).not.toContain(email);
+      expect(new Headers(request.headers).get('x-lash-control-body-sha256')).toBe(
+        createHash('sha256').update(requestBody).digest('base64url'),
+      );
+      if (url.endsWith('/issue')) {
+        expect(input.role).toBe('comment');
+        return Response.json({
+          ok: true,
+          version: 1,
+          invite: {
+            inviteId,
+            emailCiphertext: input.emailCiphertext,
+            role: 'comment',
+            status: 'pending',
+            expiresAt: new Date(Date.now() + 60_000).toISOString(),
+          },
+        });
+      }
+      return Response.json({
+        ok: true,
+        version: 1,
+        session: {
+          roomId,
+          actorId,
+          source: 'named',
+          role: 'comment',
+          protocolVersion: 6,
+          capabilities: ['doc.read', 'doc.comment', 'doc.suggest'],
+          socketProtocol: 'lash-realtime-v6',
+          ticketProtocol: `lash-named-comment-ticket.${'t'.repeat(43)}`,
+          expiresAt: new Date(Date.now() + 60_000).toISOString(),
+        },
+      });
+    });
+    vi.stubGlobal('fetch', worker);
+    const issued = await post('issue', { email, inviteId, role: 'comment' });
+    expect(issued.status).toBe(200);
+    const issueBody = await issued.json();
+    expect(issueBody).toMatchObject({ invite: { role: 'comment', email, inviteId } });
+
+    auth.principal.mockResolvedValue({ id: member, email });
+    const accepted = await post('session', { accept: true, token: issueBody.token });
+    expect(accepted.status).toBe(200);
+    expect(await accepted.json()).toEqual({ ok: true, version: 1 });
+    expect(accepted.headers.get('set-cookie')).toContain('Max-Age=0');
+    const reopened = await post('session', { token: null });
+    expect(await reopened.json()).toMatchObject({
+      session: {
+        role: 'comment',
+        protocolVersion: 6,
+        capabilities: ['doc.read', 'doc.comment', 'doc.suggest'],
+        socketUrl: `wss://worker.test/api/realtime/rooms/${roomId}/socket?protocolVersion=6&actorId=${actorId}`,
+      },
+    });
+  });
+
+  it('discloses an unavailable Comment projection only for owner-directed issuance', async () => {
+    configure();
+    const worker = vi.fn(async () =>
+      Response.json(
+        {
+          ok: false,
+          version: 1,
+          error: 'comment-projection-unavailable',
+          retryable: false,
+        },
+        { status: 409 },
+      ),
+    );
+    vi.stubGlobal('fetch', worker);
+    auth.principal.mockResolvedValue({ id: owner, email: 'owner@example.test' });
+    const issue = await post('issue', {
+      email: 'reviewer@example.test',
+      inviteId,
+      role: 'comment',
+    });
+    expect(issue.status).toBe(409);
+    expect(await issue.json()).toEqual({
+      ok: false,
+      version: 1,
+      error: 'comment-projection-unavailable',
+    });
+
+    auth.principal.mockResolvedValue({ id: member, email: 'reviewer@example.test' });
+    const session = await post('session', { token: null });
+    expect(session.status).toBe(403);
+    expect(await session.json()).toEqual({ ok: false, version: 1, error: 'unavailable' });
+  });
+
+  it('does not offer Comment when the web phase is closed and preserves the legacy Edit request', async () => {
+    configure();
+    vi.stubEnv('LASH_NAMED_COMMENT_PHASE', 'disabled');
+    auth.principal.mockResolvedValue({ id: owner, email: 'owner@example.test' });
+    const worker = vi.fn(async (url: string, request: RequestInit) => {
+      const body = JSON.parse(String(request.body));
+      if (url.endsWith('/list')) {
+        expect(body).toEqual({ version: 1, includeComment: true });
+        return Response.json({ ok: true, version: 1, invites: [] });
+      }
+      expect(body).not.toHaveProperty('role');
+      return Response.json({
+        ok: true,
+        version: 1,
+        invite: {
+          inviteId,
+          emailCiphertext: body.emailCiphertext,
+          role: 'edit',
+          status: 'pending',
+          expiresAt: new Date(Date.now() + 60_000).toISOString(),
+        },
+      });
+    });
+    vi.stubGlobal('fetch', worker);
+    expect(await (await post('list', { includeComment: true })).json()).toEqual({
+      ok: true,
+      version: 1,
+      invites: [],
+    });
+    const rejected = await post('issue', {
+      email: 'reviewer@example.test',
+      inviteId,
+      role: 'comment',
+    });
+    expect(rejected.status).toBe(503);
+    expect(await rejected.json()).toEqual({
+      ok: false,
+      version: 1,
+      error: 'named-comment-disabled',
+    });
+    expect(worker).toHaveBeenCalledTimes(1);
+    expect(
+      (await post('issue', { email: 'editor@example.test', inviteId, role: 'edit' })).status,
+    ).toBe(200);
+  });
+
+  it('fails closed as unavailable when a legacy Worker rejects a Comment issue', async () => {
+    configure();
+    auth.principal.mockResolvedValue({ id: owner, email: 'owner@example.test' });
+    const worker = vi.fn(async (url: string, request: RequestInit) => {
+      if (url.endsWith('/list') && String(request.body) === '{"version":1}') {
+        return Response.json({ ok: true, version: 1, invites: [] });
+      }
+      return Response.json(
+        { ok: false, version: 1, error: 'invalid-request', retryable: false },
+        { status: 400 },
+      );
+    });
+    vi.stubGlobal('fetch', worker);
+    expect(await (await post('list', { includeComment: true })).json()).toEqual({
+      ok: true,
+      version: 1,
+      invites: [],
+    });
+    expect(
+      worker.mock.calls.slice(0, 2).map(([, request]) => JSON.parse(String(request.body))),
+    ).toEqual([{ version: 1, includeComment: true }, { version: 1 }]);
+    const rejected = await post('issue', {
+      email: 'reviewer@example.test',
+      inviteId,
+      role: 'comment',
+    });
+    expect(rejected.status).toBe(503);
+    expect(await rejected.json()).toEqual({
+      ok: false,
+      version: 1,
+      error: 'named-comment-disabled',
+    });
+  });
+
+  it('lists and revokes existing Comment invites with new issuance disabled', async () => {
+    configure();
+    vi.stubEnv('LASH_NAMED_COMMENT_PHASE', 'disabled');
+    auth.principal.mockResolvedValue({ id: owner, email: 'owner@example.test' });
+    const email = 'reviewer@example.test';
+    const emailCiphertext =
+      'email-v1.' +
+      encryptNamedEditValue(Buffer.from(testKey, 'base64url'), 'email', email, roomId, inviteId);
+    const invite = {
+      inviteId,
+      emailCiphertext,
+      role: 'comment',
+      status: 'accepted',
+      expiresAt: new Date(Date.now() + 60_000).toISOString(),
+    };
+    const worker = vi.fn(async (url: string, request: RequestInit) => {
+      const body = JSON.parse(String(request.body));
+      if (url.endsWith('/list')) {
+        expect(body).toEqual({ version: 1, includeComment: true });
+        return Response.json({ ok: true, version: 1, invites: [invite] });
+      }
+      expect(body).toEqual({ version: 1, inviteId, role: 'comment' });
+      return Response.json({ ok: true, version: 1, invite: { ...invite, status: 'revoked' } });
+    });
+    vi.stubGlobal('fetch', worker);
+    const list = await (await post('list', { includeComment: true })).json();
+    expect(list).not.toHaveProperty('commentInvitesEnabled');
+    expect(list).toMatchObject({ ok: true, invites: [{ role: 'comment', email, inviteId }] });
+    const revoked = await post('revoke', { inviteId, role: 'comment' });
+    expect(revoked.status).toBe(200);
+    expect(await revoked.json()).toMatchObject({ invite: { role: 'comment', status: 'revoked' } });
+    expect(worker).toHaveBeenCalledTimes(2);
+  });
+
+  it('keeps the legacy browser list contract Edit-only with Comment enabled', async () => {
+    configure();
+    auth.principal.mockResolvedValue({ id: owner, email: 'owner@example.test' });
+    const worker = vi.fn(async (_url: string, request: RequestInit) => {
+      expect(String(request.body)).toBe('{"version":1}');
+      return Response.json({ ok: true, version: 1, invites: [] });
+    });
+    vi.stubGlobal('fetch', worker);
+    expect(await (await post('list', {})).json()).toEqual({ ok: true, version: 1, invites: [] });
+    expect(worker).toHaveBeenCalledTimes(1);
+  });
+});

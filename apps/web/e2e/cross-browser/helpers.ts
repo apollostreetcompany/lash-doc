@@ -1,37 +1,35 @@
 import { expect, type Page } from '@playwright/test';
 
-export const waitForEditorReady = async (page: Page) =>
-  page.waitForFunction(() =>
-    Boolean((window as unknown as { __lashEditor?: unknown }).__lashEditor),
-  );
+import { selectDiscussionTab } from '../discussion-tabs';
 
 export const runEditorCompatibilitySmoke = async (page: Page, label: string) => {
   await page.goto('/');
-  await waitForEditorReady(page);
 
-  const editor = page.getByTestId('lash-editor-content');
-  await expect(editor).toBeVisible();
-  await expect(page.getByTestId('ai-panel')).toBeVisible();
-
+  const editor = page.getByRole('textbox', { name: 'Document editor' });
+  await expect(editor).toHaveAttribute('contenteditable', 'true');
   await editor.click();
   await page.keyboard.type(`${label} compatibility`);
+  await expect(editor).toHaveText(`${label} compatibility`);
 
-  await expect(editor).toContainText(`${label} compatibility`);
+  await selectDiscussionTab(page, 'history');
+  await expect(page.getByRole('region', { name: 'History' })).toBeVisible();
   await expect(page.getByTestId('history-version')).toHaveCount(1, { timeout: 10_000 });
+  await expect(page.getByTestId('history-diff-insert')).toHaveText(`${label} compatibility`);
+
+  await selectDiscussionTab(page, 'ai');
+  await expect(page.getByRole('region', { name: 'AI editor' })).toBeVisible();
+  await page.getByRole('button', { name: 'Close activity panel' }).click();
+  await expect(page.getByRole('region', { name: 'AI editor' })).toBeHidden();
 };
 
 /**
- * Mobile shell smoke — verifies the responsive chrome works on a narrow
- * viewport: hamburger opens the sidebar drawer, Escape closes it, and the
- * share button opens the right-rail drawer.
+ * Narrow viewports keep writing, Discussion, navigation, and Share reachable.
  *
  * Shared by `cb-mobile-safari` (WebKit / iPhone) and `cb-mobile-chrome`
  * (Chromium / Pixel) projects.
  */
 export const runMobileShellSmoke = async (page: Page) => {
-  await page.goto('/');
-  await waitForEditorReady(page);
-  await expect(page.getByTestId('lash-editor-content')).toBeVisible();
+  await runEditorCompatibilitySmoke(page, 'Mobile');
 
   const app = page.locator('.lash-app');
   await expect(app).toBeVisible();
@@ -44,6 +42,14 @@ export const runMobileShellSmoke = async (page: Page) => {
   await page.keyboard.press('Escape');
   await expect(app).toHaveAttribute('data-mobile-drawer', 'false');
 
-  await page.getByTestId('topbar-share-button').tap();
-  await expect(app).toHaveAttribute('data-rail-mobile', 'true');
+  const shareTrigger = page.getByRole('button', { name: 'Share document' });
+  await shareTrigger.tap();
+  const share = page.getByRole('dialog', { name: /^Share /u });
+  await expect(share).toBeVisible();
+  await share.getByRole('button', { name: 'Close sharing' }).tap();
+  await expect(share).toBeHidden();
+  await expect(shareTrigger).toBeFocused();
+  await expect(page.getByRole('textbox', { name: 'Document editor' })).toHaveText(
+    'Mobile compatibility',
+  );
 };

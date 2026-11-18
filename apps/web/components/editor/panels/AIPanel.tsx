@@ -1,17 +1,19 @@
-/**
- * panels/AIPanel — AI Edit invocation + accept/reject flow + chat citations.
- */
 'use client';
 
-import {
-  suggestFallback,
-  validateEditPatch,
-  type ValidationResult,
-  type ValidatorOptions,
-} from '@lash/ai';
+import { suggestFallback, validateEditPatch, type ValidatorOptions } from '@lash/ai';
 import type { DocumentId, EditPatch, EditPatchCitation } from '@lash/types';
 import type { Editor } from '@tiptap/core';
-import { useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+
+import { getAiSelection, isAiSelectionCurrent, type AiSelection } from '../../../lib/aiSelection';
+import {
+  getWritingModelAvailability,
+  MAX_AI_QUESTION_LENGTH,
+  MAX_AI_REVISION_LENGTH,
+  MAX_AI_SELECTION_LENGTH,
+  requestWritingModel,
+  type WritingModelAvailability,
+} from '../../../lib/browserWritingModel';
 
 export interface AIPanelProps {
   editor: Editor | null;
@@ -20,79 +22,43 @@ export interface AIPanelProps {
   currentText: string;
   schemaVersion: string;
   open?: boolean;
-  onApplyPatch: (patch: EditPatch) => Promise<{ ok: true } | { ok: false; reason: string }>;
+  revisionFocusRequest?: number;
+  showTestControls?: boolean;
+  onApplyPatch: (
+    patch: EditPatch,
+    selection: AiSelection,
+  ) => Promise<{ ok: true } | { ok: false; reason: string }>;
 }
 
 const AI_AUTHOR = { type: 'ai', id: 'ai-editor', label: 'AI Editor' } as const;
+const SCHEMA_SUMMARY: ValidatorOptions['schemaSummary'] = { nodeTypes: [], markTypes: [] };
+const DRAFT_CHANGED = 'The draft or selection changed. Select the passage and try again.';
+const PREVIEW_SURROUNDING_LENGTH = 180;
 
-const SCHEMA_SUMMARY: ValidatorOptions['schemaSummary'] = {
-  nodeTypes: [
-    'doc',
-    'paragraph',
-    'heading',
-    'bulletList',
-    'orderedList',
-    'listItem',
-    'taskList',
-    'taskItem',
-    'image',
-    'table',
-    'tableRow',
-    'tableCell',
-    'chip',
-  ],
-  markTypes: ['bold', 'italic', 'underline', 'code', 'link'],
-};
-
-/** ProseMirror document positions (NOT plaintext offsets). */
-interface PmRange {
-  from: number;
-  to: number;
+type Citation = Extract<EditPatchCitation, { type: 'doc' }>;
+interface Source {
+  citation: Citation;
+  selection: AiSelection;
+}
+interface Revision extends Source {
+  patch: EditPatch;
+  text: string;
+  before: string;
+  after: string;
+  editing?: boolean;
 }
 
-const selectedText = (editor: Editor | null): string => {
-  if (!editor) return '';
-  const { from, to, empty } = editor.state.selection;
-  if (empty) return '';
-  return editor.state.doc.textBetween(from, to, '\n');
-};
-
-/** The current selection as true ProseMirror positions, captured at request
- *  time. These map directly to setTextSelection and avoid reconstructing
- *  positions from plaintext offsets (which drift across block boundaries and
- *  resolve to the first occurrence of repeated text). */
-const selectionPmRange = (editor: Editor | null): PmRange | null => {
-  if (!editor) return null;
-  const { from, to, empty } = editor.state.selection;
-  if (empty) return null;
-  return { from, to };
-};
-
-/** Whole-document range in true ProseMirror positions (used by the doc-wide
- *  rewrite citation). */
-const docPmRange = (editor: Editor | null): PmRange | null => {
-  if (!editor) return null;
-  const { doc } = editor.state;
-  // First/last valid text positions inside the doc node.
-  return { from: 1, to: Math.max(1, doc.content.size - 1) };
-};
-
-/** Stable key for matching a doc citation back to its captured PM range. */
-const citationKey = (citation: Extract<EditPatchCitation, { type: 'doc' }>): string =>
-  `${citation.baseVersion}:${citation.rangeFrom}:${citation.rangeTo}`;
-
-const improveText = (text: string) => {
-  const normalized = text.replace(/\s+/g, ' ').trim();
-  return normalized ? `Polished ${normalized}` : 'Polished draft';
-};
-
-const validationMessage = (result: Exclude<ValidationResult, { ok: true }>) => {
-  if (result.reason === 'doc-wide-without-confirm') return 'Global edit requires confirmation.';
-  if (result.reason === 'out-of-scope') return 'AI patch was blocked because it exceeds selection.';
-  if (result.reason === 'schema-invalid')
-    return `AI patch rejected: ${result.details ?? 'schema invalid'}.`;
-  return `AI patch rejected: ${result.reason}.`;
-};
+function revisionContext(currentText: string, { from, to }: AiSelection['plaintextRange']) {
+  const paragraphStart = from > 0 ? currentText.lastIndexOf('\n', from - 1) + 1 : 0;
+  const nextBreak = currentText.indexOf('\n', to);
+  const paragraphEnd = nextBreak === -1 ? currentText.length : nextBreak;
+  const start = Math.max(paragraphStart, from - PREVIEW_SURROUNDING_LENGTH);
+  const end = Math.min(paragraphEnd, to + PREVIEW_SURROUNDING_LENGTH);
+  return {
+    before: `${start > paragraphStart ? '…' : ''}${currentText.slice(start, from)}`,
+    after: `${currentText.slice(to, end)}${end < paragraphEnd ? '…' : ''}`,
+  };
+}
 
 export function AIPanel({
   editor,
@@ -101,338 +67,584 @@ export function AIPanel({
   currentText,
   schemaVersion,
   open = true,
+  revisionFocusRequest,
+  showTestControls = false,
   onApplyPatch,
 }: AIPanelProps) {
-  const patchCounterRef = useRef(0);
-  const [pendingPatch, setPendingPatch] = useState<EditPatch | null>(null);
-  const [appliedPatch, setAppliedPatch] = useState<EditPatch | null>(null);
-  const [fallbackPatch, setFallbackPatch] = useState<EditPatch | null>(null);
-  const [status, setStatus] = useState('Select text to request an AI edit.');
+  const request = useRef<AbortController | null>(null);
+  const applying = useRef(false);
+  const promptRef = useRef<HTMLTextAreaElement>(null);
+  const lastFocusedRevision = useRef<number | undefined>(undefined);
+  const [availability, setAvailability] = useState<WritingModelAvailability | null>(null);
+  const [availabilityAttempt, setAvailabilityAttempt] = useState(0);
+  const [pendingRevision, setPendingRevision] = useState<Revision | null>(null);
+  const [fixtureAppliedRevision, setFixtureAppliedRevision] = useState<Revision | null>(null);
+  const [answer, setAnswer] = useState<(Source & { text: string }) | null>(null);
+  const [fallback, setFallback] = useState<string | null>(null);
+  const [status, setStatus] = useState('');
+  const [prompt, setPrompt] = useState('');
+  const [busy, setBusy] = useState(false);
   const [globalConfirmed, setGlobalConfirmed] = useState(false);
-  const [chatAnswer, setChatAnswer] = useState<string | null>(null);
-  const [chatCitation, setChatCitation] = useState<Extract<
-    EditPatchCitation,
-    { type: 'doc' }
-  > | null>(null);
   const [jumpTarget, setJumpTarget] = useState('');
-  // Maps a doc citation (by key) to the true ProseMirror positions captured at
-  // request time, so jumpToCitation can navigate without reconstructing offsets.
-  const citationPmRanges = useRef(new Map<string, PmRange>());
 
-  const selectionText = selectedText(editor);
-  const selectionRange = useMemo(() => {
-    if (!selectionText) return null;
-    const from = currentText.indexOf(selectionText);
-    if (from < 0) return null;
-    return { from, to: from + selectionText.length };
-  }, [currentText, selectionText]);
-  const canRequestSelectionPatch = Boolean(editor && baseVersion && selectionRange);
+  useEffect(() => {
+    if (!open || showTestControls) return;
+    let current = true;
+    void getWritingModelAvailability().then((result) => {
+      if (current) setAvailability(result);
+    });
+    return () => {
+      current = false;
+    };
+  }, [availabilityAttempt, open, showTestControls]);
+
+  useEffect(() => {
+    setBusy(applying.current);
+    if (!showTestControls) {
+      setPendingRevision(null);
+      setAnswer(null);
+      setStatus('');
+    }
+    return () => {
+      request.current?.abort();
+      request.current = null;
+    };
+  }, [open, editor, docId, showTestControls, revisionFocusRequest]);
+
+  const editorDoc = editor?.state.doc;
+  const selectionFrom = editor?.state.selection.from;
+  const selectionTo = editor?.state.selection.to;
+  const selection = useMemo(() => {
+    if (!open || !editorDoc || selectionFrom === selectionTo) return null;
+    return getAiSelection(editor, currentText);
+  }, [currentText, editor, editorDoc, open, selectionFrom, selectionTo]);
+  const hasModel =
+    showTestControls ||
+    availability === 'available' ||
+    availability === 'downloadable' ||
+    availability === 'downloading';
+  const canUseModel = Boolean(editor && baseVersion && hasModel);
+  const selectionFits = Boolean(
+    selection?.text.trim() && selection.text.length <= MAX_AI_SELECTION_LENGTH,
+  );
+  const canAsk = canUseModel && !busy && selectionFits;
+  const canRevise = canAsk && selection?.canReplace;
+
+  useEffect(() => {
+    if (
+      !open ||
+      !canUseModel ||
+      revisionFocusRequest === undefined ||
+      lastFocusedRevision.current === revisionFocusRequest ||
+      !promptRef.current
+    )
+      return;
+    lastFocusedRevision.current = revisionFocusRequest;
+    promptRef.current.focus({ preventScroll: true });
+  }, [canUseModel, open, revisionFocusRequest]);
 
   if (!open) return null;
 
-  const nextPatchId = () => {
-    patchCounterRef.current += 1;
-    return `ai-patch:${patchCounterRef.current}`;
-  };
+  const getSource = (selection: AiSelection, version: string): Source => ({
+    selection,
+    citation: {
+      type: 'doc',
+      baseVersion: version,
+      rangeFrom: selection.plaintextRange.from,
+      rangeTo: selection.plaintextRange.to,
+    },
+  });
 
-  const recordCitationPmRange = (
-    citation: Extract<EditPatchCitation, { type: 'doc' }>,
-    pmRange: PmRange,
-  ) => {
-    citationPmRanges.current.set(citationKey(citation), pmRange);
-  };
-
-  const validateAndStage = (patch: EditPatch, confirmations = {}) => {
-    const result = validateEditPatch(patch, {
+  const validateRevision = (patch: EditPatch, source: AiSelection) =>
+    validateEditPatch(patch, {
       baseDoc: { text: currentText },
-      selection: selectionRange,
+      baseVersionHash: baseVersion ?? undefined,
+      selection: patch.allowGlobal ? null : source.plaintextRange,
       schemaSummary: SCHEMA_SUMMARY,
-      confirmations,
+      confirmations: { globalEditConfirmed: Boolean(patch.allowGlobal && globalConfirmed) },
     });
-    if (!result.ok) {
-      setPendingPatch(null);
-      setFallbackPatch(suggestFallback(patch, result));
-      setStatus(validationMessage(result));
-      return;
-    }
-    setPendingPatch(patch);
-    setFallbackPatch(null);
-    setStatus('AI patch ready for review.');
-  };
 
-  const createSelectionPatch = () => {
-    if (!baseVersion || !selectionRange || !selectionText) {
-      setStatus('Select text before requesting an AI edit.');
-      return;
-    }
-    const pmRange = selectionPmRange(editor);
-    if (!pmRange) {
-      setStatus('Select text before requesting an AI edit.');
-      return;
-    }
-    const citation: Extract<EditPatchCitation, { type: 'doc' }> = {
-      type: 'doc',
-      baseVersion,
-      rangeFrom: selectionRange.from,
-      rangeTo: selectionRange.to,
-    };
-    recordCitationPmRange(citation, pmRange);
-    validateAndStage({
-      patchId: nextPatchId(),
+  const stageRevision = (source: Source, text: string, rationale: string, allowGlobal = false) => {
+    const { citation, selection } = source;
+    const { from, to } = selection.plaintextRange;
+    const patch: EditPatch = {
+      patchId: crypto.randomUUID(),
       docId,
-      baseVersion,
+      baseVersion: citation.baseVersion,
       schemaVersion,
       author: AI_AUTHOR,
       createdAt: new Date().toISOString(),
-      operations: [
-        {
-          op: 'replace_text',
-          from: selectionRange.from,
-          to: selectionRange.to,
-          text: improveText(selectionText),
-        },
-      ],
-      rationale: 'Tighten the selected wording while preserving the original meaning.',
+      operations: [{ op: 'replace_text', from, to, text }],
+      rationale,
       citations: [citation],
-    });
-  };
-
-  const createInvalidPatch = () => {
-    if (!baseVersion) return;
-    validateAndStage({
-      patchId: nextPatchId(),
-      docId,
-      baseVersion,
-      schemaVersion,
-      author: AI_AUTHOR,
-      createdAt: new Date().toISOString(),
-      operations: [
-        { op: 'insert_node', pos: selectionRange?.from ?? 0, node: { type: 'unknownWidget' } },
-      ],
-      rationale: 'Attempt an unsupported structure.',
-    });
-  };
-
-  const createGlobalPatch = () => {
-    if (!baseVersion || !currentText) return;
-    const docCitation: Extract<EditPatchCitation, { type: 'doc' }> = {
-      type: 'doc',
-      baseVersion,
-      rangeFrom: 0,
-      rangeTo: currentText.length,
+      ...(allowGlobal ? { allowGlobal } : {}),
     };
-    const docRange = docPmRange(editor);
-    if (docRange) recordCitationPmRange(docCitation, docRange);
-    validateAndStage(
-      {
-        patchId: nextPatchId(),
-        docId,
-        baseVersion,
-        schemaVersion,
-        author: AI_AUTHOR,
-        createdAt: new Date().toISOString(),
-        operations: [
-          {
-            op: 'replace_text',
-            from: 0,
-            to: currentText.length,
-            text: `Polished draft: ${currentText.replace(/\s+/g, ' ').trim()}`,
-          },
-        ],
-        rationale: 'Rewrite the full document only after explicit user confirmation.',
-        citations: [docCitation],
-        allowGlobal: true,
-      },
-      { globalEditConfirmed: globalConfirmed },
-    );
-  };
-
-  const acceptPatch = async () => {
-    if (!pendingPatch) return;
-    const result = await onApplyPatch(pendingPatch);
+    const result = validateRevision(patch, selection);
     if (!result.ok) {
-      setStatus(`AI patch failed: ${result.reason}`);
+      setPendingRevision(null);
+      setFallback(suggestFallback(patch, result)?.rationale ?? null);
+      setStatus(
+        result.reason === 'doc-wide-without-confirm'
+          ? 'Global edit requires confirmation.'
+          : 'This revision couldn’t be applied safely.',
+      );
       return;
     }
-    setAppliedPatch(pendingPatch);
-    setPendingPatch(null);
-    setStatus('AI patch applied.');
+    setPendingRevision({
+      ...source,
+      patch,
+      text,
+      ...revisionContext(currentText, selection.plaintextRange),
+    });
+    setStatus(showTestControls ? 'AI patch ready for review.' : 'Review the proposed revision.');
   };
 
-  const askAi = () => {
-    if (!baseVersion || !selectionRange || !selectionText) {
-      setStatus('Select text before asking AI.');
+  const run = async (kind: 'revision' | 'question') => {
+    if (!editor || !baseVersion || request.current || applying.current || !hasModel) return;
+    const excerpt = getAiSelection(editor, currentText);
+    if (!excerpt?.text.trim() || excerpt.text.length > MAX_AI_SELECTION_LENGTH) {
+      setStatus(
+        kind === 'revision'
+          ? 'Select text before requesting an AI edit.'
+          : 'Select text before asking AI.',
+      );
       return;
     }
-    const pmRange = selectionPmRange(editor);
-    if (!pmRange) {
-      setStatus('Select text before asking AI.');
+    if (kind === 'revision' && !excerpt.canReplace) {
+      setStatus('Select text within a single paragraph or heading to revise it.');
       return;
     }
-    const citation: Extract<EditPatchCitation, { type: 'doc' }> = {
-      type: 'doc',
-      baseVersion,
-      rangeFrom: selectionRange.from,
-      rangeTo: selectionRange.to,
+    const input = prompt.trim();
+    if (kind === 'question' && !input && !showTestControls) return;
+
+    const source = getSource(excerpt, baseVersion);
+    setPendingRevision(null);
+    setFixtureAppliedRevision(null);
+    setFallback(null);
+    setAnswer(null);
+    if (showTestControls) {
+      if (kind === 'revision') {
+        stageRevision(
+          source,
+          `Polished ${excerpt.text}`,
+          'Tighten the selected wording while preserving the original meaning.',
+        );
+      } else {
+        setAnswer({ ...source, text: `AI answer grounded in "${excerpt.text}".` });
+        setStatus('AI answer includes a document citation.');
+      }
+      return;
+    }
+
+    const controller = new AbortController();
+    request.current = controller;
+    setBusy(true);
+    const inProgress = kind === 'revision' ? 'Preparing a revision…' : 'Reading the excerpt…';
+    setStatus(
+      availability === 'available' ? inProgress : 'Preparing the browser’s on-device model…',
+    );
+    try {
+      const { from, to } = excerpt.plaintextRange;
+      const context = {
+        selectedText: excerpt.text,
+        beforeContext: currentText.slice(Math.max(0, from - MAX_AI_SELECTION_LENGTH), from),
+        afterContext: currentText.slice(to, to + MAX_AI_SELECTION_LENGTH),
+      };
+      const response = await requestWritingModel(
+        kind === 'revision'
+          ? { ...context, kind, instruction: input || 'Make this clearer and more concise.' }
+          : { ...context, kind, question: input },
+        controller.signal,
+        (progress) => {
+          if (request.current !== controller || availability === 'available') return;
+          setStatus(
+            progress === 100 ? inProgress : `Downloading the on-device model (${progress}%)…`,
+          );
+        },
+      );
+      if (request.current !== controller || controller.signal.aborted) return;
+      setAvailability('available');
+      if (editor.isDestroyed || !isAiSelectionCurrent(editor, excerpt)) {
+        setStatus(DRAFT_CHANGED);
+        return;
+      }
+      if (response.kind === 'question') {
+        setAnswer({ ...source, text: response.answer });
+        setStatus('Answer ready.');
+        return;
+      }
+      if (response.revision === excerpt.text.trim()) {
+        setStatus('The model didn’t suggest a change to this selection.');
+        return;
+      }
+      const leadingSpace = excerpt.text.match(/^\s*/u)?.[0] ?? '';
+      const trailingSpace = excerpt.text.match(/\s*$/u)?.[0] ?? '';
+      stageRevision(
+        source,
+        `${leadingSpace}${response.revision}${trailingSpace}`,
+        response.rationale,
+      );
+    } catch {
+      if (request.current === controller && !controller.signal.aborted) {
+        setStatus(
+          'The on-device model couldn’t complete this request. Try again with a shorter excerpt.',
+        );
+      }
+    } finally {
+      if (request.current === controller) {
+        request.current = null;
+        setBusy(false);
+      }
+    }
+  };
+
+  const acceptRevision = async () => {
+    if (!pendingRevision || applying.current) return;
+    if (pendingRevision.patch.allowGlobal && !globalConfirmed) {
+      setPendingRevision(null);
+      setStatus('Global edit requires confirmation.');
+      return;
+    }
+    if (
+      !editor ||
+      (!pendingRevision.patch.allowGlobal &&
+        !isAiSelectionCurrent(editor, pendingRevision.selection))
+    ) {
+      setPendingRevision(null);
+      setStatus(DRAFT_CHANGED);
+      return;
+    }
+    const { text, selection: selectedSource } = pendingRevision;
+    if (!text.trim() || text === selectedSource.text) return;
+    const { from, to } = selectedSource.plaintextRange;
+    const patch: EditPatch = {
+      ...pendingRevision.patch,
+      operations: [{ op: 'replace_text', from, to, text }],
     };
-    recordCitationPmRange(citation, pmRange);
-    setChatAnswer(`AI answer grounded in "${selectionText}".`);
-    setChatCitation(citation);
-    setStatus('AI answer includes a document citation.');
-  };
-
-  const jumpToCitation = (citation: Extract<EditPatchCitation, { type: 'doc' }>) => {
-    if (!editor) return;
-    const pmRange = citationPmRanges.current.get(citationKey(citation));
-    if (!pmRange) {
-      // No captured ProseMirror range means this citation was not produced in
-      // this session (e.g. a rehydrated patch). Fail loudly rather than
-      // navigating to a fabricated, likely-wrong position.
-      setStatus('Cannot navigate to citation: its source position is unavailable.');
+    if (!validateRevision(patch, selectedSource).ok) {
+      setPendingRevision(null);
+      setStatus(DRAFT_CHANGED);
       return;
     }
-    const docSize = editor.state.doc.content.size;
-    const from = Math.min(pmRange.from, docSize);
-    const to = Math.min(Math.max(from, pmRange.to), docSize);
-    editor.chain().focus().setTextSelection({ from, to }).run();
-    setJumpTarget(currentText.slice(citation.rangeFrom, citation.rangeTo));
+    applying.current = true;
+    setBusy(true);
+    try {
+      const result = await onApplyPatch(patch, selectedSource);
+      if (!result.ok) {
+        setPendingRevision(null);
+        setStatus(`Couldn’t apply the revision. ${result.reason}`);
+        return;
+      }
+      if (showTestControls) setFixtureAppliedRevision(pendingRevision);
+      setPendingRevision(null);
+      setStatus(showTestControls ? 'AI patch applied.' : 'Revision applied.');
+    } catch {
+      setStatus('Couldn’t apply the revision. Check the draft before trying again.');
+    } finally {
+      applying.current = false;
+      setBusy(false);
+    }
   };
 
-  const visiblePatch = pendingPatch ?? appliedPatch;
+  const jumpToSource = (source: Source) => {
+    if (!editor) return;
+    if (!showTestControls && editor.state.doc !== source.selection.document) {
+      setStatus('The draft changed after this answer. Select the excerpt to ask again.');
+      return;
+    }
+    const { from, to } = source.selection.pmRange;
+    editor.chain().focus().setTextSelection({ from, to }).run();
+    setJumpTarget(source.selection.text);
+  };
+
+  const visibleRevision = pendingRevision ?? fixtureAppliedRevision;
+  const guidance = !hasModel
+    ? availability === null
+      ? 'Checking for an on-device model…'
+      : availability === 'timed-out'
+        ? 'The browser’s on-device model didn’t respond. You can keep editing your draft.'
+        : 'On-device AI is unavailable in this browser. You can keep editing your draft.'
+    : !editor || !baseVersion
+      ? 'AI editing is unavailable for this document.'
+      : !selection
+        ? 'Select a passage in your draft to get started.'
+        : !selectionFits
+          ? `Select up to ${MAX_AI_SELECTION_LENGTH.toLocaleString('en-US')} characters of text.`
+          : !selection.canReplace
+            ? 'Select text within one paragraph or heading to preview a revision.'
+            : '';
 
   return (
     <section className="lash-ai-panel" data-testid="ai-panel" aria-label="AI editor">
-      <div className="ai-panel-header">
-        <h2 className="ai-panel-title">AI Editor</h2>
-        <span className="ai-label" data-testid="ai-label">
-          AI Editor
-        </span>
-      </div>
-
-      <div className="ai-controls">
-        <button
-          type="button"
-          className="ai-action-button"
-          data-testid="ai-improve-button"
-          disabled={!canRequestSelectionPatch}
-          onClick={createSelectionPatch}
-        >
-          Improve Writing
-        </button>
-        <button
-          type="button"
-          className="ai-action-button"
-          data-testid="ai-chat-ask"
-          disabled={!canRequestSelectionPatch}
-          onClick={askAi}
-        >
-          Ask AI
-        </button>
-        <button
-          type="button"
-          className="ai-action-button"
-          data-testid="ai-run-invalid"
-          disabled={!baseVersion}
-          onClick={createInvalidPatch}
-        >
-          Test invalid patch
-        </button>
-      </div>
-
-      <label className="ai-confirm-control">
-        <input
-          type="checkbox"
-          data-testid="ai-global-confirm"
-          checked={globalConfirmed}
-          onChange={(event) => setGlobalConfirmed(event.currentTarget.checked)}
-        />
-        Confirm doc-wide edit
-      </label>
-      <button
-        type="button"
-        className="ai-action-button"
-        data-testid="ai-global-rewrite"
-        disabled={!baseVersion || !currentText}
-        onClick={createGlobalPatch}
-      >
-        Rewrite document
-      </button>
-
-      <p className="ai-status" data-testid="ai-status" aria-live="polite">
-        {status}
-      </p>
-
-      {visiblePatch ? (
-        <div className="ai-review" data-testid="ai-review">
-          <p className="ai-rationale" data-testid="ai-rationale">
-            {visiblePatch.rationale}
+      {canUseModel && !showTestControls ? (
+        <>
+          <p className="ai-rationale">
+            Your browser processes the selection and nearby text on this device.
+            {availability !== 'available' ? ' It may need to download its model first.' : ''}
           </p>
-          <pre className="ai-patch-json" data-testid="ai-patch-json">
-            {JSON.stringify(visiblePatch, null, 2)}
-          </pre>
-          {visiblePatch.citations?.map((citation, index) =>
-            citation.type === 'doc' ? (
+          <label className="ai-prompt">
+            <span>Revision instructions or question</span>
+            <textarea
+              ref={promptRef}
+              data-testid="ai-prompt"
+              rows={2}
+              value={prompt}
+              maxLength={MAX_AI_QUESTION_LENGTH}
+              placeholder="Make this more direct"
+              onChange={(event) => setPrompt(event.currentTarget.value)}
+            />
+          </label>
+        </>
+      ) : null}
+      {hasModel ? (
+        <div className="ai-controls">
+          <button
+            type="button"
+            className="ai-action-button"
+            data-testid="ai-improve-button"
+            disabled={!canRevise}
+            onClick={() => void run('revision')}
+          >
+            Improve writing
+          </button>
+          <button
+            type="button"
+            className="ai-action-button"
+            data-testid="ai-chat-ask"
+            disabled={!canAsk || (!showTestControls && !prompt.trim())}
+            onClick={() => void run('question')}
+          >
+            Ask about selection
+          </button>
+          {busy && !applying.current ? (
+            <button
+              type="button"
+              className="ai-action-button"
+              onClick={() => {
+                request.current?.abort();
+                request.current = null;
+                setBusy(false);
+                setStatus('Request canceled.');
+              }}
+            >
+              Cancel
+            </button>
+          ) : null}
+        </div>
+      ) : null}
+
+      {showTestControls ? (
+        <>
+          <button
+            type="button"
+            className="ai-action-button"
+            data-testid="ai-run-invalid"
+            disabled={!baseVersion}
+            onClick={() => {
+              if (!baseVersion) return;
+              const result = validateEditPatch(
+                {
+                  patchId: crypto.randomUUID(),
+                  docId,
+                  baseVersion,
+                  schemaVersion,
+                  author: AI_AUTHOR,
+                  createdAt: new Date().toISOString(),
+                  operations: [{ op: 'insert_node', pos: 0, node: { type: 'unknownWidget' } }],
+                  rationale: 'Test an unsupported structure.',
+                },
+                {
+                  baseDoc: { text: currentText },
+                  selection: selection?.plaintextRange ?? null,
+                  schemaSummary: SCHEMA_SUMMARY,
+                  confirmations: {},
+                },
+              );
+              setPendingRevision(null);
+              if (!result.ok) setStatus(`AI patch rejected: ${result.details ?? result.reason}.`);
+            }}
+          >
+            Test invalid patch
+          </button>
+          <label className="ai-confirm-control">
+            <input
+              type="checkbox"
+              data-testid="ai-global-confirm"
+              checked={globalConfirmed}
+              onChange={(event) => setGlobalConfirmed(event.currentTarget.checked)}
+            />
+            Confirm doc-wide edit
+          </label>
+          <button
+            type="button"
+            className="ai-action-button"
+            data-testid="ai-global-rewrite"
+            disabled={!baseVersion || !currentText}
+            onClick={() => {
+              if (!editor || !baseVersion) return;
+              const whole = getAiSelection(editor, currentText, {
+                from: 1,
+                to: editor.state.doc.content.size - 1,
+              });
+              if (whole?.canReplace)
+                stageRevision(
+                  getSource(whole, baseVersion),
+                  `Polished draft: ${currentText}`,
+                  'Rewrite the full document only after explicit user confirmation.',
+                  true,
+                );
+            }}
+          >
+            Rewrite document
+          </button>
+        </>
+      ) : null}
+
+      <p
+        className="ai-status"
+        data-testid="ai-status"
+        aria-live="polite"
+        hidden={!status && !guidance}
+      >
+        {status || guidance}
+      </p>
+      {availability === 'timed-out' ? (
+        <button
+          type="button"
+          className="ai-action-button"
+          onClick={() => {
+            setAvailability(null);
+            setAvailabilityAttempt((attempt) => attempt + 1);
+          }}
+        >
+          Check again
+        </button>
+      ) : null}
+      {visibleRevision ? (
+        <div className="ai-review" data-testid="ai-review">
+          {!showTestControls ? (
+            <dl className="ai-revision-comparison">
+              <div>
+                <dt>Original</dt>
+                <dd data-testid="ai-original">{visibleRevision.selection.text}</dd>
+              </div>
+              <div>
+                <dt>Proposed revision</dt>
+                <dd>
+                  {visibleRevision.editing ? (
+                    <input
+                      className="ai-revision-input"
+                      data-testid="ai-revision-input"
+                      aria-label="Proposed wording"
+                      autoFocus
+                      value={visibleRevision.text}
+                      maxLength={MAX_AI_REVISION_LENGTH}
+                      disabled={busy}
+                      onChange={(event) => {
+                        const text = event.currentTarget.value;
+                        setPendingRevision((draft) => draft && { ...draft, text });
+                      }}
+                    />
+                  ) : (
+                    <>
+                      <span data-testid="ai-revision">{visibleRevision.text}</span>
+                      <button
+                        type="button"
+                        className="ai-action-button ai-edit-revision"
+                        data-testid="ai-edit-revision"
+                        disabled={busy}
+                        onClick={() =>
+                          setPendingRevision((draft) => draft && { ...draft, editing: true })
+                        }
+                      >
+                        Edit wording
+                      </button>
+                    </>
+                  )}
+                </dd>
+              </div>
+              <div>
+                <dt>In your draft</dt>
+                <dd data-testid="ai-revision-context">
+                  {visibleRevision.before}
+                  <mark>{visibleRevision.text}</mark>
+                  {visibleRevision.after}
+                </dd>
+              </div>
+            </dl>
+          ) : null}
+          <p className="ai-rationale" data-testid="ai-rationale">
+            {visibleRevision.patch.rationale}
+          </p>
+          {showTestControls ? (
+            <>
+              <pre className="ai-patch-json" data-testid="ai-patch-json">
+                {JSON.stringify(visibleRevision.patch, null, 2)}
+              </pre>
               <button
-                key={`${citation.baseVersion}:${citation.rangeFrom}:${citation.rangeTo}:${index}`}
                 type="button"
                 className="ai-citation-button"
                 data-testid="ai-citation"
-                data-range-from={String(citation.rangeFrom)}
-                data-range-to={String(citation.rangeTo)}
-                onClick={() => jumpToCitation(citation)}
+                data-range-from={visibleRevision.citation.rangeFrom}
+                data-range-to={visibleRevision.citation.rangeTo}
+                onClick={() => jumpToSource(visibleRevision)}
               >
-                Doc citation {citation.rangeFrom}-{citation.rangeTo}
+                Doc citation {visibleRevision.citation.rangeFrom}-{visibleRevision.citation.rangeTo}
               </button>
-            ) : null,
-          )}
-          {pendingPatch ? (
+            </>
+          ) : null}
+          {pendingRevision ? (
             <div className="ai-review-actions">
               <button
                 type="button"
                 className="ai-action-button"
                 data-testid="ai-accept-button"
-                onClick={acceptPatch}
+                disabled={
+                  busy ||
+                  !pendingRevision.text.trim() ||
+                  pendingRevision.text === pendingRevision.selection.text
+                }
+                onClick={() => void acceptRevision()}
               >
-                Accept
+                {showTestControls ? 'Accept' : 'Apply revision'}
               </button>
               <button
                 type="button"
                 className="ai-action-button"
                 data-testid="ai-reject-button"
+                disabled={busy}
                 onClick={() => {
-                  setPendingPatch(null);
-                  setStatus('AI patch rejected.');
+                  setPendingRevision(null);
+                  setStatus(showTestControls ? 'AI patch rejected.' : 'Revision discarded.');
                 }}
               >
-                Reject
+                {showTestControls ? 'Reject' : 'Discard'}
               </button>
             </div>
           ) : null}
         </div>
       ) : null}
 
-      {fallbackPatch ? (
+      {fallback ? (
         <p className="ai-fallback" data-testid="ai-fallback">
-          {fallbackPatch.rationale}
+          {fallback}
         </p>
       ) : null}
-
-      {chatAnswer && chatCitation ? (
+      {answer ? (
         <div className="ai-chat-answer" data-testid="ai-chat-answer">
-          <p>{chatAnswer}</p>
+          <p>{answer.text}</p>
           <button
             type="button"
             className="ai-citation-button"
             data-testid="ai-chat-citation"
-            data-range-from={String(chatCitation.rangeFrom)}
-            data-range-to={String(chatCitation.rangeTo)}
-            onClick={() => jumpToCitation(chatCitation)}
+            data-range-from={answer.citation.rangeFrom}
+            data-range-to={answer.citation.rangeTo}
+            onClick={() => jumpToSource(answer)}
           >
-            Citation: {currentText.slice(chatCitation.rangeFrom, chatCitation.rangeTo)}
+            {showTestControls ? `Citation: ${answer.selection.text}` : 'Go to source excerpt'}
           </button>
         </div>
       ) : null}
-
       {jumpTarget ? (
         <span className="sr-only" data-testid="ai-citation-jump-target">
           {jumpTarget}

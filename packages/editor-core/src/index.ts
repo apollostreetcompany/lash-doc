@@ -9,6 +9,14 @@ export type {
   LashAiSchemaOptions,
 } from './schema';
 export { createLashEditorExtensions } from './schema';
+export { normalizeYProsemirrorProjectionJson } from './yjs-projection';
+export {
+  isWellFormedSuggestionText,
+  prepareSuggestionReplacement,
+  readSuggestionRange,
+  type SuggestionRange,
+} from './suggestion-range';
+export { projectDocumentHeadingIds } from './plugins/heading-id';
 export type { ToolbarButtonSpec } from './toolbar';
 export { toolbarButtons, toolbarGroups, runToolbarAction, isToolbarButtonActive } from './toolbar';
 export type { OutlineItem, OutlinePersistenceAdapter } from './plugins/outline';
@@ -23,12 +31,25 @@ export {
   createMemoryOutlinePersistence,
 } from './persistence/outline-persistence';
 export {
+  deriveLegacyMarkdownTitle,
+  MARKDOWN_FILE_MAX_BYTES,
+  parseMarkdownFileToDoc,
   parseMarkdownToDoc,
   serializeDocToMarkdown,
+  serializeDocToMarkdownFile,
+  type MarkdownFileFormat,
+  type MarkdownFileParseResult,
+  type MarkdownFileSerializeOptions,
+  type MarkdownFileSerializeResult,
   type MarkdownImportResult,
   type MarkdownImportOptions,
 } from './markdown';
-export type { LashImageUploader } from './extensions/image';
+export { ImageUploadError, type LashImageUploader } from './extensions/image';
+export {
+  hasImageSignature,
+  isSupportedImageType,
+  MAX_IMAGE_FILE_BYTES,
+} from './extensions/image-source';
 export type { LashTableCellType, LashTableCellAttrs, LashTableOptions } from './extensions/table';
 export {
   sanitizeCellType,

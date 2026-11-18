@@ -3,75 +3,118 @@
 ## Runtime
 
 - Package manager: `pnpm@8.10.0`
-- Web app: `apps/web` via Next.js 14.
-- Production build command: `pnpm run build`
-- Static edge build command: `pnpm run build:static`
+- Web app: `apps/web` runs on Next.js 16.4.6 and React 19.3.1 with Node 22. The dynamic and static build scripts explicitly select webpack.
+- Inter and JetBrains Mono are bundled from pinned Fontsource packages. The build preloads Latin variable fonts and includes the remaining Unicode subsets. Their notices are served at `/licenses/inter.txt` and `/licenses/jetbrains-mono.txt`.
+- Production build command: `pnpm run build`; it runs the strict shipped-product gate before `next build`.
+- Static preview build command: `pnpm run build:static`; it runs the same shipped-product gate before exporting the browser-local writing preview.
+- Shipped-product typecheck: `pnpm run typecheck:product`; it checks the web and package product sources and the realtime Worker project.
+- Playwright/evidence typecheck: `pnpm run typecheck:harness`; it checks the browser harness under its strict no-emit project.
+- Combined compiler gate: `pnpm run typecheck` (or `make typecheck`); it runs product and harness gates in order.
+- Unit behavior gate: `pnpm run test:unit`. Unit test source is not yet a strict-type-clean project; `PROD-TSC-UNIT-01` tracks the 112 current diagnostics separately, so a green unit run must not be described as a unit-source typecheck.
 - Realtime Worker: `packages/realtime-worker`, Cloudflare Worker `lash-realtime`.
-- Realtime room runtime: Cloudflare Durable Objects class `LashRealtimeRoom`, binding `LASH_REALTIME_ROOM`, WebSocket transport.
+- Realtime authority runtime: Cloudflare Durable Objects class `LashRealtimeRoom`, binding `LASH_REALTIME_ROOM`, plus the additive stable promotion coordinator class `LashDocumentClaim`, binding `LASH_DOCUMENT_CLAIM`; room sockets use WebSocket transport.
 - Local E2E command: `pnpm run test:e2e`
 - CI E2E command: `pnpm run test:e2e:ci`
 
-## Local Service Rules
+## Local development
 
-- Do not run long-lived dev servers manually in this repo.
-- Playwright owns the local web server lifecycle during `pnpm run test:e2e`.
-- For local manual use, run `make serve`. It starts the production build in the background at `http://127.0.0.1:3000` after checking the port and writing `.lash-web.pid` / `.lash-web.log`.
-- Use `make status` to verify the local server and `make stop` when finished.
-- Check port `3000` before introducing or changing a local web server binding. Set `PORT=3001 make serve` if `3000` is occupied.
-- Check port `8787` before starting the realtime Worker. Use `LASH_REALTIME_PORT=8788 make verify-realtime-runtime` or `make realtime-dev` if `8787` is occupied.
-- Stop the local server before running `pnpm run build` or `pnpm run test:e2e`; `next build` rewrites `apps/web/.next` and can conflict with a running `next start`.
-- Local editor pages do not auto-connect to the default realtime Worker merely because they are on localhost. Enable local realtime with `NEXT_PUBLIC_LASH_REALTIME_URL`, `?realtime=on`, or `localStorage.setItem('lash:realtime-enabled', 'true')`; use `localStorage.setItem('lash:realtime-url', 'ws://127.0.0.1:<port>')` to point one browser context at a non-default local Worker; use `?realtime=off` to force local-only editing.
+Run `make dev-collab` for a two-writer workspace. It starts the web app and Worker
+on loopback and uses a local account provider and Mailpit inbox. The launcher
+generates and retains per-checkout keys and document state outside the repository.
+The default web, Worker, Auth and inbox ports are 3000, 8787, 55321 and 55324.
+Ctrl-C stops its application processes. To stop its Compose provider while
+preserving local volumes, run `node scripts/dev-collab.mjs --stop-provider`.
+The [two-profile walkthrough](README.md#try-collaboration-with-two-writers) exercises the normal user path.
 
-## Deploy Assumptions
+For browser-local writing, run `pnpm --filter @lash/web dev`. For the last production
+build, `make serve` starts a tracked local server. Use `make status` and `make stop`
+for that server. Serialize builds and servers that share a checkout's Next output.
+`pnpm run test:e2e` runs its own server when no external base URL is set.
 
-- Public test deployment target: Cloudflare Pages project `lash`.
-- Public test URL: `https://lash-9xx.pages.dev/`.
-- Static export output: `apps/web/out`, produced by `LASH_STATIC_EXPORT=1 next build` via `pnpm run build:static`.
-- Deploy command: `make deploy-cloudflare`.
-- Public smoke/performance verification command: `make verify-cloudflare URL=https://lash-9xx.pages.dev/`.
-- Dynamic Render Blueprint: `render.yaml`, service `lash-doc-web`, Node runtime, build command `corepack enable && corepack prepare pnpm@8.10.0 --activate && pnpm install --frozen-lockfile && pnpm run build`, start command `pnpm --filter @lash/web exec next start -H 0.0.0.0 -p $PORT`.
-- Dynamic Render preflight command: `make verify-render`; it runs the production dynamic build and verifies `/` plus `/doc/render-smoke` through `next start` on `0.0.0.0:$PORT`.
-- GitHub remote is `https://github.com/apollostreetcompany/lash-doc.git`.
-- Default branch is `main`.
-- Branch protection is configured on `main` with strict required `build-and-test`, admin enforcement, and no force-push/delete.
-- GitHub Actions CI uses Node 22 because current Wrangler releases require Node 22+.
-- GitHub Actions CI runs browser E2E through `pnpm run test:e2e:ci`, which rebuilds `apps/web` with `NEXT_PUBLIC_LASH_TEST_HOOKS=true` and serializes Playwright with `--workers=1` to avoid realtime Worker port contention and shared-runner performance jitter.
-- Latest protected `main` CI is green on integrated Beads 23-36 commit `1b85b26682505d5a8e10e6051c4f4464b612898c` via run `26914289177`; it passed lint, typecheck, unit tests, serialized E2E, and build.
-- Latest Bead 36 PR CI was green on PR #28 run `26913934385`; PR #28 then merged the complete Beads 23-36 stack to `main`.
-- Container/runtime binding assumptions are not applicable to the Cloudflare Pages test site because it serves static assets at the edge. The existing local `next start` path remains unchanged.
-- Bead 28 chooses Cloudflare Durable Objects as the realtime room runtime. The app now has a deploy-shaped `lash-realtime` Worker with `/api/realtime/health`, `/api/realtime/rooms/:id/health`, and `/api/realtime/rooms/:id/socket` endpoints. Verified result: `pnpm --filter @lash/realtime-worker run deploy:dry-run` bundles successfully with Durable Object binding `LASH_REALTIME_ROOM`.
-- Bead 30 gates realtime room access with signed session grants. Browsers first request `GET /api/realtime/rooms/:id/session?actorId=<actor>` and then pass the returned `accessToken` to room health/socket requests. Local development uses a non-production fallback secret only on loopback hosts; production must set `LASH_REALTIME_SESSION_SECRET` before publishing the Worker.
-- Bead 31 persists realtime document CRDT state in the per-document Durable Object using SQLite-backed storage. Each accepted Yjs update is appended before broadcast, snapshots compact hydration state periodically, new sockets hydrate from the latest snapshot plus later updates, and restore appends a new head update instead of deleting history.
-- Bead 32 makes realtime opt-in for unconfigured local browser sessions so normal large-document typing does not pay collaboration runtime overhead. Online typing Playwright coverage opts in explicitly before opening document pages.
-- Bead 33 carries presence on the existing realtime room socket: clients send room-scoped `awareness-update` messages, the Durable Object sends same-room `awareness-state` peer lists, and persisted client updates return `sync-ack` messages for saved/syncing UI.
-- Bead 34 adds invite/access UX and signed invite-token exchange. Local/static Lash invite links use `#invite=<token>` and local browser storage for collaborator rows/revocation; the browser strips the hash after validation and forwards the invite token to realtime session exchange when realtime is enabled. In non-local Worker deployments, `/session` denies requests without a valid signed invite token instead of minting a default edit grant. Durable DO-backed invite issuance, global revocation, and audit remain follow-up work.
-- Bead 35 stores document chat thread metadata and suggestion resolution records in document-scoped localStorage for local-only sessions, and mirrors them into per-record Y.Map entries in the existing realtime Y.Doc when realtime is enabled. No new deploy secret, binding, database, or service is required; Durable Object persistence captures these metadata updates through the same append-only Yjs update log and snapshot path as document content.
-- Bead 36 adds web UI and local test configurability: collaboration Ready/share, sync feedback, retry reconnect, and the `lash:realtime-url` localStorage override. Its post-subreview hardening also changes the realtime access split without adding a deploy secret, binding, database, or route: WebSocket joins require `doc.read`, while persisted/broadcast `yjs-update` messages require `doc.edit` inside the Durable Object.
-- INF-02 realtime deployment receipt: Cloudflare Worker `lash-realtime` deployed to `https://lash-realtime.ryan-borker.workers.dev` as version `06150817-80d3-4c52-b86d-cbfd2ac92f4f` on 2026-06-24. Public `GET /api/realtime/health` returned `ok: true`; unauthenticated `GET /api/realtime/rooms/inf-02/session?actorId=public-check` returned `403 invalid`; `wrangler secret list` returned `[]`. Production document sessions intentionally remain closed until `LASH_REALTIME_SESSION_SECRET` and `LASH_REALTIME_INVITE_SECRET` are set and matched by the dynamic web runtime.
-- INF-01 dynamic Render receipt: `make verify-render` passed on 2026-06-24, and the Next build output classified `/doc/[id]` as dynamic server-rendered on demand. Render CLI auth works in Apollo Street Company's workspace and no existing Lash service was found, but Render CLI v2.6.1 exposes service inspection/deploy management rather than service creation/Blueprint apply; no `RENDER_API_KEY` is configured. Apply `render.yaml` through the Render Dashboard or API to create the live `lash-doc-web` service.
-- The existing Cloudflare Pages public test site remains the static host for the last static-export deployment. The Beads 23-36 merged `main` build includes Bead 27 `/doc/[id]` Next routes, which are now covered by the Render dynamic runtime Blueprint/preflight; Cloudflare Pages static export remains unsuitable for arbitrary dynamic document routes.
+### Account and public-access configuration
+
+- Account-provider proof uses the repository-pinned Supabase CLI `2.110.0`, never an ambient/global CLI. Lash's isolated local stack binds API/Auth `55321`, Postgres `55322`, Studio `55323`, Mailpit `55324`, SMTP `55325`, and shadow database `55320`; check all six ports before `make supabase-start`.
+- A source-matched account build/runtime needs `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`, exact `LASH_SITE_ORIGIN`, and a server-only `LASH_ACCOUNT_PRINCIPAL_HMAC_KEY` of at least 32 UTF-8 bytes. Do not persist or print provider keys. `make supabase-start` emits only allowlisted service URLs, and `make verify-account-auth` checks Auth/Mailpit health before running the one-test, capture-disabled `playwright.account.config.ts` journey.
+- Local editor pages do not auto-connect to the default realtime Worker merely because they are on localhost. Enable local realtime with `NEXT_PUBLIC_LASH_REALTIME_URL`, `?realtime=on`, or `localStorage.setItem('lash:realtime-enabled', 'true')`; use `localStorage.setItem('lash:realtime-url', 'ws://127.0.0.1:<port>')` to point one browser context at a non-default local Worker. Browser storage/query opt-ins are honored only on exact loopback hosts in development or explicitly test-tagged builds, and the override URL itself must use `ws:` or `wss:` with a loopback hostname. Deployed hostnames ignore those local overrides. `?realtime=off` always forces local-only editing, including when `NEXT_PUBLIC_LASH_REALTIME_URL` is configured.
+- Account-backed owner reopen and local-to-account promotion require a build with `NEXT_PUBLIC_LASH_REALTIME_URL` configured. In that build, a route without an invite remains behind the checking surface until the owner-session lookup resolves; an unowned route then mounts verified local content once, while an owned route mounts only the hydrated Durable Object projection. Do not build account acceptance without the configured public socket origin and then infer owner persistence from local-only behavior.
+- Signed-out public-document proof additionally requires the server-only web flag `LASH_PUBLIC_DOCUMENT_ACCESS_ENABLED=true`, dedicated matching `LASH_WORKER_PUBLIC_CONTROL_SECRET_CURRENT` values in Next and the Worker, `LASH_PUBLIC_RATE_KEY_SECRET` of at least 32 UTF-8 bytes, and `LASH_TRUSTED_CLIENT_ADDRESS_HEADER` set exactly to `x-forwarded-for` or `cf-connecting-ip`. The configured platform or a root-controlled local reverse proxy must overwrite that header with one canonical bare IPv4 or IPv6 address; comma-separated forwarding chains, ports, whitespace, and browser-supplied values fail closed.
+- Worker public-session issuance is independently closed unless `LASH_PUBLIC_DOCUMENT_ACCESS_PHASE=enabled` and `LASH_PUBLIC_READ_ROOM_ALLOWLIST` is a bounded, duplicate-free comma-separated list of exact canonical room IDs. This phase is separate from the existing owner-promotion `LASH_SHARE_PHASE`; enabling account ownership must never implicitly enable public recipients.
+- Typed public-comment proof is a third independently closed boundary. Next requires exact `LASH_PUBLIC_COMMENT_ACCESS_ENABLED=true` and `LASH_WORKER_PUBLIC_COMMENT_SECRET_CURRENT` of at least 32 UTF-8 bytes in addition to the existing site origin, Worker HTTP origin, account-principal key, trusted-address header, and public rate-key secret. The Worker requires exact `LASH_PUBLIC_COMMENT_ACCESS_PHASE=enabled`, its own matching current secret plus optional previous secret, and `LASH_PUBLIC_COMMENT_ROOM_ALLOWLIST`; every comment room must also be present in the public-read allowlist. Owner soft-hide moderation remains available through the existing owner-management phase and control secret even when public-comment creation is disabled.
+
+### Named editors
+
+The web server and Worker both require `LASH_NAMED_EDIT_PHASE=enabled`.
+The Worker also requires `LASH_SHARE_PHASE=enabled`. The web runtime uses
+`LASH_NAMED_EDIT_KEY`, a dedicated stable base64url key of at least 32 decoded
+bytes, for invitation identity and email protection. Retain it across deploys.
+Use `LASH_SITE_ORIGIN` for the exact HTTPS origin, configure account sign-in
+redirects for that origin, and set the matching control secret in both services.
+`NEXT_PUBLIC_LASH_REALTIME_URL` is a build-time setting. The Worker and web
+service must target the same room deployment.
+
+The owner copies a link for a named recipient. Redemption requires the matching
+verified account. Run the account and named-editor suites with two separate
+browser profiles on a staging instance before enabling the route for users.
+Keep public read and comment rollout independent. The Worker refuses public
+delivery for documents containing recipient-sensitive references.
+
+### Named reviewers
+
+The local launcher enables named comments alongside named edits. For a hosted
+rollout, deploy the compatible Worker first, then the matching web application.
+Enable `LASH_NAMED_COMMENT_PHASE=enabled` in both services for the review trial.
+A reviewer receives the current title and body. Documents with private reference
+chips, unsupported metadata or projections exceeding the 1 MiB bounds cannot
+issue a usable reviewer session. The owner sees when a document is ineligible.
+The other named access settings above still apply. Check **Can edit** and **Can
+comment** from different verified accounts. Check that a reviewer can propose
+wording, an owner can accept it, and revoking the reviewer ends their access.
+
+To disable new reviewer access, close the web and Worker comment phases. Preserve
+stored reviewer grants and feedback when reverting the application version.
+
+## Hosting
+
+For account-backed collaboration, deploy the dynamic web service defined in
+`render.yaml` with its matching Worker and account provider. The web process
+binds to `0.0.0.0:$PORT`. Run `make verify-render` to exercise the same start
+command on a new document and the home route. Verify the deployed candidate
+with two signed-in browsers, including reload, revocation and room restart.
+
+Cloudflare Pages serves the browser-local preview. The Documents catalog lives
+at `/documents/` and local document links use `/?doc=<id>`. Account and shared
+room operations require the dynamic service. See [release notes](RELEASE_NOTES.md)
+for the supported writing and review journeys.
 
 ## Realtime Worker Preflight
 
-1. Generate binding/runtime types after config changes: `pnpm --filter @lash/realtime-worker types`.
-2. Typecheck the Worker: `pnpm --filter @lash/realtime-worker typecheck`.
-3. Set the production session signing secret before publishing: `npx wrangler secret put LASH_REALTIME_SESSION_SECRET --config packages/realtime-worker/wrangler.jsonc`.
-4. Set a production invite signing secret before accepting server-issued invite links: `npx wrangler secret put LASH_REALTIME_INVITE_SECRET --config packages/realtime-worker/wrangler.jsonc`. If omitted, the Worker falls back to `LASH_REALTIME_SESSION_SECRET` for invite verification.
-5. Validate deploy shape without publishing: `make realtime-dry-run`.
-6. Verify local token issuance, denied unauthenticated access, room health, and WebSocket upgrade: `make verify-realtime-runtime`.
-7. Deploy the realtime Worker when ready: `make deploy-realtime-cloudflare`.
+1. Generate and inspect binding/runtime types after config changes: `pnpm --filter @lash/realtime-worker types`. The generated `Env` must include both `LASH_REALTIME_ROOM` and `LASH_DOCUMENT_CLAIM`.
+2. Confirm `wrangler.jsonc` retains migration tag `v1` for `LashRealtimeRoom` and additive tag `v2` for `LashDocumentClaim`; never rewrite or reuse a deployed migration tag.
+3. Typecheck the Worker: `pnpm --filter @lash/realtime-worker typecheck`.
+4. Set the production session signing secret before publishing: `npx wrangler secret put LASH_REALTIME_SESSION_SECRET --config packages/realtime-worker/wrangler.jsonc`.
+5. A production invite signing secret remains necessary for any future authoritative issuer: `npx wrangler secret put LASH_REALTIME_INVITE_SECRET --config packages/realtime-worker/wrangler.jsonc`. It is not sufficient to open the Bead 41 legacy token route. Use the named account invitation flow described above for production editor access.
+6. Account promotion additionally requires the current Worker control secret and an explicit closed-by-default `LASH_SHARE_PHASE`; never print either value. Initial Worker v2 deployment stays closed while the new binding, migration, health, and negative v1/v2 routes are checked.
+7. Validate deploy shape without publishing: `make realtime-dry-run`. The output must list both Durable Object bindings.
+8. Verify local token issuance, denied unauthenticated access, room health, WebSocket upgrade, signed v1 promotion cutoff, and signed v2 claim promotion before activation.
+9. Roll out Worker v2 first. Only after its binding/migration and v1 cutoff are verified may the matching v2 Next caller be enabled. There is no v2-to-v1 fallback.
+10. Verify the deployed web and Worker revisions together before enabling collaboration on a shared document.
+11. Rollback before any v2 claim is activated may return to the preceding compatible Worker. After a `LashDocumentClaim` alias exists, disable the web promotion path first, set the Worker share phase closed/frozen, preserve every claim/room row, and roll back only to a Worker version that includes the v2 class, binding, and schema. Never select a pre-v2 Worker or delete the claim Durable Object to force rollback.
+12. Public-document rollout is Worker first and closed by default: configure the dedicated current/previous public-control secrets, leave `LASH_PUBLIC_DOCUMENT_ACCESS_PHASE` closed, verify denial, then enable only an exact `LASH_PUBLIC_READ_ROOM_ALLOWLIST` canary. Configure the matching Next secret and trusted rate-key settings, keep `LASH_PUBLIC_DOCUMENT_ACCESS_ENABLED` closed until the Worker canary is healthy, and only then run a clean signed-out browser journey.
+13. Public-document rollback disables the Next public-access flag first, then the Worker public-access phase. Change every allowlisted canary document to `restricted` to increment its cutoff and close protocol-v4 sockets, verify no active public-v4 sockets, and wait past the 60-second unused-ticket lifetime. Preserve public policy, ticket, rate, audit, and Yjs rows; never downgrade or delete the additive room schema.
+14. Public-comment rollout is also Worker first: deploy the additive comment/rate/audit/moderation schema and routes with `LASH_PUBLIC_COMMENT_ACCESS_PHASE` closed; configure current/previous comment secrets; verify disabled and wrong-room denial; then enable only one disposable room that is already in the public-read allowlist. Deploy Next with `LASH_PUBLIC_COMMENT_ACCESS_ENABLED` still closed, verify the exact same-origin/CSRF negatives, then enable the one-room BFF canary and run the real account/browser post, reload, owner hide, and policy cutoff journey.
+15. Rotate the public-comment service secret Worker first (`CURRENT=new`, `PREVIOUS=old`), then Next (`CURRENT=new`), and remove the Worker previous value only after the 60-second assertion lifetime has elapsed across every Next instance. Next never loads or signs with the previous secret.
+16. Public-comment rollback disables Next authoring first, then closes the Worker comment phase and removes the comment allowlist. If abuse or uncertainty exists, set affected documents to Read or Restricted through owner Settings. Preserve comment, moderation-receipt, rate, and audit rows; never drop the additive tables or fall back to a writable protocol-v4 socket.
 
 ## Realtime Worker Health
 
 - Service health: `GET /api/realtime/health`.
-- Room session grant: `GET /api/realtime/rooms/<doc-id>/session?actorId=<actor-id>`. Local fallback mints a default edit grant only when `LASH_REALTIME_SESSION_SECRET` is absent and the request host is `127.0.0.1`, `localhost`, or loopback IPv6. Non-local hosts without the session secret deny session minting. Production requests must include `inviteToken=<signed-share-token>`; `view` maps to `doc.read`, while `comment`, `suggest`, and `edit` map to `doc.read` + `doc.edit` with the original invite scope preserved on the short-lived grant.
+- Room session grant candidate: `POST /api/realtime/rooms/<doc-id>/session` with exact JSON keys `actorId` and `inviteToken`, `Content-Type: application/json`, and a 16 KiB request limit. Token-free `GET .../session?actorId=<actor-id>` exists only for exact-loopback fallback development. A successful local response and signed grant both declare `protocolVersion: 2`. Configured non-loopback invite requests fail terminally with `invite-authority-unavailable`; this legacy endpoint does not issue production role grants. Use named invitations for authenticated editors and reviewers.
 - Room health: `GET /api/realtime/rooms/<doc-id>/health?accessToken=<token>`; requires `doc.read`; includes `persistence.updates`, `persistence.snapshotSequence`, and `persistence.hydrationUpdates`.
-- Room socket: `GET /api/realtime/rooms/<doc-id>/socket?accessToken=<token>` with `Upgrade: websocket`; requires `doc.read` so view invitees can hydrate room state.
+- Room socket: `GET /api/realtime/rooms/<doc-id>/socket?accessToken=<token>&protocolVersion=2` with `Upgrade: websocket`; requires `doc.read`. URL-free WebSocket session transport remains an explicit production hardening item.
 - Room restore: `POST /api/realtime/rooms/<doc-id>/restore?accessToken=<token>` with body `{ "update": "<base64-yjs-update>" }`; requires `doc.edit`; appends a new restore update and broadcasts it to connected peers.
-- Room socket protocol: `yjs-update` messages require the socket attachment to include `doc.edit`, can include `updateId`, and receive `sync-ack` after persistence; read-only sockets receive `scope_mismatch` before persistence or broadcast if they attempt a Yjs mutation. Document content, comment thread metadata, and suggestion resolution records all travel as Yjs updates. `awareness-update` messages carry label/color/selection and receive room-scoped `awareness-state` peer lists.
+- Room socket protocol v2: the Worker attaches the protocol version and `hydrated: false`, emits `room-ready`, replays persisted `yjs-update` frames, emits `room-hydration-complete`, and only then marks the socket hydrated and includes it in presence, persistence, or broadcast. Legacy, malformed, pre-hydration, and non-OPEN hibernated sockets are excluded. A current hibernated attachment additionally requires normalized nonempty actor/room IDs, unique capabilities including `doc.read`, and scope-consistent edit capability. Post-hydration `yjs-update` messages require `doc.edit`, may include `updateId`, and receive `sync-ack` after persistence; read-only sockets receive `scope_mismatch` before persistence or broadcast. `awareness-update` messages carry label/color/selection and receive room-scoped `awareness-state` lists.
+- CORS preflight: handled routes return 204 and the exact allow-header list `authorization, cache-control, content-type`; requested header values and bearer-shaped strings are not reflected.
 - Local verification command: `pnpm run verify:realtime`.
-- Latest local verification: service health passed on `http://127.0.0.1:8787`, unauthenticated room health returned `403`, room `bead-28-health` reported actor `verify-runtime` and `protocolVersion: 1`, and authorized WebSocket ping returned `pong` with one active connection.
-- Latest online realtime verification: `apps/web/e2e/online-typing` passes unauthorized denial, same-doc remote visibility, concurrent convergence, reload durability, snapshot compaction without deleting update history, room presence/cursor visibility, saved/reconnecting/recovered sync states, local-only collaboration chrome honesty, and view-invite realtime hydration without body edit access.
 
 ## Cloudflare Pages Preflight
 
@@ -85,10 +128,7 @@
 
 - Public verification runs `apps/web/e2e/smoke/home.spec.ts` and `apps/web/e2e/performance/typing-latency.spec.ts` with `PLAYWRIGHT_BASE_URL`.
 - Essay typing threshold: p95 browser event processing < 8 ms, max event processing < 50 ms, full essay typed < 5 s, zero long tasks, and no character loss.
-- Local large-document typing gate: `apps/web/e2e/performance/large-doc-typing.spec.ts` seeds 10k-word and 50k-word docs through test hooks and enforces p95 event work < 8 ms plus max event work < 50 ms. It logs long task counts for future document virtualization work.
-- On GitHub-hosted CI only, the 50k-word Event Timing p95 budget is 16 ms to account for hosted-runner CPU scheduling. Local and product validation keep the 8 ms p95 budget, and the spec logs `p95BudgetMs` with each scenario.
-- Latest public verification on `https://lash-9xx.pages.dev/`: 585 characters typed in 985 ms, p95 event work 0.8 ms, max event work 7.4 ms, zero long tasks.
-- Latest merged-main Cloudflare deployment preview: `https://cad5a3ac.lash-9xx.pages.dev`.
+- Local large-document typing gate: `apps/web/e2e/performance/large-doc-typing.spec.ts` seeds 10k-word and 50k-word docs through test hooks and enforces p95 event work < 8 ms plus max event work < 50 ms. Check the final text after saving and reopening.
 
 ## Rollback
 
@@ -97,6 +137,6 @@
 - Cloudflare Pages rollback path: Cloudflare dashboard -> Workers & Pages -> `lash` -> Deployments -> promote a prior successful deployment.
 - CLI deployment inspection: `npx wrangler pages deployment list --project-name lash --environment production`
 - CLI fallback: redeploy a known-good checkout with `make deploy-cloudflare`.
-- Realtime Worker rollback path: inspect versions with `pnpm exec wrangler versions list --config packages/realtime-worker/wrangler.jsonc`, then roll back with `pnpm exec wrangler rollback --config packages/realtime-worker/wrangler.jsonc <version-id>`.
+- Realtime Worker rollback path: disable the v2 web caller first and close/freeze new Worker promotion. Inspect versions with `pnpm exec wrangler versions list --config packages/realtime-worker/wrangler.jsonc`, then select only a version that retains every activated Durable Object class/migration. After any claim alias exists, do not roll back to a pre-`LashDocumentClaim` version; preserve all alias, owner, projection, audit, and Yjs rows.
 - Render rollback path: use Render Dashboard -> `lash-doc-web` -> Deploys -> Roll back to the previous successful deploy, or trigger a known-good commit after the service is created from `render.yaml`.
 - For future deploy-affecting beads, record the health check URL, smoke URL, and rollback command/path in `handoff/beads.jsonl`.

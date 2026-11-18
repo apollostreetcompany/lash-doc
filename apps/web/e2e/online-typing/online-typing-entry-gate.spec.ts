@@ -1,6 +1,10 @@
-import { expect, test, type Browser, type BrowserContext, type Page } from '@playwright/test';
-import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
-import { once } from 'node:events';
+import { expect, type Browser, type BrowserContext, type Page } from '@playwright/test';
+
+import {
+  enableDevelopmentLoopback,
+  test,
+  type DevelopmentLoopbackWorker,
+} from '../development-loopback-worker';
 
 type LashTestWindow = Window & {
   __lashEditor?: {
@@ -14,7 +18,10 @@ type LashTestWindow = Window & {
     disconnectForTest: () => void;
     reconnectForTest: () => void;
     getSnapshot: () => {
+      connectionState: string;
       syncState: string;
+      queuedUpdateCount: number;
+      pendingUpdateCount: number;
       peers: Array<{
         actorId: string;
         selection: { from: number; to: number } | null;
@@ -24,72 +31,7 @@ type LashTestWindow = Window & {
 };
 
 const EMPTY_DOC = '<p></p>';
-const REALTIME_PORT = 8787;
-const REALTIME_HEALTH_URL = `http://127.0.0.1:${REALTIME_PORT}/api/realtime/health`;
 const SNAPSHOT_UPDATE_THRESHOLD = 20;
-
-let realtimeWorker: ChildProcess | null = null;
-
-const assertRealtimePortFree = () => {
-  const result = spawnSync('lsof', ['-n', '-P', `-iTCP:${REALTIME_PORT}`, '-sTCP:LISTEN'], {
-    encoding: 'utf8',
-  });
-  if (result.status === 0) {
-    throw new Error(`Realtime test port ${REALTIME_PORT} is already in use:\n${result.stdout}`);
-  }
-};
-
-const waitForRealtimeWorker = async () => {
-  const deadline = Date.now() + 30_000;
-  let lastError = '';
-  while (Date.now() < deadline) {
-    try {
-      const response = await fetch(REALTIME_HEALTH_URL);
-      if (response.ok) return;
-      lastError = `${response.status} ${response.statusText}`;
-    } catch (error) {
-      lastError = error instanceof Error ? error.message : String(error);
-    }
-    await new Promise((resolve) => setTimeout(resolve, 500));
-  }
-  throw new Error(`Realtime worker did not become ready: ${lastError}`);
-};
-
-const startRealtimeWorker = async () => {
-  assertRealtimePortFree();
-  realtimeWorker = spawn(
-    'pnpm',
-    [
-      'exec',
-      'wrangler',
-      'dev',
-      '--config',
-      'packages/realtime-worker/wrangler.jsonc',
-      '--local',
-      '--port',
-      String(REALTIME_PORT),
-      '--log-level',
-      'error',
-    ],
-    {
-      cwd: process.cwd(),
-      env: { ...process.env, NO_COLOR: '1' },
-      stdio: ['ignore', 'ignore', 'pipe'],
-    },
-  );
-  realtimeWorker.stderr?.on('data', (chunk) => process.stderr.write(chunk));
-  await waitForRealtimeWorker();
-};
-
-const stopRealtimeWorker = async () => {
-  const worker = realtimeWorker;
-  realtimeWorker = null;
-  if (!worker || worker.exitCode !== null || worker.signalCode !== null) return;
-  worker.kill('SIGTERM');
-  const timeout = setTimeout(() => worker.kill('SIGKILL'), 5_000);
-  await once(worker, 'exit').catch(() => undefined);
-  clearTimeout(timeout);
-};
 
 const waitForEditor = async (page: Page) => {
   await page.waitForFunction(() => Boolean((window as LashTestWindow).__lashEditor));
@@ -115,16 +57,9 @@ const openDocument = async (page: Page, documentId: string) => {
   await seedEmptyDoc(page);
 };
 
-const enableLocalRealtime = (context: BrowserContext, actorId?: string) =>
-  context.addInitScript((nextActorId) => {
-    window.localStorage.setItem('lash:realtime-enabled', 'true');
-    if (nextActorId) {
-      window.localStorage.setItem('lash:actor-id', nextActorId);
-    }
-  }, actorId);
-
 const openTwoClientsOnSameDoc = async (
   browser: Browser,
+  worker: DevelopmentLoopbackWorker,
   options: {
     actorA?: string;
     actorB?: string;
@@ -134,7 +69,10 @@ const openTwoClientsOnSameDoc = async (
   const { actorA = 'actor-alpha', actorB = 'actor-beta', documentId = 'demo-document' } = options;
   const contextA = await browser.newContext();
   const contextB = await browser.newContext();
-  await Promise.all([enableLocalRealtime(contextA, actorA), enableLocalRealtime(contextB, actorB)]);
+  await Promise.all([
+    enableDevelopmentLoopback(contextA, worker, actorA),
+    enableDevelopmentLoopback(contextB, worker, actorB),
+  ]);
   const pageA = await contextA.newPage();
   const pageB = await contextB.newPage();
 
@@ -161,19 +99,22 @@ const editorText = (page: Page) =>
 const realtimeSnapshot = (page: Page) =>
   page.evaluate(() => (window as LashTestWindow).__lashRealtime?.getSnapshot() ?? null);
 
-const typeIntoEditor = async (page: Page, text: string) => {
-  await page.evaluate(() => {
+const focusEditor = (page: Page) =>
+  page.evaluate(() => {
     const editor = (window as LashTestWindow).__lashEditor;
     if (!editor) throw new Error('Lash editor test hook is unavailable');
     editor.commands.focus('end');
   });
+
+const typeIntoEditor = async (page: Page, text: string) => {
+  await focusEditor(page);
   await page.keyboard.type(text);
   await expect.poll(() => editorText(page)).toContain(text);
 };
 
-const sessionFor = async (roomId: string, actorId: string) => {
+const sessionFor = async (worker: DevelopmentLoopbackWorker, roomId: string, actorId: string) => {
   const response = await fetch(
-    `http://127.0.0.1:${REALTIME_PORT}/api/realtime/rooms/${roomId}/session?actorId=${actorId}`,
+    `${worker.httpBaseUrl}/api/realtime/rooms/${roomId}/session?actorId=${actorId}`,
   );
   expect(response.status).toBe(200);
   const body = (await response.json()) as { ok: true; accessToken: string };
@@ -207,9 +148,13 @@ const waitForSocketRefusal = async (url: string) =>
     });
   });
 
-const roomHealth = async (roomId: string, accessToken: string) => {
+const roomHealth = async (
+  worker: DevelopmentLoopbackWorker,
+  roomId: string,
+  accessToken: string,
+) => {
   const response = await fetch(
-    `http://127.0.0.1:${REALTIME_PORT}/api/realtime/rooms/${roomId}/health?accessToken=${encodeURIComponent(accessToken)}`,
+    `${worker.httpBaseUrl}/api/realtime/rooms/${roomId}/health?accessToken=${encodeURIComponent(accessToken)}`,
   );
   expect(response.status).toBe(200);
   return (await response.json()) as {
@@ -222,44 +167,38 @@ const roomHealth = async (roomId: string, accessToken: string) => {
   };
 };
 
-test.describe.configure({ mode: 'serial' });
-
-test.describe('online typing entry gate', () => {
-  test.beforeAll(startRealtimeWorker);
-  test.afterAll(stopRealtimeWorker);
-
-  test('unauthorized sessions cannot read or join a document room', async () => {
+test.describe('development loopback transport', () => {
+  test('unauthorized sessions cannot read or join a document room', async ({
+    developmentLoopbackWorker: worker,
+  }) => {
     const roomId = 'access-boundary-alpha';
-    const noTokenHealth = await fetch(
-      `http://127.0.0.1:${REALTIME_PORT}/api/realtime/rooms/${roomId}/health`,
-    );
+    const noTokenHealth = await fetch(`${worker.httpBaseUrl}/api/realtime/rooms/${roomId}/health`);
     expect(noTokenHealth.status).toBe(403);
 
-    await waitForSocketRefusal(
-      `ws://127.0.0.1:${REALTIME_PORT}/api/realtime/rooms/${roomId}/socket`,
-    );
+    await waitForSocketRefusal(`${worker.socketBaseUrl}/api/realtime/rooms/${roomId}/socket`);
 
-    const accessToken = await sessionFor(roomId, 'actor-authorized');
+    const accessToken = await sessionFor(worker, roomId, 'actor-authorized');
     const tamperedToken = `${accessToken.slice(0, -2)}xx`;
     const tamperedHealth = await fetch(
-      `http://127.0.0.1:${REALTIME_PORT}/api/realtime/rooms/${roomId}/health?accessToken=${tamperedToken}`,
+      `${worker.httpBaseUrl}/api/realtime/rooms/${roomId}/health?accessToken=${tamperedToken}`,
     );
     expect(tamperedHealth.status).toBe(403);
 
     await waitForSocketRefusal(
-      `ws://127.0.0.1:${REALTIME_PORT}/api/realtime/rooms/${roomId}/socket?accessToken=${encodeURIComponent(tamperedToken)}`,
+      `${worker.socketBaseUrl}/api/realtime/rooms/${roomId}/socket?accessToken=${encodeURIComponent(tamperedToken)}`,
     );
 
     const authorizedHealth = await fetch(
-      `http://127.0.0.1:${REALTIME_PORT}/api/realtime/rooms/${roomId}/health?accessToken=${encodeURIComponent(accessToken)}`,
+      `${worker.httpBaseUrl}/api/realtime/rooms/${roomId}/health?accessToken=${encodeURIComponent(accessToken)}`,
     );
     expect(authorizedHealth.status).toBe(200);
   });
 
   test('same-doc remote visibility shows keystrokes in another browser context', async ({
     browser,
+    developmentLoopbackWorker: worker,
   }) => {
-    const room = await openTwoClientsOnSameDoc(browser);
+    const room = await openTwoClientsOnSameDoc(browser, worker);
     try {
       const remoteVisibleText = 'Remote visible alpha';
       await typeIntoEditor(room.pageA, remoteVisibleText);
@@ -275,14 +214,20 @@ test.describe('online typing entry gate', () => {
     }
   });
 
-  test('same-doc concurrent typing converges across two browser contexts', async ({ browser }) => {
-    const room = await openTwoClientsOnSameDoc(browser);
+  test('same-doc concurrent typing converges across two browser contexts', async ({
+    browser,
+    developmentLoopbackWorker: worker,
+  }) => {
+    const room = await openTwoClientsOnSameDoc(browser, worker);
     try {
       const fromA = 'Alpha from client A';
       const fromB = 'Beta from client B';
 
-      await typeIntoEditor(room.pageA, fromA);
-      await typeIntoEditor(room.pageB, fromB);
+      await Promise.all([focusEditor(room.pageA), focusEditor(room.pageB)]);
+      await Promise.all([
+        room.pageA.keyboard.insertText(fromA),
+        room.pageB.keyboard.insertText(fromB),
+      ]);
 
       await expect
         .poll(
@@ -291,7 +236,7 @@ test.describe('online typing entry gate', () => {
               editorText(room.pageA),
               editorText(room.pageB),
             ]);
-            return [textA, textB].every((text) => text.includes(fromA) && text.includes(fromB));
+            return textA === textB && textA.includes(fromA) && textA.includes(fromB);
           },
           {
             message: 'both clients should converge to a document containing both users typing',
@@ -304,15 +249,35 @@ test.describe('online typing entry gate', () => {
     }
   });
 
-  test('typed document content survives reload of the same document', async ({ browser }) => {
+  test('typed document content survives reload of the same document', async ({
+    browser,
+    developmentLoopbackWorker: worker,
+  }) => {
     const context = await browser.newContext();
-    await enableLocalRealtime(context);
+    await enableDevelopmentLoopback(context, worker);
+    const primarySentinel = 'realtime-primary-sentinel';
+    const backupSentinel = 'realtime-backup-sentinel';
+    await context.addInitScript(
+      ({ primary, backup }) => {
+        window.localStorage.setItem('lash:body:demo-document', primary);
+        window.localStorage.setItem('lash:body-backup:demo-document', backup);
+      },
+      { primary: primarySentinel, backup: backupSentinel },
+    );
     const page = await context.newPage();
 
     try {
       await openDemoDoc(page);
+      await expect(page.getByTestId('autosave-indicator')).toHaveCount(0);
       const durableText = 'Durable reload text';
       await typeIntoEditor(page, durableText);
+      await page.waitForTimeout(700);
+      expect(
+        await page.evaluate(() => ({
+          primary: window.localStorage.getItem('lash:body:demo-document'),
+          backup: window.localStorage.getItem('lash:body-backup:demo-document'),
+        })),
+      ).toEqual({ primary: primarySentinel, backup: backupSentinel });
 
       await page.reload();
       await waitForEditor(page);
@@ -323,26 +288,36 @@ test.describe('online typing entry gate', () => {
           timeout: 3_000,
         })
         .toContain(durableText);
+      await expect(page.getByTestId('autosave-indicator')).toHaveCount(0);
+      expect(
+        await page.evaluate(() => ({
+          primary: window.localStorage.getItem('lash:body:demo-document'),
+          backup: window.localStorage.getItem('lash:body-backup:demo-document'),
+        })),
+      ).toEqual({ primary: primarySentinel, backup: backupSentinel });
     } finally {
       await context.close();
     }
   });
 
-  test('durable room compacts snapshots without deleting update history', async ({ browser }) => {
+  test('durable room compacts snapshots without deleting update history', async ({
+    browser,
+    developmentLoopbackWorker: worker,
+  }) => {
     const roomId = `bead-31-snapshot-${Date.now()}`;
     const context = await browser.newContext();
-    await enableLocalRealtime(context);
+    await enableDevelopmentLoopback(context, worker);
     const page = await context.newPage();
 
     try {
       await openDocument(page, roomId);
       await typeIntoEditor(page, 'Snapshot compaction writes enough real editor updates.');
-      const accessToken = await sessionFor(roomId, 'actor-snapshot-reader');
+      const accessToken = await sessionFor(worker, roomId, 'actor-snapshot-reader');
 
       await expect
         .poll(
           async () => {
-            const health = await roomHealth(roomId, accessToken);
+            const health = await roomHealth(worker, roomId, accessToken);
             return health.persistence;
           },
           {
@@ -356,7 +331,7 @@ test.describe('online typing entry gate', () => {
           hydrationUpdates: expect.any(Number),
         });
 
-      const health = await roomHealth(roomId, accessToken);
+      const health = await roomHealth(worker, roomId, accessToken);
       expect(health.persistence.updates).toBeGreaterThanOrEqual(SNAPSHOT_UPDATE_THRESHOLD);
       expect(health.persistence.snapshotSequence).not.toBeNull();
     } finally {
@@ -364,8 +339,11 @@ test.describe('online typing entry gate', () => {
     }
   });
 
-  test('presence and remote cursor awareness are visible across clients', async ({ browser }) => {
-    const room = await openTwoClientsOnSameDoc(browser, {
+  test('presence and remote cursor awareness are visible across clients', async ({
+    browser,
+    developmentLoopbackWorker: worker,
+  }) => {
+    const room = await openTwoClientsOnSameDoc(browser, worker, {
       actorA: 'ada-author',
       actorB: 'grace-editor',
       documentId: `bead-33-presence-${Date.now()}`,
@@ -404,8 +382,226 @@ test.describe('online typing entry gate', () => {
     }
   });
 
-  test('sync state surfaces saved, reconnecting, and recovered states', async ({ browser }) => {
-    const room = await openTwoClientsOnSameDoc(browser, {
+  test('offline-queue uses the actual provider queue while the peer remains unchanged', async ({
+    browser,
+    developmentLoopbackWorker: worker,
+  }) => {
+    const queuedText = 'Queued through the real Yjs provider';
+    const room = await openTwoClientsOnSameDoc(browser, worker, {
+      actorA: 'queue-author',
+      actorB: 'queue-observer',
+      documentId: `bead-43-offline-queue-${Date.now()}`,
+    });
+
+    try {
+      await expect
+        .poll(() => realtimeSnapshot(room.pageA), {
+          message: 'both clients should establish actual awareness before disconnect',
+        })
+        .toMatchObject({
+          connectionState: 'connected',
+          peers: expect.arrayContaining([
+            expect.objectContaining({
+              actorId: 'queue-observer',
+            }),
+          ]),
+        });
+
+      await room.pageA.evaluate(() => {
+        const api = (window as LashTestWindow).__lashRealtime;
+        if (!api) throw new Error('Realtime test API unavailable');
+        api.disconnectForTest();
+      });
+      await expect
+        .poll(() => realtimeSnapshot(room.pageA))
+        .toMatchObject({ connectionState: 'reconnecting' });
+      await expect
+        .poll(async () => {
+          const snapshot = await realtimeSnapshot(room.pageB);
+          return snapshot?.peers.some((peer) => peer.actorId === 'queue-author') ?? false;
+        })
+        .toBe(false);
+
+      await typeIntoEditor(room.pageA, queuedText);
+      await expect
+        .poll(() => realtimeSnapshot(room.pageA), {
+          message: 'the disconnected provider should own a real queued Yjs update',
+        })
+        .toMatchObject({
+          connectionState: 'reconnecting',
+          syncState: 'reconnecting',
+          queuedUpdateCount: expect.any(Number),
+          pendingUpdateCount: 0,
+        });
+      expect((await realtimeSnapshot(room.pageA))?.queuedUpdateCount ?? 0).toBeGreaterThan(0);
+
+      await room.pageB.waitForTimeout(500);
+      expect(await editorText(room.pageB)).not.toContain(queuedText);
+    } finally {
+      await room.close();
+    }
+  });
+
+  test('offline-merge reconnects, converges, and reloads the actual queued update', async ({
+    browser,
+    developmentLoopbackWorker: worker,
+  }) => {
+    const queuedText = 'Durable queued update from the real provider';
+    const documentId = `bead-43-offline-merge-${Date.now()}`;
+    const room = await openTwoClientsOnSameDoc(browser, worker, {
+      actorA: 'merge-author',
+      actorB: 'merge-observer',
+      documentId,
+    });
+    let verificationContext: BrowserContext | null = null;
+
+    try {
+      await expect
+        .poll(() => realtimeSnapshot(room.pageA))
+        .toMatchObject({
+          connectionState: 'connected',
+          peers: expect.arrayContaining([
+            expect.objectContaining({
+              actorId: 'merge-observer',
+            }),
+          ]),
+        });
+
+      await room.pageA.evaluate(() => {
+        const api = (window as LashTestWindow).__lashRealtime;
+        if (!api) throw new Error('Realtime test API unavailable');
+        api.disconnectForTest();
+      });
+      await typeIntoEditor(room.pageA, queuedText);
+      await expect
+        .poll(async () => (await realtimeSnapshot(room.pageA))?.queuedUpdateCount ?? 0)
+        .toBeGreaterThan(0);
+      expect(await editorText(room.pageB)).not.toContain(queuedText);
+
+      await room.pageA.evaluate(() => {
+        const api = (window as LashTestWindow).__lashRealtime;
+        if (!api) throw new Error('Realtime test API unavailable');
+        api.reconnectForTest();
+      });
+      await expect
+        .poll(
+          async () => {
+            const [textA, textB] = await Promise.all([
+              editorText(room.pageA),
+              editorText(room.pageB),
+            ]);
+            return { textA, textB };
+          },
+          {
+            message: 'both clients should converge after the provider reconnects',
+            timeout: 5_000,
+          },
+        )
+        .toEqual({ textA: queuedText, textB: queuedText });
+      await expect
+        .poll(() => realtimeSnapshot(room.pageA))
+        .toMatchObject({
+          connectionState: 'connected',
+          syncState: 'saved',
+          queuedUpdateCount: 0,
+          pendingUpdateCount: 0,
+        });
+
+      await Promise.all([room.pageA.reload(), room.pageB.reload()]);
+      await Promise.all([waitForEditor(room.pageA), waitForEditor(room.pageB)]);
+      await expect
+        .poll(
+          async () => {
+            const [textA, textB] = await Promise.all([
+              editorText(room.pageA),
+              editorText(room.pageB),
+            ]);
+            return { textA, textB };
+          },
+          {
+            message: 'the converged provider state should hydrate both reloaded clients',
+            timeout: 5_000,
+          },
+        )
+        .toEqual({ textA: queuedText, textB: queuedText });
+
+      verificationContext = await browser.newContext();
+      await enableDevelopmentLoopback(verificationContext, worker, 'merge-clean-verifier');
+      const verificationPage = await verificationContext.newPage();
+      await verificationPage.goto(`/doc/${documentId}`);
+      await waitForEditor(verificationPage);
+      await expect
+        .poll(() => editorText(verificationPage), {
+          message: 'a third clean context should hydrate the exact Durable Object text',
+          timeout: 5_000,
+        })
+        .toBe(queuedText);
+    } finally {
+      await verificationContext?.close();
+      await room.close();
+    }
+  });
+
+  test('presence-resume removes and restores actual provider awareness', async ({
+    browser,
+    developmentLoopbackWorker: worker,
+  }) => {
+    const room = await openTwoClientsOnSameDoc(browser, worker, {
+      actorA: 'presence-author',
+      actorB: 'presence-observer',
+      documentId: `bead-43-presence-resume-${Date.now()}`,
+    });
+
+    try {
+      await expect
+        .poll(() => realtimeSnapshot(room.pageA))
+        .toMatchObject({
+          peers: expect.arrayContaining([
+            expect.objectContaining({
+              actorId: 'presence-observer',
+            }),
+          ]),
+        });
+
+      await room.pageB.evaluate(() => {
+        const api = (window as LashTestWindow).__lashRealtime;
+        if (!api) throw new Error('Realtime test API unavailable');
+        api.disconnectForTest();
+      });
+      await expect
+        .poll(async () => {
+          const snapshot = await realtimeSnapshot(room.pageA);
+          return snapshot?.peers.some((peer) => peer.actorId === 'presence-observer') ?? false;
+        })
+        .toBe(false);
+
+      await room.pageB.evaluate(() => {
+        const api = (window as LashTestWindow).__lashRealtime;
+        if (!api) throw new Error('Realtime test API unavailable');
+        api.reconnectForTest();
+      });
+      await expect
+        .poll(() => realtimeSnapshot(room.pageA), {
+          message: 'actual room awareness should restore the reconnected peer',
+          timeout: 5_000,
+        })
+        .toMatchObject({
+          peers: expect.arrayContaining([
+            expect.objectContaining({
+              actorId: 'presence-observer',
+            }),
+          ]),
+        });
+    } finally {
+      await room.close();
+    }
+  });
+
+  test('sync state surfaces saved, reconnecting, and recovered states', async ({
+    browser,
+    developmentLoopbackWorker: worker,
+  }) => {
+    const room = await openTwoClientsOnSameDoc(browser, worker, {
       actorA: 'sync-author',
       actorB: 'sync-observer',
       documentId: `bead-33-sync-${Date.now()}`,

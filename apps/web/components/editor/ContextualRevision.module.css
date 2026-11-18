@@ -1,0 +1,28 @@
+.revise {
+  position: absolute;
+  z-index: 4;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 36px;
+  padding-inline: 10px;
+  color: var(--color-text-on-dark);
+  background: var(--color-sidebar-bg);
+  border: 1px solid var(--color-sidebar-bg);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-sm);
+  font-size: var(--text-meta);
+  font-weight: 600;
+  white-space: nowrap;
+  transform: translateY(-100%);
+  cursor: pointer;
+}
+
+.revise:hover {
+  background: var(--color-sidebar-hover);
+}
+
+.revise svg {
+  width: 15px;
+  height: 15px;
+}

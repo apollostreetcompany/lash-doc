@@ -1,0 +1,96 @@
+.section {
+  display: grid;
+  gap: 0.75rem;
+  padding-block: 1rem;
+  border-block-start: 1px solid var(--lash-border, #e1e1e1);
+}
+
+.section button {
+  justify-self: start;
+  min-height: 2.75rem;
+  padding-inline: 0.65rem;
+  color: #8f3f2d;
+  background: transparent;
+  border: 1px solid rgba(185, 79, 55, 0.28);
+  border-radius: 0.55rem;
+  font: inherit;
+  font-size: 0.84rem;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.form,
+.delivery {
+  display: grid;
+  gap: 0.5rem;
+}
+
+.fieldRow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) max-content;
+  align-items: end;
+  gap: 0.75rem;
+}
+
+.field {
+  display: grid;
+  gap: 0.35rem;
+  min-width: 0;
+}
+
+.invite {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.fieldRow input,
+.fieldRow select {
+  min-width: 0;
+  min-height: 2.75rem;
+  padding-inline: 0.55rem;
+  border: 1px solid var(--lash-border, #a3a3a3);
+  border-radius: 0.4rem;
+  font: inherit;
+}
+
+.role {
+  display: grid;
+  align-items: center;
+  min-height: 2.75rem;
+}
+
+.invite button {
+  flex-shrink: 0;
+}
+
+.list {
+  display: grid;
+  gap: 0.55rem;
+  max-height: 10.5rem;
+  overflow: auto;
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+.invite > div {
+  min-width: 0;
+}
+
+.email,
+.details {
+  display: block;
+  overflow-wrap: anywhere;
+}
+
+.details {
+  font-size: 0.875em;
+}
+
+.section button:focus-visible,
+.fieldRow :is(input, select):focus-visible {
+  outline: 2px solid rgba(185, 79, 55, 0.72);
+  outline-offset: 2px;
+}

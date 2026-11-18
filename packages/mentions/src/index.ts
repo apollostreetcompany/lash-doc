@@ -1,15 +1,5 @@
-/**
- * @lash/mentions — @user/@group/@date providers, natural-date parsing, RBAC-aware resolvers.
- * Status: SCAFFOLD — implement in M3/D1 (users/groups/dates) and M3/D2 (advanced chips).
- *
- * RBAC concern: providers MUST return `MentionResolveResult` from `@lash/types`,
- * which is a discriminated union — visible mentions carry refId/display, hidden
- * mentions carry only `anonymizedDisplay`. Provider implementations route every
- * decision through `@lash/rbac` to keep policy in one place.
- */
-
 import type { PolicyEngine, Target } from '@lash/rbac';
-import type { MentionResolveResult } from '@lash/types';
+import type { MentionResolveResult, VisibleMentionResult } from '@lash/types';
 
 export interface MentionContext {
   /** The caller's user id; used by RBAC filter. */
@@ -83,108 +73,79 @@ const dayIndexes: Record<string, number> = {
 };
 
 const pad = (value: number) => String(value).padStart(2, '0');
+const dayMs = 24 * 60 * 60 * 1000;
 
-/**
- * Compute the UTC offset string (e.g. '+09:00', '-04:00', 'Z') that `timezone`
- * is observing at the given wall-clock instant. The instant is supplied as the
- * UTC fields the user typed (year/month/day/hour/minute interpreted as local
- * wall-clock time in `timezone`). We derive the offset from the zone itself via
- * Intl so DST and arbitrary IANA zones are handled correctly, instead of a
- * hard-coded lookup. Failing loudly (throwing) on an unresolvable zone keeps us
- * from silently stamping a wrong offset.
- */
-const timezoneOffset = (
-  timezone: string,
-  wall: { year: number; month: number; day: number; hour: number; minute: number },
-): string => {
-  // Treat the typed wall-clock fields as if they were UTC to get a probe instant.
-  const utcProbe = Date.UTC(wall.year, wall.month - 1, wall.day, wall.hour, wall.minute);
+// Encode the local clock fields as UTC so they can be compared without the host's timezone.
+const localClock = (formatter: Intl.DateTimeFormat, instant: number): number => {
+  const parts = formatter.formatToParts(instant);
+  const field = (name: Intl.DateTimeFormatPartTypes) =>
+    Number(parts.find((part) => part.type === name)?.value);
+  return Date.UTC(field('year'), field('month') - 1, field('day'), field('hour'), field('minute'));
+};
 
-  // Read back what that probe instant looks like in the target zone. The delta
-  // between the zone's rendered wall-clock and the UTC probe is the zone offset.
-  const parts = new Intl.DateTimeFormat('en-US', {
-    timeZone: timezone,
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
-    hour12: false,
-  }).formatToParts(new Date(utcProbe));
-
-  const field = (type: Intl.DateTimeFormatPartTypes): number => {
-    const found = parts.find((part) => part.type === type);
-    if (!found) {
-      throw new Error(`Unable to resolve timezone "${timezone}" (missing ${type})`);
-    }
-    // Intl can render midnight as hour '24' in some engines; normalize to 0.
-    const value = Number(found.value);
-    return type === 'hour' && value === 24 ? 0 : value;
-  };
-
-  const zoned = Date.UTC(
-    field('year'),
-    field('month') - 1,
-    field('day'),
-    field('hour'),
-    field('minute'),
-    field('second'),
-  );
-
-  // Offset = (wall-clock as rendered in zone) - (UTC probe). Positive east of UTC.
-  const offsetMinutes = Math.round((zoned - utcProbe) / 60000);
+const formatOffset = (offsetMinutes: number): string => {
   if (offsetMinutes === 0) return 'Z';
   const sign = offsetMinutes > 0 ? '+' : '-';
   const abs = Math.abs(offsetMinutes);
   return `${sign}${pad(Math.floor(abs / 60))}:${pad(abs % 60)}`;
 };
 
-/** Pure function — same input always returns same result. Returns a visible
- *  date mention (no RBAC needed since dates are not access-controlled). */
 export const parseDateMention = (
   input: string,
   ctx: Pick<MentionContext, 'locale' | 'timezone' | 'now'>,
-): MentionResolveResult | null => {
+): VisibleMentionResult | null => {
   const match = input
     .trim()
     .toLowerCase()
-    .match(/^next\s+(\w+)(?:\s+at)?\s+(\d{1,2})(?::(\d{2}))?\s*(am|pm)?$/);
+    .match(/^(today|tomorrow|next\s+(\w+))(?:\s+at)?\s+(\d{1,2})(?::(\d{2}))?\s*(am|pm)?$/);
   if (!match) return null;
-  const weekday = dayIndexes[match[1]];
-  if (weekday === undefined) return null;
+  const [, relative, day, hours, minutes, ampm] = match;
+  const weekday = dayIndexes[day];
+  let hour = Number(hours);
+  const minute = Number(minutes ?? '0');
+  if ((day && weekday === undefined) || minute > 59 || (ampm ? hour < 1 || hour > 12 : hour > 23))
+    return null;
+  if (ampm) hour = (hour % 12) + (ampm === 'pm' ? 12 : 0);
 
-  const now = ctx.now ? new Date(ctx.now) : new Date();
-  const base = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
-  const distance = (weekday - base.getUTCDay() + 7) % 7 || 7;
-  base.setUTCDate(base.getUTCDate() + distance);
+  try {
+    const formatter = new Intl.DateTimeFormat('en-US', {
+      timeZone: ctx.timezone,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      hourCycle: 'h23',
+    });
+    const now = ctx.now ? Date.parse(ctx.now) : Date.now();
+    const today = new Date(localClock(formatter, now));
+    const distance = day
+      ? (weekday - today.getUTCDay() + 7) % 7 || 7
+      : Number(relative === 'tomorrow');
+    today.setUTCDate(today.getUTCDate() + distance);
+    const wall = today.setUTCHours(hour, minute, 0, 0);
 
-  let hour = Number(match[2]);
-  const minute = Number(match[3] ?? '0');
-  const ampm = match[4];
-  if (ampm === 'pm' && hour < 12) hour += 12;
-  if (ampm === 'am' && hour === 12) hour = 0;
+    // Check both sides of a timezone transition. A skipped local time has no
+    // matching instant; when the clock repeats, use the first occurrence.
+    const instants = [wall - dayMs, wall + dayMs]
+      .map((probe) => wall - (localClock(formatter, probe) - probe))
+      .filter((instant) => localClock(formatter, instant) === wall)
+      .sort((left, right) => left - right);
+    const instant = instants[0];
+    if (instant === undefined) return null;
 
-  const year = base.getUTCFullYear();
-  const month = base.getUTCMonth() + 1;
-  const day = base.getUTCDate();
-  const date = `${year}-${pad(month)}-${pad(day)}`;
-  const offset = timezoneOffset(ctx.timezone, { year, month, day, hour, minute });
-  const iso = `${date}T${pad(hour)}:${pad(minute)}:00${offset}`;
-  const display = new Intl.DateTimeFormat(ctx.locale, {
-    weekday: 'short',
-    month: 'short',
-    day: 'numeric',
-    hour: 'numeric',
-    minute: '2-digit',
-    timeZone: ctx.timezone,
-  }).format(new Date(iso));
+    const iso = `${today.toISOString().slice(0, 19)}${formatOffset((wall - instant) / 60000)}`;
+    const display = new Intl.DateTimeFormat(ctx.locale, {
+      weekday: 'short',
+      month: 'short',
+      day: 'numeric',
+      hour: 'numeric',
+      minute: '2-digit',
+      timeZone: ctx.timezone,
+    }).format(instant);
 
-  return {
-    visible: true,
-    kind: 'date',
-    refId: `date:${iso}`,
-    display,
-    iso,
-  };
+    return { visible: true, kind: 'date', refId: `date:${iso}`, display, iso };
+  } catch {
+    return null;
+  }
 };

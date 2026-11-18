@@ -23,7 +23,6 @@
  */
 
 import { Extension, type Editor, type Extensions } from '@tiptap/core';
-import CollaborationExtension from '@tiptap/extension-collaboration';
 import LinkExtension from '@tiptap/extension-link';
 import TaskItemExtension from '@tiptap/extension-task-item';
 import TaskListExtension from '@tiptap/extension-task-list';
@@ -32,13 +31,17 @@ import { Plugin, PluginKey, TextSelection } from '@tiptap/pm/state';
 import StarterKitExtension from '@tiptap/starter-kit';
 import type * as Y from 'yjs';
 
+import { createEmptyDocumentInvitationExtensions } from '../extensions/empty-document-invitation';
 import { LashHeading } from '../extensions/heading';
 import { LashImage, type LashImageUploader } from '../extensions/image';
+import { LashListTextInput } from '../extensions/list-text-input';
+import { LashNativePasteSelection } from '../extensions/native-paste-selection';
 import {
   createLashTableExtensions,
   type LashTableOptions,
   createLashTableInteractionPlugin,
 } from '../extensions/table';
+import { LashCollaboration } from '../plugins/collaboration-text-identity';
 import { OutlineManager, type OutlinePersistenceAdapter } from '../plugins/outline';
 
 export interface LashSchemaOptions {
@@ -159,7 +162,7 @@ export const buildBaseExtensions = (options?: LashSchemaOptions): Extensions => 
     }),
     ...(options?.collaboration
       ? [
-          CollaborationExtension.configure({
+          LashCollaboration.configure({
             document: options.collaboration.document,
             field: options.collaboration.field,
           }),
@@ -168,6 +171,8 @@ export const buildBaseExtensions = (options?: LashSchemaOptions): Extensions => 
     // dir="auto" gives headings the same per-block bidi resolution as
     // paragraphs so RTL titles display correctly (F-C22-09).
     LashHeading.configure({ levels: [1, 2, 3], HTMLAttributes: { dir: 'auto' } }),
+    LashListTextInput,
+    LashNativePasteSelection,
     OutlineManager.configure({
       documentId: outlineOptions.documentId ?? 'default',
       persistence: outlineOptions.persistence,
@@ -194,6 +199,7 @@ export const buildBaseExtensions = (options?: LashSchemaOptions): Extensions => 
       linkOnPaste: true,
       HTMLAttributes: { rel: 'noopener noreferrer' },
     }),
+    ...createEmptyDocumentInvitationExtensions(),
     LashKeyboardShortcuts.configure(options ?? {}),
     LashTableNavigation,
     Extension.create({

@@ -29,7 +29,12 @@ export const runToolbarAction = (
   editor: Editor,
   id: ToolbarCommandId,
   options?: { href?: string },
-): boolean => runToolbarCommand(editor, id, options);
+): boolean => {
+  // Restore the native caret before running a command from a focused toolbar button.
+  // TipTap's focus command would otherwise defer the handoff to the next frame.
+  if (!editor.view.hasFocus()) editor.view.focus();
+  return runToolbarCommand(editor, id, options);
+};
 
 export const isToolbarButtonActive = (editor: Editor, id: ToolbarCommandId): boolean => {
   switch (id) {

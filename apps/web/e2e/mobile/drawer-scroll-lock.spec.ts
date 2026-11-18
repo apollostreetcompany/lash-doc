@@ -50,23 +50,27 @@ test.describe('mobile drawer scroll-lock and focus restore', () => {
     expect(focusedTestId).toBe('topbar-mobile-menu');
   });
 
-  test('rail observer ignores rubber-band overscroll near bottom', async ({ page }) => {
+  test('explicit tab selection remains stable during rail overscroll', async ({ page }) => {
     await page.goto('/');
     await page.waitForFunction(() =>
       Boolean((window as unknown as { __lashEditor?: unknown }).__lashEditor),
     );
 
-    await page.getByTestId('topbar-share-button').tap();
+    await page.getByTestId('topbar-discussion-button').tap();
     await expect(page.locator('.lash-app')).toHaveAttribute('data-rail-mobile', 'true');
 
-    // Tap the History chip inside the open mobile rail; the active tab
-    // should latch and not get yanked back to chat by the observer mid-scroll.
+    // Tap History inside the open mobile rail. Only the selected panel should
+    // remain available while the modal body's scroll lock stays active.
     const historyChip = page.getByTestId('rail-tab-history');
     await expect(historyChip).toBeVisible();
     await historyChip.evaluate((element) => {
       (element as HTMLButtonElement).click();
     });
     await expect(historyChip).toHaveAttribute('data-active', 'true');
+    await expect(historyChip).toHaveAttribute('aria-selected', 'true');
+    await expect(page.locator('#rail-section-history')).toBeVisible();
+    await expect(page.locator('#rail-section-chat')).toBeHidden();
+    await expect(page.locator('#rail-section-ai')).toBeHidden();
 
     const activeBefore = await page.evaluate(() => {
       const tab = document.querySelector('[data-testid="rail-tab-history"]');
@@ -87,5 +91,7 @@ test.describe('mobile drawer scroll-lock and focus restore', () => {
     });
 
     expect(activeAfter).toBe(activeBefore);
+    await expect(page.locator('#rail-section-history')).toBeVisible();
+    await expect.poll(() => page.evaluate(() => document.body.style.position)).toBe('fixed');
   });
 });

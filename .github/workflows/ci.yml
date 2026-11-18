@@ -11,14 +11,31 @@ on:
 
 jobs:
   build-and-test:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    container:
+      # Playwright v1.55.1 on Ubuntu Noble. Match the version in pnpm-lock.yaml.
+      image: mcr.microsoft.com/playwright@sha256:2f29369043d81d6d69a815ceb80760f55e85f5020371ad06a4d996f18503ad1c
+      options: --user 1001
+    defaults:
+      run:
+        shell: bash
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
-          # Full history is required for the "Block fresh test.skip / test.todo"
-          # diff guard below to resolve `BASE_SHA...HEAD_SHA` locally.
+          # The PR merge commit carries both parents. Keep their ancestry for the diff.
           fetch-depth: 0
+          persist-credentials: false
+
+      - name: Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+
+      - name: Check tracked build outputs
+        run: python3 tools/check_generated_files.py --source index
 
       - name: Setup PNPM
         uses: pnpm/action-setup@v2
@@ -34,109 +51,28 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Block fresh test.skip / test.todo without escape token
+      - name: Check new test skips
         if: github.event_name == 'pull_request'
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-          BASE_REF: ${{ github.event.pull_request.base.ref }}
-          HEAD_REF: ${{ github.event.pull_request.head.ref }}
-          HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
-          BASE_REPO: ${{ github.repository }}
           PR_BODY: ${{ github.event.pull_request.body }}
-        run: |
-          set -euo pipefail
-
-          # `grep ... || true` swallows BOTH "no match" (status 1) AND real
-          # grep errors (status 2+); pipefail then can't surface a real error.
-          # This helper normalizes ONLY no-match → 0, leaving syntax/runtime
-          # failures to propagate.
-          #
-          # Bash gotcha: capturing `$?` AFTER `fi` when no branch executed
-          # returns the if-statement's status (0), not grep's. Capture inside
-          # `else` where grep was the last command run.
-          grep_no_match_ok() {
-            local status
-            if grep -E "$1"; then
-              return 0
-            else
-              status=$?
-              if [ "$status" -eq 1 ]; then
-                return 0
-              fi
-              return "$status"
-            fi
-          }
-
-          # Allow contributors to opt out per-PR with `[allow-skip: <non-empty reason>]`.
-          # The regex requires at least one non-whitespace char so an empty
-          # `[allow-skip: ]` is rejected.
-          if printf '%s' "$PR_BODY" | grep -Eq '\[allow-skip:[^]]*[^][:space:]][^]]*\]'; then
-            echo "allow-skip token present in PR body — skipping check."
-            exit 0
-          fi
-
-          # Endpoint-object and merge-base availability defense. On pull_request
-          # events, checkout can leave the job with the synthetic merge commit
-          # but without enough ancestry for BASE_SHA...HEAD_SHA. Fetch the
-          # branch refs with history before computing the diff.
-          git fetch --no-tags origin "+refs/heads/$BASE_REF:refs/remotes/origin/$BASE_REF" 2>/dev/null || true
-          if [ "$HEAD_REPO" = "$BASE_REPO" ]; then
-            git fetch --no-tags origin "+refs/heads/$HEAD_REF:refs/remotes/origin/$HEAD_REF" 2>/dev/null || true
-          else
-            git fetch --no-tags "https://github.com/$HEAD_REPO.git" "+refs/heads/$HEAD_REF:refs/remotes/pr-head/$HEAD_REF" 2>/dev/null || true
-          fi
-          git fetch --no-tags origin "$BASE_SHA" "$HEAD_SHA" 2>/dev/null || true
-
-          # Preflight: if the base SHA is not retrievable, fail loudly with a
-          # clear message instead of a raw `git diff` fatal further down.
-          if ! git cat-file -e "$BASE_SHA" 2>/dev/null; then
-            echo "::error::PR base SHA $BASE_SHA is not present locally even after fetch."
-            echo "If this is a force-pushed PR, rebase against current main and re-push."
-            exit 1
-          fi
-          if ! git cat-file -e "$HEAD_SHA" 2>/dev/null; then
-            echo "::error::PR head SHA $HEAD_SHA is not present locally even after fetch."
-            echo "If this is a force-pushed PR, rebase against current main and re-push."
-            exit 1
-          fi
-
-          MERGE_BASE=$(git merge-base "$BASE_SHA" "$HEAD_SHA" || true)
-          if [ -z "$MERGE_BASE" ]; then
-            echo "::error::No merge base found between PR base $BASE_SHA and head $HEAD_SHA after fetching branch ancestry."
-            echo "Rebase the PR branch onto the current base branch, then re-push."
-            exit 1
-          fi
-
-          # Match all common skip/todo invocations:
-          #   test.skip(...), it.skip(...), describe.skip(...), test.skip.each(...)
-          #   test.todo(...), it.todo(...)
-          # Trailing `\b` after .skip prevents false-positives on .skipIf, etc.
-          DIFF=$(git diff --no-color "$MERGE_BASE" "$HEAD_SHA" -- '*.spec.ts' '*.spec.tsx' '*.test.ts' '*.test.tsx')
-          ADDED=$(printf '%s' "$DIFF" \
-            | grep_no_match_ok '^\+[^+]' \
-            | grep_no_match_ok '\b(test|it|describe)\.skip\b|\b(test|it)\.todo\b')
-          if [ -n "$ADDED" ]; then
-            echo "::error::PR adds test.skip / test.todo lines (any form: test/it/describe .skip(...), .skip.each(...), test/it .todo(...))."
-            echo "If intentional (e.g. waiting on an upstream lane), add '[allow-skip: <short reason>]' to the PR body."
-            echo "$ADDED"
-            exit 1
-          fi
+        run: python3 tools/check_test_skips.py
 
       - name: Lint
         run: pnpm run lint
 
-      - name: Typecheck
-        run: pnpm run typecheck
+      - name: Product typecheck
+        run: pnpm run typecheck:product
+
+      - name: Harness and evidence typecheck
+        run: pnpm run typecheck:harness
 
       - name: Unit tests
         run: pnpm run test:unit
-
-      - name: Install Playwright browsers
-        run: pnpm exec playwright install --with-deps
 
       - name: E2E tests
         run: pnpm run test:e2e:ci
 
       - name: Build
-        run: pnpm run build
+        run: pnpm run build:ci

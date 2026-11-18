@@ -1,6 +1,6 @@
-import { expect, test, type BrowserContext, type Page } from '@playwright/test';
-import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
-import { once } from 'node:events';
+import { expect, type Page } from '@playwright/test';
+
+import { enableDevelopmentLoopback, test } from '../development-loopback-worker';
 
 type LashTestWindow = Window & {
   __lashEditor?: {
@@ -16,85 +16,6 @@ type LashTestWindow = Window & {
   };
   __lashLastInviteLink?: string;
 };
-
-const REALTIME_PORT = 8788;
-const REALTIME_INSPECTOR_PORT = 9230;
-const REALTIME_HEALTH_URL = `http://127.0.0.1:${REALTIME_PORT}/api/realtime/health`;
-
-let realtimeWorker: ChildProcess | null = null;
-
-const assertRealtimePortFree = () => {
-  const result = spawnSync('lsof', ['-n', '-P', `-iTCP:${REALTIME_PORT}`, '-sTCP:LISTEN'], {
-    encoding: 'utf8',
-  });
-  if (result.status === 0) {
-    throw new Error(`Realtime test port ${REALTIME_PORT} is already in use:\n${result.stdout}`);
-  }
-};
-
-const waitForRealtimeWorker = async () => {
-  const deadline = Date.now() + 30_000;
-  let lastError = '';
-  while (Date.now() < deadline) {
-    try {
-      const response = await fetch(REALTIME_HEALTH_URL);
-      if (response.ok) return;
-      lastError = `${response.status} ${response.statusText}`;
-    } catch (error) {
-      lastError = error instanceof Error ? error.message : String(error);
-    }
-    await new Promise((resolve) => setTimeout(resolve, 500));
-  }
-  throw new Error(`Realtime worker did not become ready: ${lastError}`);
-};
-
-const startRealtimeWorker = async () => {
-  assertRealtimePortFree();
-  realtimeWorker = spawn(
-    'pnpm',
-    [
-      'exec',
-      'wrangler',
-      'dev',
-      '--config',
-      'packages/realtime-worker/wrangler.jsonc',
-      '--local',
-      '--port',
-      String(REALTIME_PORT),
-      '--inspector-port',
-      String(REALTIME_INSPECTOR_PORT),
-      '--log-level',
-      'error',
-    ],
-    {
-      cwd: process.cwd(),
-      env: { ...process.env, NO_COLOR: '1' },
-      stdio: ['ignore', 'ignore', 'pipe'],
-    },
-  );
-  realtimeWorker.stderr?.on('data', (chunk) => process.stderr.write(chunk));
-  await waitForRealtimeWorker();
-};
-
-const stopRealtimeWorker = async () => {
-  const worker = realtimeWorker;
-  realtimeWorker = null;
-  if (!worker || worker.exitCode !== null || worker.signalCode !== null) return;
-  worker.kill('SIGTERM');
-  const timeout = setTimeout(() => worker.kill('SIGKILL'), 5_000);
-  await once(worker, 'exit').catch(() => undefined);
-  clearTimeout(timeout);
-};
-
-const enableLocalRealtime = (context: BrowserContext, actorId: string) =>
-  context.addInitScript(
-    ({ nextActorId, realtimeUrl }) => {
-      window.localStorage.setItem('lash:realtime-enabled', 'true');
-      window.localStorage.setItem('lash:realtime-url', realtimeUrl);
-      window.localStorage.setItem('lash:actor-id', nextActorId);
-    },
-    { nextActorId: actorId, realtimeUrl: `ws://127.0.0.1:${REALTIME_PORT}` },
-  );
 
 const waitForEditor = async (page: Page) => {
   await page.waitForFunction(() => Boolean((window as LashTestWindow).__lashEditor));
@@ -123,12 +44,7 @@ const typeIntoEditor = async (page: Page, text: string) => {
   await expect.poll(() => editorText(page)).toContain(text);
 };
 
-test.describe.configure({ mode: 'serial' });
-
 test.describe('collaboration delight', () => {
-  test.beforeAll(startRealtimeWorker);
-  test.afterAll(stopRealtimeWorker);
-
   test('local-only documents do not advertise realtime collaboration', async ({ page }) => {
     await page.goto(`/doc/bead-36-local-only-${Date.now()}`);
     await waitForEditor(page);
@@ -138,28 +54,53 @@ test.describe('collaboration delight', () => {
       'false',
     );
     await expect(page.getByTestId('collaboration-empty-state')).toHaveCount(0);
-    await expect(page.getByTestId('remote-collaborator-empty')).toContainText('Solo');
+    await expect(page.getByTestId('realtime-presence-bar')).toHaveText('On this device');
+    await expect(page.getByTestId('remote-collaborator')).toHaveCount(0);
   });
 
-  test('first-run collaboration state can open invite flow', async ({ browser }) => {
-    const context = await browser.newContext();
-    await enableLocalRealtime(context, 'delight-owner');
-    const page = await context.newPage();
+  test('first-run collaboration state can open invite flow', async ({
+    page,
+    developmentLoopbackWorker: worker,
+  }) => {
+    await enableDevelopmentLoopback(page, worker, 'delight-owner');
+    await page.setViewportSize({ width: 375, height: 812 });
     await page.goto(`/doc/bead-36-first-run-${Date.now()}`);
     await waitForEditor(page);
 
-    await expect(page.getByTestId('collaboration-empty-state')).toContainText('Ready');
-    await page.getByTestId('collaboration-share-shortcut').click();
+    await expect(page.getByTestId('realtime-sync-state')).toHaveText('Saved');
+    await expect(page.getByTestId('invite-access-status')).toHaveText('Owner access');
+    const shareDisclosure = page.getByTestId('topbar-share-button');
+    const inviteShortcut = page.getByTestId('collaboration-share-shortcut');
+    await expect(shareDisclosure).toHaveAttribute('aria-expanded', 'false');
+    await inviteShortcut.click();
+    await expect(shareDisclosure).toHaveAttribute('aria-expanded', 'true');
     await expect(page.getByTestId('share-panel')).toBeVisible();
     await expect(page.getByTestId('invite-email-input')).toBeVisible();
+    await page.getByRole('button', { name: 'Close activity panel' }).click();
+    await expect(shareDisclosure).toHaveAttribute('aria-expanded', 'false');
+    await expect(inviteShortcut).toBeFocused();
 
-    await context.close();
+    await shareDisclosure.click();
+    await expect(shareDisclosure).toHaveAttribute('aria-expanded', 'true');
+    await page.keyboard.press('Escape');
+    await expect(shareDisclosure).toHaveAttribute('aria-expanded', 'false');
+    await expect(shareDisclosure).toBeFocused();
+
+    await inviteShortcut.click();
+    await expect(shareDisclosure).toHaveAttribute('aria-expanded', 'true');
+    await page.keyboard.press('Escape');
+    await expect(shareDisclosure).toHaveAttribute('aria-expanded', 'false');
+    await expect(inviteShortcut).toBeFocused();
+    await expect(page.getByTestId('realtime-presence-bar')).toContainText('Development session');
   });
 
-  test('view invite can hydrate realtime content without body edit access', async ({ browser }) => {
+  test('view invite can hydrate realtime content without body edit access', async ({
+    browser,
+    developmentLoopbackWorker: worker,
+  }) => {
     const docId = `bead-36-view-hydrate-${Date.now()}`;
     const ownerContext = await browser.newContext();
-    await enableLocalRealtime(ownerContext, 'delight-view-owner');
+    await enableDevelopmentLoopback(ownerContext, worker, 'delight-view-owner');
     const ownerPage = await ownerContext.newPage();
 
     try {
@@ -179,14 +120,13 @@ test.describe('collaboration delight', () => {
       );
 
       const readerContext = await browser.newContext();
-      await enableLocalRealtime(readerContext, 'delight-view-reader');
+      await enableDevelopmentLoopback(readerContext, worker, 'delight-view-reader');
       const readerPage = await readerContext.newPage();
       try {
         await readerPage.goto(link);
         await waitForEditor(readerPage);
-        await expect(readerPage.getByTestId('invite-access-status')).toContainText(
-          'Access granted: view',
-        );
+        await expect(readerPage.getByTestId('invite-access-status')).toHaveText('View access');
+        await expect(readerPage.getByTestId('realtime-sync-state')).toHaveText('Read only');
         await expect
           .poll(() => realtimeSnapshot(readerPage))
           .toMatchObject({
@@ -211,10 +151,11 @@ test.describe('collaboration delight', () => {
     }
   });
 
-  test('reconnect feedback includes a retry action', async ({ browser }) => {
-    const context = await browser.newContext();
-    await enableLocalRealtime(context, 'delight-retry');
-    const page = await context.newPage();
+  test('reconnect feedback includes a retry action', async ({
+    page,
+    developmentLoopbackWorker: worker,
+  }) => {
+    await enableDevelopmentLoopback(page, worker, 'delight-retry');
     await page.goto(`/doc/bead-36-retry-${Date.now()}`);
     await waitForEditor(page);
     await expect.poll(() => realtimeSnapshot(page)).toMatchObject({ syncState: 'saved' });
@@ -230,7 +171,5 @@ test.describe('collaboration delight', () => {
     await page.getByTestId('sync-retry-button').click();
     await expect.poll(() => realtimeSnapshot(page)).toMatchObject({ syncState: 'saved' });
     await expect(page.getByTestId('sync-feedback')).toContainText('Saved');
-
-    await context.close();
   });
 });

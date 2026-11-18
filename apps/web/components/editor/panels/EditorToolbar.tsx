@@ -9,6 +9,7 @@
 
 import { isToolbarButtonActive, type ToolbarButtonSpec } from '@lash/editor-core';
 import type { Editor } from '@tiptap/core';
+import { useEditorState } from '@tiptap/react';
 import type { ReactNode } from 'react';
 
 import { Icon, type IconName } from '../../shell/Icon';
@@ -22,6 +23,7 @@ export interface EditorToolbarProps {
   editor: Editor | null;
   groups: ToolbarMeta[];
   hidden: boolean;
+  disabled?: boolean;
   onClick: (spec: ToolbarButtonSpec) => void;
   trailing?: ReactNode;
 }
@@ -60,8 +62,29 @@ function shortcutHint(hotkey?: string) {
     .replace(/\+/g, isMac ? '' : '+');
 }
 
-export function EditorToolbar({ editor, groups, hidden, onClick, trailing }: EditorToolbarProps) {
+export function EditorToolbar({
+  editor,
+  groups,
+  hidden,
+  disabled = false,
+  onClick,
+  trailing,
+}: EditorToolbarProps) {
   const ready = Boolean(editor);
+  const activeButtons = useEditorState({
+    editor,
+    selector: () => {
+      const active = new Set<string>();
+      if (editor) {
+        for (const { items } of groups) {
+          for (const { id } of items) {
+            if (!ACTION_COMMAND_IDS.has(id) && isToolbarButtonActive(editor, id)) active.add(id);
+          }
+        }
+      }
+      return active;
+    },
+  });
 
   return (
     <div className="lash-toolbar-bar" hidden={hidden} data-hidden={hidden ? 'true' : 'false'}>
@@ -70,12 +93,28 @@ export function EditorToolbar({ editor, groups, hidden, onClick, trailing }: Edi
         aria-label="Editor toolbar"
         data-testid="lash-toolbar"
         className="lash-toolbar"
+        onFocusCapture={(event) => {
+          const button = event.target;
+          const toolbar = event.currentTarget;
+          if (
+            !(button instanceof HTMLButtonElement) ||
+            !button.matches(':focus-visible') ||
+            toolbar.scrollWidth <= toolbar.clientWidth
+          )
+            return;
+
+          requestAnimationFrame(() => {
+            if (document.activeElement === button) {
+              button.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+            }
+          });
+        }}
       >
         {groups.map(({ label, items }) => (
           <div key={label} role="group" aria-label={label} data-toolbar-group>
             {items.map((item) => {
               const isToggle = !ACTION_COMMAND_IDS.has(item.id);
-              const active = isToggle && editor ? isToolbarButtonActive(editor, item.id) : false;
+              const active = activeButtons?.has(item.id) ?? false;
               const iconName = COMMAND_ICONS[item.id];
               const hint = shortcutHint(item.hotkey);
               const tooltip = hint ? `${item.label} (${hint})` : item.label;
@@ -94,7 +133,11 @@ export function EditorToolbar({ editor, groups, hidden, onClick, trailing }: Edi
                   // (e.g. insert-table) omit aria-pressed entirely so they are
                   // not announced as toggles.
                   aria-pressed={isToggle ? (active ? 'true' : 'false') : undefined}
-                  disabled={!ready}
+                  disabled={!ready || disabled}
+                  onMouseDown={(event) => {
+                    // Keep the editor's native selection during pointer formatting.
+                    if (event.button === 0 && editor?.view.hasFocus()) event.preventDefault();
+                  }}
                   onClick={() => onClick(item)}
                 >
                   {iconName ? <Icon name={iconName} /> : <span>{item.icon}</span>}
@@ -103,11 +146,17 @@ export function EditorToolbar({ editor, groups, hidden, onClick, trailing }: Edi
             })}
           </div>
         ))}
+        {trailing ? (
+          <div
+            className="lash-toolbar-trailing"
+            role="group"
+            aria-label="Markdown file actions"
+            data-toolbar-group
+          >
+            {trailing}
+          </div>
+        ) : null}
       </div>
-
-      {trailing ? (
-        <div style={{ marginLeft: 'auto', display: 'flex', gap: 8 }}>{trailing}</div>
-      ) : null}
     </div>
   );
 }

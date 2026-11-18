@@ -1,56 +1,39 @@
 import { expect, test } from '@playwright/test';
 
-const BASE64_PNG =
-  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M/wHwAE/wJ/lEpi/AAAAABJRU5ErkJggg==';
+import {
+  expectDecodedPng,
+  openImageDocument,
+  persistedBody,
+  PNG_SOURCE,
+  sendImageFile,
+} from './image-file';
 
-const pasteImage = async (page: import('@playwright/test').Page) => {
-  await page.evaluate(([base64]) => {
-    // ProseMirror only listens for paste/drop on its own contenteditable
-    // element (.ProseMirror). The wrapper [data-testid="lash-editor-content"]
-    // is a parent div that does not receive these handlers.
-    const editorHost = document.querySelector('.ProseMirror');
-    if (!editorHost) {
-      return;
-    }
-    const byteCharacters = atob(base64);
-    const byteNumbers = new Array(byteCharacters.length);
-    for (let i = 0; i < byteCharacters.length; i += 1) {
-      byteNumbers[i] = byteCharacters.charCodeAt(i);
-    }
-    const byteArray = new Uint8Array(byteNumbers);
-    const file = new File([byteArray], 'clipboard.png', { type: 'image/png' });
-    const dataTransfer = new DataTransfer();
-    dataTransfer.items.add(file);
-    const clipboardEvent = new ClipboardEvent('paste', { bubbles: true, cancelable: true });
-    Object.defineProperty(clipboardEvent, 'clipboardData', {
-      value: dataTransfer,
-    });
-    editorHost.dispatchEvent(clipboardEvent);
-  }, [BASE64_PNG]);
-};
+test('image-clipboard saves the original image and surrounding text after reload', async ({
+  page,
+}) => {
+  const id = 'media-clipboard';
+  const text = 'Text that stays in the document';
+  await openImageDocument(page, id);
+  await page.locator('.ProseMirror').press('End');
+  await page.keyboard.type(text);
+  await expect.poll(() => persistedBody(page, id)).toContain(text);
+  await page.keyboard.press('ControlOrMeta+A');
 
-test.describe('image-clipboard', () => {
-  test('pastes image and completes upload', async ({ page }) => {
-    await page.goto('/');
-    await page.evaluate(() => {
-      (window as unknown as { __lashImageUploadMock?: Record<string, unknown> }).__lashImageUploadMock = {
-        mode: 'alwaysSucceed',
-        nextUrl: 'https://assets.lash.dev/test/clipboard.png',
-        nextWidth: 420,
-        delayMs: 120,
-      };
-    });
+  await sendImageFile(page);
+  await expect(page.getByTestId('lash-image-node')).toHaveAttribute('data-status', 'idle');
+  await expectDecodedPng(page);
+  await expect(page.locator('.ProseMirror')).toContainText(text);
 
-    const editor = page.getByTestId('lash-editor-content');
-    await editor.click();
-    await pasteImage(page);
+  page.once('dialog', (dialog) => dialog.accept('Teal swatch'));
+  await page.getByRole('button', { name: 'Alt text' }).click();
+  await expect.poll(() => persistedBody(page, id)).toContain('Teal swatch');
+  const saved = await persistedBody(page, id);
+  expect(saved).toContain(PNG_SOURCE);
+  expect(saved).toContain(text);
+  expect(saved).not.toContain('blob:');
 
-    const imageNode = page.getByTestId('lash-image-node');
-    await expect(imageNode).toBeVisible();
-    await expect(imageNode).toHaveAttribute('data-status', 'idle');
-    await expect(page.locator('.lash-image-media')).toHaveAttribute(
-      'src',
-      'https://assets.lash.dev/test/clipboard.png',
-    );
-  });
+  await page.reload();
+  await expectDecodedPng(page);
+  await expect(page.locator('.lash-image-media')).toHaveAttribute('alt', 'Teal swatch');
+  await expect(page.locator('.ProseMirror')).toContainText(text);
 });

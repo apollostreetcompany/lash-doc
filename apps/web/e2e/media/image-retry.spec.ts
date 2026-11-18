@@ -1,62 +1,76 @@
 import { expect, test } from '@playwright/test';
 
-// 1×1 transparent PNG — known-valid base64 (same fixture as image-clipboard).
-const BASE64_PNG =
-  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M/wHwAE/wJ/lEpi/AAAAABJRU5ErkJggg==';
+import {
+  expectDecodedPng,
+  openImageDocument,
+  persistedBody,
+  PNG_BASE64,
+  PNG_SOURCE,
+  sendImageFile,
+} from './image-file';
 
-const pasteImage = async (page: import('@playwright/test').Page) => {
-  await page.evaluate(([base64]) => {
-    // ProseMirror only listens for paste on its own contenteditable element.
-    const host = document.querySelector('.ProseMirror');
-    if (!host) {
-      return;
-    }
-    const bytes = atob(base64);
-    const buffer = new Uint8Array(bytes.length);
-    for (let i = 0; i < bytes.length; i += 1) {
-      buffer[i] = bytes.charCodeAt(i);
-    }
-    const file = new File([buffer], 'retry.png', { type: 'image/png' });
-    const dt = new DataTransfer();
-    dt.items.add(file);
-    const evt = new ClipboardEvent('paste', { bubbles: true, cancelable: true });
-    Object.defineProperty(evt, 'clipboardData', { value: dt });
-    host.dispatchEvent(evt);
-  }, [BASE64_PNG]);
-};
+test('image-retry recovers a failed read of the same file', async ({ page }) => {
+  const id = 'media-retry';
+  await openImageDocument(page, id);
+  await page.evaluate(() => {
+    (window as Window & { __lashImageUploadMock?: { failNext: boolean } }).__lashImageUploadMock = {
+      failNext: true,
+    };
+  });
+  await page.locator('.ProseMirror').click();
+  await sendImageFile(page);
 
-test.describe('image-retry', () => {
-  test('surfaces retry button and succeeds on retry', async ({ page }) => {
-    await page.goto('/');
-    await page.evaluate(() => {
-      (window as unknown as { __lashImageUploadMock?: Record<string, unknown> }).__lashImageUploadMock = {
-        failNext: true,
-        nextUrl: 'https://assets.lash.dev/test/retry.png',
-        nextWidth: 480,
-        delayMs: 80,
-      };
-    });
+  const imageNode = page.getByTestId('lash-image-node');
+  await expect(imageNode).toHaveAttribute('data-status', 'error');
+  await expect(imageNode).toContainText('Could not read this file.');
+  await expect.poll(() => persistedBody(page, id)).toContain('"status":"error"');
+  expect(await persistedBody(page, id)).not.toContain('blob:');
 
-    await page.getByTestId('lash-editor-content').click();
-    await pasteImage(page);
+  await imageNode.getByRole('button', { name: 'Try again' }).click();
+  await expect(imageNode).toHaveAttribute('data-status', 'idle');
+  await expectDecodedPng(page);
+  await expect.poll(() => persistedBody(page, id)).toContain(PNG_SOURCE);
+});
+
+const invalidImages = [
+  {
+    kind: 'wrong-format',
+    base64: Buffer.from('plain text wearing a PNG name').toString('base64'),
+    message: 'The file does not match its image format.',
+  },
+  {
+    kind: 'missing-pixels',
+    base64: Buffer.from(PNG_BASE64, 'base64').subarray(0, 33).toString('base64'),
+    message: 'Could not open this image. Choose another file.',
+  },
+  {
+    kind: 'oversized',
+    base64: Buffer.alloc(256 * 1024 + 1).toString('base64'),
+    message: 'Choose a nonempty image up to 256 KiB.',
+  },
+];
+
+for (const { kind, base64, message } of invalidImages) {
+  test(`a ${kind} image leaves selected writing intact and explains the failure`, async ({
+    page,
+  }) => {
+    const id = `media-invalid-${kind}`;
+    const text = 'The selection stays here';
+    await openImageDocument(page, id);
+    await page.locator('.ProseMirror').click();
+    await page.keyboard.type(text);
+    await expect.poll(() => persistedBody(page, id)).toContain(text);
+    await page.keyboard.press('ControlOrMeta+A');
+    await sendImageFile(page, 'paste', base64);
 
     const imageNode = page.getByTestId('lash-image-node');
     await expect(imageNode).toHaveAttribute('data-status', 'error');
-
-    await page.evaluate(() => {
-      (window as unknown as { __lashImageUploadMock?: Record<string, unknown> }).__lashImageUploadMock = {
-        mode: 'alwaysSucceed',
-        nextUrl: 'https://assets.lash.dev/test/retry.png',
-        nextWidth: 540,
-        delayMs: 80,
-      };
-    });
-
-    await page.getByTestId('image-retry-button').click();
-    await expect(imageNode).toHaveAttribute('data-status', 'idle');
-    await expect(page.locator('.lash-image-media')).toHaveAttribute(
-      'src',
-      'https://assets.lash.dev/test/retry.png',
-    );
+    await expect(imageNode).toContainText(message);
+    await expect(imageNode.getByRole('button', { name: 'Try again' })).toBeHidden();
+    await expect(page.locator('.ProseMirror')).toContainText(text);
+    await expect.poll(() => persistedBody(page, id)).toContain('"status":"error"');
+    await page.reload();
+    await expect(page.locator('.ProseMirror')).toContainText(text);
+    await expect(page.locator('.lash-image-media')).not.toHaveAttribute('src', /.+/u);
   });
-});
+}

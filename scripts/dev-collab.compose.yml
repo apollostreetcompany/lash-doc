@@ -1,0 +1,68 @@
+services:
+  db:
+    image: public.ecr.aws/supabase/postgres:17.6.1.143
+    environment:
+      POSTGRES_PASSWORD: ${LASH_DEV_DB_PASSWORD:?Run make dev-collab}
+    volumes:
+      - postgres:/var/lib/postgresql/data
+      - ./dev-collab.db.sql:/docker-entrypoint-initdb.d/init-scripts/99-lash-auth.sql:ro
+    healthcheck:
+      test: [CMD, pg_isready, -h, 127.0.0.1, -U, postgres, -d, postgres]
+      interval: 2s
+      timeout: 5s
+      retries: 60
+
+  auth:
+    image: public.ecr.aws/supabase/gotrue:v2.193.0
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      API_EXTERNAL_URL: ${LASH_DEV_AUTH_ORIGIN:?Run make dev-collab}/auth/v1
+      GOTRUE_API_HOST: 0.0.0.0
+      GOTRUE_API_PORT: 9999
+      GOTRUE_DB_DRIVER: postgres
+      GOTRUE_DB_DATABASE_URL: postgres://supabase_auth_admin:${LASH_DEV_DB_PASSWORD:?Run make dev-collab}@db:5432/postgres
+      GOTRUE_SITE_URL: ${LASH_DEV_WEB_ORIGIN:?Run make dev-collab}
+      GOTRUE_URI_ALLOW_LIST: ${LASH_DEV_WEB_ORIGIN:?Run make dev-collab}/auth/confirm**
+      GOTRUE_JWT_ISSUER: ${LASH_DEV_AUTH_ORIGIN:?Run make dev-collab}/auth/v1
+      GOTRUE_JWT_SECRET: ${LASH_DEV_AUTH_JWT_SECRET:?Run make dev-collab}
+      GOTRUE_JWT_EXP: 3600
+      GOTRUE_JWT_AUD: authenticated
+      GOTRUE_JWT_DEFAULT_GROUP_NAME: authenticated
+      GOTRUE_DISABLE_SIGNUP: 'false'
+      GOTRUE_EXTERNAL_EMAIL_ENABLED: 'true'
+      GOTRUE_MAILER_AUTOCONFIRM: 'false'
+      GOTRUE_MAILER_OTP_EXP: 900
+      GOTRUE_RATE_LIMIT_EMAIL_SENT: 30
+      GOTRUE_SMTP_HOST: mailpit
+      GOTRUE_SMTP_PORT: 1025
+      GOTRUE_SMTP_ADMIN_EMAIL: accounts@lash.local
+      GOTRUE_SMTP_SENDER_NAME: Lash
+      GOTRUE_SMTP_MAX_FREQUENCY: 15s
+      GOTRUE_MAILER_SUBJECTS_CONFIRMATION: Confirm your Lash account
+      GOTRUE_MAILER_SUBJECTS_MAGIC_LINK: Your Lash sign-in link
+      GOTRUE_MAILER_TEMPLATES_CONFIRMATION: http://gateway:8080/email/confirmation.html
+      GOTRUE_MAILER_TEMPLATES_MAGIC_LINK: http://gateway:8080/email/magic_link.html
+
+  gateway:
+    image: nginx:1.30.6-alpine
+    depends_on: [auth]
+    ports:
+      - '127.0.0.1:${LASH_DEV_AUTH_PORT:?Run make dev-collab}:8080'
+    volumes:
+      - ./dev-collab.nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      - ../supabase/templates:/etc/lash-email:ro
+
+  mailpit:
+    image: public.ecr.aws/supabase/mailpit:v1.30.2
+    ports:
+      - '127.0.0.1:${LASH_DEV_MAILPIT_PORT:?Run make dev-collab}:8025'
+    environment:
+      MP_DATABASE: /data/mailpit.db
+    volumes:
+      - mail:/data
+
+volumes:
+  postgres:
+  mail:

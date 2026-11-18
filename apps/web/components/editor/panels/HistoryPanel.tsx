@@ -3,11 +3,24 @@
  */
 'use client';
 
-import { computeDiff } from '@lash/history';
-import type { DiffSpan, HistoryEntry } from '@lash/types';
+import { entryHasHistoryBody } from '@lash/history';
+import type { DiffJSON, DiffSpan, HistoryEntry } from '@lash/types';
 import type { Editor } from '@tiptap/core';
+import { useEffect, useId, useState } from 'react';
 
 export type HistoryTimeFilter = 'last-7-days' | null;
+export type HistoryAvailabilityState =
+  | 'loading'
+  | 'ready'
+  | 'empty-baseline'
+  | 'capacity-reached'
+  | 'body-history-diverged'
+  | 'body-saving-unavailable'
+  | 'recovery-available'
+  | 'unavailable'
+  | 'corrupt'
+  | 'unsupported-version'
+  | 'remote-disabled';
 
 type TextDiffSpan = Extract<DiffSpan, { kind: 'inserted' | 'deleted' }>;
 type SuggestionResolutionRecord = {
@@ -17,6 +30,8 @@ type SuggestionResolutionRecord = {
   ts: string;
   actorId: string;
 };
+type SavedHistorySnapshot = { readonly text: string };
+type LoadSavedHistoryPreview = () => Promise<SavedHistorySnapshot | null>;
 
 export interface HistoryPanelProps {
   editor: Editor | null;
@@ -26,9 +41,17 @@ export interface HistoryPanelProps {
   timeFilter: HistoryTimeFilter;
   acceptedSuggestionIds: string[];
   suggestionResolutions: SuggestionResolutionRecord[];
+  legacySuggestionError?: string;
+  availability: HistoryAvailabilityState;
+  canRestore: boolean;
+  authorshipVisible: boolean;
   open?: boolean;
+  restoreNotice?: string;
+  loadSavedHistoryPreview?: LoadSavedHistoryPreview;
+  loadDiff: (fromSha: string, toSha: string) => Promise<DiffJSON>;
   onSelect: (entryId: string) => void;
   onRestore: (entry: HistoryEntry) => void;
+  onToggleAuthorship: () => void;
   onSetAuthorFilter: (authorId: string) => void;
   onClearAuthorFilter: () => void;
   onSetTimeFilter: (filter: HistoryTimeFilter) => void;
@@ -104,12 +127,102 @@ const renderSpan = (span: DiffSpan) => {
       </del>
     );
   }
+  if (span.kind === 'attrChanged') {
+    return <span key={span.id}>Formatting or structure changed.</span>;
+  }
   return (
     <span key={span.id} className="history-diff-unchanged">
       {''}
     </span>
   );
 };
+
+function SavedHistorySnapshotContent({ load }: { load: LoadSavedHistoryPreview }) {
+  const fieldId = useId();
+  const helpId = useId();
+  const [result, setResult] = useState<{
+    load: LoadSavedHistoryPreview;
+    snapshot: SavedHistorySnapshot | null;
+  } | null>(null);
+  useEffect(() => {
+    let active = true;
+    void load().then(
+      (snapshot) => {
+        if (active) setResult({ load, snapshot });
+      },
+      () => {
+        if (active) setResult({ load, snapshot: null });
+      },
+    );
+    return () => {
+      active = false;
+    };
+  }, [load]);
+
+  if (result?.load !== load) {
+    return (
+      <p className="history-empty" role="status">
+        Checking the saved version…
+      </p>
+    );
+  }
+  if (!result.snapshot) {
+    return (
+      <p className="history-empty" role="status">
+        This saved version is no longer available to preview.
+      </p>
+    );
+  }
+  if (!result.snapshot.text) {
+    return (
+      <p className="history-empty" role="status">
+        This saved version has no plain text.
+      </p>
+    );
+  }
+
+  return (
+    <div className="history-diff-card">
+      <label className="history-diff-meta" htmlFor={fieldId}>
+        Saved version text
+      </label>
+      <p className="history-empty" id={helpId}>
+        This read-only snapshot omits formatting and non-text content. Select and copy the text you
+        need.
+      </p>
+      <textarea
+        aria-describedby={helpId}
+        className="history-diff"
+        id={fieldId}
+        readOnly
+        rows={6}
+        value={result.snapshot.text}
+      />
+    </div>
+  );
+}
+
+function SavedHistoryPreview({ load }: { load: LoadSavedHistoryPreview }) {
+  const previewId = useId();
+  const [expanded, setExpanded] = useState(false);
+
+  return (
+    <>
+      <button
+        type="button"
+        className="history-filter-button"
+        aria-controls={previewId}
+        aria-expanded={expanded}
+        onClick={() => setExpanded((visible) => !visible)}
+      >
+        {expanded ? 'Hide saved version' : 'Preview saved version'}
+      </button>
+      <div id={previewId} hidden={!expanded}>
+        {expanded ? <SavedHistorySnapshotContent load={load} /> : null}
+      </div>
+    </>
+  );
+}
 
 export function HistoryPanel({
   editor,
@@ -119,9 +232,17 @@ export function HistoryPanel({
   timeFilter,
   acceptedSuggestionIds,
   suggestionResolutions,
+  legacySuggestionError,
+  availability,
+  canRestore,
+  authorshipVisible,
   open = true,
+  restoreNotice,
+  loadSavedHistoryPreview,
+  loadDiff,
   onSelect,
   onRestore,
+  onToggleAuthorship,
   onSetAuthorFilter,
   onClearAuthorFilter,
   onSetTimeFilter,
@@ -129,8 +250,9 @@ export function HistoryPanel({
   onAcceptSuggestion,
   onRejectSuggestion,
 }: HistoryPanelProps) {
-  if (!open) return null;
-
+  const [loaded, setLoaded] = useState<{ entryId: string; diff: DiffJSON | null } | null>(null);
+  const historyVerified = availability === 'ready' || availability === 'empty-baseline' ||
+    availability === 'capacity-reached';
   const authorIds = Array.from(new Set(entries.map((entry) => entry.actor.id))).sort();
   const visibleEntries = entries.filter((entry) => {
     if (authorFilter && entry.actor.id !== authorFilter) return false;
@@ -138,9 +260,22 @@ export function HistoryPanel({
   });
   const selectedEntry =
     visibleEntries.find((entry) => entry.id === selectedEntryId) ?? visibleEntries.at(-1) ?? null;
-  const diff = selectedEntry
-    ? computeDiff(selectedEntry.parentSha, selectedEntry.resultSha, entries)
-    : null;
+  const entryId = selectedEntry?.id;
+  const parentSha = selectedEntry?.parentSha;
+  const resultSha = selectedEntry?.resultSha;
+  useEffect(() => {
+    if (!open || !entryId || !parentSha || !resultSha) return;
+    let active = true;
+    void loadDiff(parentSha, resultSha).then(
+      (diff) => { if (active) setLoaded({ entryId, diff }); },
+      () => { if (active) setLoaded({ entryId, diff: null }); },
+    );
+    return () => { active = false; };
+  }, [entryId, loadDiff, open, parentSha, resultSha]);
+  if (!open) return null;
+  const selectedDiff = loaded?.entryId === entryId ? loaded : null;
+  const diff = selectedDiff?.diff;
+  const canRestoreSelected = selectedEntry ? entryHasHistoryBody(selectedEntry) : false;
   const hasActiveFilters = Boolean(authorFilter || timeFilter);
   const selectedSuggestionAccepted = selectedEntry
     ? acceptedSuggestionIds.includes(selectedEntry.id)
@@ -154,47 +289,110 @@ export function HistoryPanel({
 
   return (
     <section className="lash-history-panel" data-testid="history-panel" aria-label="History">
+      {restoreNotice ? <p role="status">{restoreNotice}</p> : null}
+      {availability === 'capacity-reached' ? (
+        <p className="history-empty" role="status">
+          Version history is full. You can keep editing and saving this document.
+        </p>
+      ) : null}
+      {availability === 'body-saving-unavailable' ? (
+        <p className="history-empty">Version history is paused while local saving is unavailable.</p>
+      ) : null}
+      {availability === 'body-history-diverged' ? (
+        <p className="history-empty" role="status">
+          Version history is paused because it does not match the saved draft. You can keep editing
+          and saving the draft.
+        </p>
+      ) : null}
+      {availability === 'body-history-diverged' && loadSavedHistoryPreview ? (
+        <SavedHistoryPreview load={loadSavedHistoryPreview} />
+      ) : null}
       <div className="history-panel-header">
-        <h2 className="history-panel-title">History</h2>
-        <span className="history-panel-count" data-testid="history-count">
-          {visibleEntries.length} {visibleEntries.length === 1 ? 'version' : 'versions'}
-        </span>
+        <div className="history-panel-header-actions">
+          {historyVerified ? (
+            <>
+              <button
+                type="button"
+                className="history-authorship-toggle"
+                data-testid="history-authorship-toggle"
+                aria-label={`${authorshipVisible ? 'Hide' : 'Show'} authorship in document`}
+                aria-pressed={authorshipVisible ? 'true' : 'false'}
+                data-active={authorshipVisible ? 'true' : 'false'}
+                onClick={onToggleAuthorship}
+              >
+                {authorshipVisible ? 'Hide authorship' : 'Show authorship'}
+              </button>
+              <span className="history-panel-count" data-testid="history-count">
+                {visibleEntries.length} {visibleEntries.length === 1 ? 'version' : 'versions'}
+              </span>
+            </>
+          ) : null}
+        </div>
       </div>
 
-      <div className="history-filter-controls" data-testid="history-filter-controls">
-        {authorIds.map((authorId) => (
+      {availability === 'loading' ? (
+        <p className="history-empty" data-testid="history-loading">
+          Loading version history… Restore is unavailable until history is verified.
+        </p>
+      ) : null}
+      {availability === 'recovery-available' ? (
+        <p className="history-empty" data-testid="history-recovery-available">
+          A verified earlier history copy is available. Review it before recovering.
+        </p>
+      ) : null}
+      {availability === 'unavailable' ? (
+        <p className="history-empty" data-testid="history-unavailable">
+          Version history is unavailable. Lash has not changed it. Reload to try again.
+        </p>
+      ) : null}
+      {availability === 'corrupt' || availability === 'unsupported-version' ? (
+        <p className="history-empty" data-testid="history-corrupt">
+          Version history could not be verified. Editing and Restore are paused to protect your
+          document.
+        </p>
+      ) : null}
+      {availability === 'remote-disabled' ? (
+        <p className="history-empty" data-testid="history-remote-disabled">
+          Version history is unavailable for this access link.
+        </p>
+      ) : null}
+
+      {historyVerified ? (
+        <div className="history-filter-controls" data-testid="history-filter-controls">
+          {authorIds.map((authorId) => (
+            <button
+              key={authorId}
+              type="button"
+              className="history-filter-button"
+              data-testid="history-author-filter"
+              data-active={authorFilter === authorId ? 'true' : 'false'}
+              onClick={() => onSetAuthorFilter(authorId)}
+            >
+              {authorId}
+            </button>
+          ))}
           <button
-            key={authorId}
             type="button"
             className="history-filter-button"
-            data-testid="history-author-filter"
-            data-active={authorFilter === authorId ? 'true' : 'false'}
-            onClick={() => onSetAuthorFilter(authorId)}
+            data-testid="history-time-filter-last-7-days"
+            data-active={timeFilter === 'last-7-days' ? 'true' : 'false'}
+            onClick={() => onSetTimeFilter(timeFilter === 'last-7-days' ? null : 'last-7-days')}
           >
-            {authorId}
+            Last 7 days
           </button>
-        ))}
-        <button
-          type="button"
-          className="history-filter-button"
-          data-testid="history-time-filter-last-7-days"
-          data-active={timeFilter === 'last-7-days' ? 'true' : 'false'}
-          onClick={() => onSetTimeFilter(timeFilter === 'last-7-days' ? null : 'last-7-days')}
-        >
-          Last 7 days
-        </button>
-        <button
-          type="button"
-          className="history-filter-button"
-          data-testid="history-filter-copy-link"
-          disabled={!hasActiveFilters}
-          onClick={onCopyFilterLink}
-        >
-          Copy link
-        </button>
-      </div>
+          <button
+            type="button"
+            className="history-filter-button"
+            data-testid="history-filter-copy-link"
+            disabled={!hasActiveFilters}
+            onClick={onCopyFilterLink}
+          >
+            Copy link
+          </button>
+        </div>
+      ) : null}
 
-      {authorFilter ? (
+      {historyVerified && authorFilter ? (
         <div className="history-filter" data-testid="history-filter-author">
           <span>Filtered by {authorFilter}</span>
           <button type="button" onClick={onClearAuthorFilter}>
@@ -203,7 +401,7 @@ export function HistoryPanel({
         </div>
       ) : null}
 
-      {timeFilter ? (
+      {historyVerified && timeFilter ? (
         <div className="history-filter" data-testid="history-filter-time">
           <span>Filtered to last 7 days</span>
           <button type="button" onClick={() => onSetTimeFilter(null)}>
@@ -212,13 +410,13 @@ export function HistoryPanel({
         </div>
       ) : null}
 
-      {hasActiveFilters ? (
+      {historyVerified && hasActiveFilters ? (
         <span className="history-filter-count" data-testid="history-filtered-counts">
           {visibleEntries.length} matching {visibleEntries.length === 1 ? 'version' : 'versions'}
         </span>
       ) : null}
 
-      {suggestionResolutions.length ? (
+      {historyVerified && suggestionResolutions.length ? (
         <ol className="suggestion-resolution-list" data-testid="suggestion-resolution-list">
           {suggestionResolutions.map((record) => (
             <li
@@ -235,7 +433,7 @@ export function HistoryPanel({
         </ol>
       ) : null}
 
-      {visibleEntries.length ? (
+      {historyVerified && visibleEntries.length ? (
         <ol className="history-version-list" data-testid="history-version-list">
           {visibleEntries.map((entry) => {
             const selected = selectedEntry?.id === entry.id;
@@ -256,13 +454,17 @@ export function HistoryPanel({
             );
           })}
         </ol>
-      ) : (
+      ) : availability === 'empty-baseline' ? (
         <p className="history-empty" data-testid="history-empty">
-          No edits recorded yet.
+          No durable versions yet. History starts with your next saved edit.
         </p>
-      )}
+      ) : null}
 
-      {selectedEntry && diff ? (
+      {historyVerified && selectedEntry && selectedDiff && !diff ? (
+        <p role="status">This version comparison is unavailable.</p>
+      ) : null}
+
+      {historyVerified && selectedEntry && diff ? (
         <div className="history-diff-card">
           <div className="history-diff-meta">
             <span data-testid="history-selected-version">Version {selectedEntry.seq}</span>
@@ -319,11 +521,17 @@ export function HistoryPanel({
               className="history-restore-button"
               data-testid="history-restore-button"
               onClick={() => onRestore(selectedEntry)}
-              disabled={!editor}
+              disabled={!editor || !canRestore || !canRestoreSelected}
             >
               Restore
             </button>
           </div>
+          {!canRestoreSelected ? (
+            <p>This version saved text only. Its original formatting is unavailable.</p>
+          ) : null}
+          {legacySuggestionError && selectedEntry.intent === 'suggest' ? (
+            <p role="alert">{legacySuggestionError}</p>
+          ) : null}
         </div>
       ) : null}
     </section>

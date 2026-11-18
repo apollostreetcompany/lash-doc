@@ -1,5 +1,7 @@
 import { expect, test } from '@playwright/test';
 
+import { selectDiscussionTab } from '../discussion-tabs';
+
 const editorContent = (page: import('@playwright/test').Page) =>
   page.getByTestId('lash-editor-content');
 
@@ -12,6 +14,7 @@ test('history-open', async ({ page }) => {
   await editorContent(page).click();
   await page.keyboard.type('History starts here');
 
+  await selectDiscussionTab(page, 'history');
   await expect(page.getByTestId('history-panel')).toBeVisible();
   await expect(page.getByTestId('history-count')).toContainText(/1 version|[1-9][0-9]* versions/);
   await expect(page.getByTestId('history-version')).toHaveCount(1);

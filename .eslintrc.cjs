@@ -11,10 +11,11 @@ module.exports = {
     ecmaVersion: 'latest',
     sourceType: 'module',
   },
-  plugins: ['@typescript-eslint', 'import'],
+  plugins: ['@typescript-eslint', 'import', 'jsx-a11y'],
   extends: [
-    'next',
-    'next/core-web-vitals',
+    'plugin:react/recommended',
+    'plugin:react-hooks/recommended',
+    'plugin:@next/next/core-web-vitals-legacy',
     'plugin:@typescript-eslint/recommended',
     'plugin:import/recommended',
     'plugin:import/typescript',
@@ -24,14 +25,23 @@ module.exports = {
     next: {
       rootDir: ['apps/web'],
     },
+    react: {
+      version: '19.3',
+    },
     'import/core-modules': ['cloudflare:workers'],
+    'import/parsers': {
+      [require.resolve('@typescript-eslint/parser')]: ['.ts', '.mts', '.cts', '.tsx', '.d.ts'],
+    },
     'import/resolver': {
+      node: { extensions: ['.js', '.jsx', '.ts', '.tsx'] },
       typescript: {
+        alwaysTryTypes: true,
         project: ['./tsconfig.json'],
       },
     },
   },
   rules: {
+    'import/no-anonymous-default-export': 'warn',
     'import/order': [
       'error',
       {
@@ -43,6 +53,16 @@ module.exports = {
         alphabetize: { order: 'asc', caseInsensitive: true },
       },
     ],
+    'jsx-a11y/alt-text': ['warn', { elements: ['img'], img: ['Image'] }],
+    'jsx-a11y/aria-props': 'warn',
+    'jsx-a11y/aria-proptypes': 'warn',
+    'jsx-a11y/aria-unsupported-elements': 'warn',
+    'jsx-a11y/role-has-required-aria-props': 'warn',
+    'jsx-a11y/role-supports-aria-props': 'warn',
+    'react/jsx-no-target-blank': 'off',
+    'react/no-unknown-property': 'off',
+    'react/prop-types': 'off',
+    'react/react-in-jsx-scope': 'off',
     '@typescript-eslint/no-explicit-any': 'warn',
     '@typescript-eslint/no-unused-vars': [
       'error',
@@ -70,6 +90,8 @@ module.exports = {
     },
   ],
   ignorePatterns: [
+    'artifacts/lex-comparison/',
+    'apps/web/next-env.d.ts',
     'node_modules/',
     '.next/',
     '**/.next/',

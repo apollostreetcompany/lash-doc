@@ -299,6 +299,8 @@ try {
       { timeout: 5000 },
     );
     await page.locator('[data-testid="chat-create-thread"]').click();
+    await page.locator('[data-testid="chat-new-thread-textarea"]').fill('Review this section.');
+    await page.locator('[data-testid="chat-post-thread"]').click();
     await page.waitForSelector('[data-testid="chat-document-anchor-marker"]', {
       timeout: 5000,
     });

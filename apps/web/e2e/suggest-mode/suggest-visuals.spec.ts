@@ -1,22 +1,13 @@
 import { expect, test } from '@playwright/test';
 
-test('suggest-visuals', async ({ page }) => {
-  await page.goto('/');
-  await page.waitForFunction(() =>
-    Boolean((window as unknown as { __lashEditor?: unknown }).__lashEditor),
-  );
+import { proposal, proposeWording, wording } from './suggestion-flow';
 
-  await page.getByTestId('suggest-mode-toggle').click();
-  await expect(page.getByTestId('suggest-mode-toggle')).toHaveAttribute('data-active', 'true');
-
-  await page.getByTestId('lash-editor-content').click();
-  await page.keyboard.type('Suggested wording');
-
-  await expect(page.getByTestId('history-suggestion-status')).toContainText('Pending suggestion');
-  await expect(page.getByTestId('history-diff-insert')).toContainText('Suggested wording');
-  await expect(page.getByTestId('history-diff-insert')).toHaveAttribute('data-intent', 'suggest');
-  await expect(page.getByTestId('history-diff-insert')).toHaveAttribute(
-    'title',
-    /local-user \| suggest/,
-  );
+test('suggest-visuals shows both versions and leaves body intact', async ({ page }) => {
+  await page.goto('/doc/suggestion-preview');
+  await proposeWording(page);
+  const card = page.getByTestId('suggestion-card');
+  await expect(card.locator('del')).toHaveText(wording);
+  await expect(card.locator('del')).toHaveAttribute('title', /Removed text by You/u);
+  await expect(card.locator('ins')).toHaveText(proposal);
+  await expect(card.locator('ins')).toHaveAttribute('title', /Inserted text by You/u);
 });

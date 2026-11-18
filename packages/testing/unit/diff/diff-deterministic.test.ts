@@ -10,26 +10,32 @@ describe('diff-deterministic', () => {
     const store = createHistoryStore({ now: () => '2026-05-16T04:00:00.000Z' });
     const emptySha = await hashCanonical(EMPTY_HISTORY_DOC);
 
-    const first = await store.append({
-      docId,
-      actor,
-      expectedParentSha: emptySha,
-      schemaVersion: 'lash-schema-v1',
-      ops: [{ op: 'replace_text', from: 0, to: 0, text: 'Alpha beta' }],
-      intent: 'edit',
-      audit,
-    });
+    const first = await store.append(
+      {
+        docId,
+        actor,
+        expectedParentSha: emptySha,
+        schemaVersion: 'lash-schema-v1',
+        ops: [{ op: 'replace_text', from: 0, to: 0, text: 'Alpha beta' }],
+        intent: 'edit',
+        audit,
+      },
+      { commitGuard: () => true },
+    );
     if (!first.ok) throw new Error(first.reason);
 
-    const second = await store.append({
-      docId,
-      actor,
-      expectedParentSha: first.entry.resultSha,
-      schemaVersion: 'lash-schema-v1',
-      ops: [{ op: 'replace_text', from: 6, to: 10, text: 'gamma' }],
-      intent: 'edit',
-      audit,
-    });
+    const second = await store.append(
+      {
+        docId,
+        actor,
+        expectedParentSha: first.entry.resultSha,
+        schemaVersion: 'lash-schema-v1',
+        ops: [{ op: 'replace_text', from: 6, to: 10, text: 'gamma' }],
+        intent: 'edit',
+        audit,
+      },
+      { commitGuard: () => true },
+    );
     if (!second.ok) throw new Error(second.reason);
 
     const entries = await store.list(docId);

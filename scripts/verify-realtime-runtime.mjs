@@ -43,17 +43,73 @@ const waitForHealth = async () => {
 };
 
 const requestSessionToken = async () => {
-  const response = await fetch(
-    `${baseUrl}/api/realtime/rooms/${roomId}/session?actorId=verify-runtime`,
-  );
+  const sessionUrl = new URL(`${baseUrl}/api/realtime/rooms/${roomId}/session`);
+  if (sessionUrl.search) {
+    throw new Error('Realtime session URL must not contain query parameters');
+  }
+  const response = await fetch(sessionUrl, {
+    method: 'POST',
+    headers: {
+      'cache-control': 'no-store',
+      'content-type': 'application/json',
+    },
+    body: JSON.stringify({
+      actorId: 'verify-runtime',
+      inviteToken: null,
+    }),
+  });
   if (!response.ok) {
     throw new Error(`Realtime session grant failed: ${response.status} ${response.statusText}`);
   }
   const body = await response.json();
-  if (!body?.ok || typeof body.accessToken !== 'string') {
-    throw new Error('Realtime session grant did not return an access token');
+  if (
+    !body?.ok ||
+    typeof body.accessToken !== 'string' ||
+    body.protocolVersion !== 2 ||
+    body.grant?.protocolVersion !== 2 ||
+    body.grant?.documentId !== roomId
+  ) {
+    throw new Error('Realtime session grant did not return a protocol-v2 document-bound token');
   }
-  return body.accessToken;
+  return {
+    accessToken: body.accessToken,
+    receipt: {
+      actorId: body.grant.actorId,
+      capabilities: body.grant.capabilities,
+      documentId: body.grant.documentId,
+      protocolVersion: body.protocolVersion,
+    },
+  };
+};
+
+const verifyInviteBearingGetDenied = async () => {
+  const sentinel = 'verify-invite-bearer-must-not-reflect';
+  const url = new URL(`${baseUrl}/api/realtime/rooms/${roomId}/session`);
+  url.searchParams.set('actorId', 'legacy-invitee');
+  url.searchParams.set('inviteToken', sentinel);
+  const response = await fetch(url);
+  const text = await response.text();
+  if (response.status !== 405 || text.includes(sentinel)) {
+    throw new Error('Invite-bearing GET must be terminal and must not reflect the bearer');
+  }
+  return JSON.parse(text);
+};
+
+const verifyLoopbackGetCompatibility = async () => {
+  const url = new URL(`${baseUrl}/api/realtime/rooms/${roomId}/session`);
+  url.searchParams.set('actorId', 'verify-legacy-loopback');
+  if (url.searchParams.has('inviteToken')) {
+    throw new Error('Loopback compatibility URL unexpectedly contains an invite bearer');
+  }
+  const response = await fetch(url);
+  const body = await response.json();
+  if (!response.ok || !body?.ok || body.protocolVersion !== 2) {
+    throw new Error(`Loopback no-token GET compatibility failed: ${response.status}`);
+  }
+  return {
+    actorId: body.grant?.actorId,
+    protocolVersion: body.protocolVersion,
+  };
 };
 
 const verifyDeniedWithoutToken = async () => {
@@ -65,9 +121,9 @@ const verifyDeniedWithoutToken = async () => {
 };
 
 const verifyRoomHealth = async (accessToken) => {
-  const response = await fetch(
-    `${baseUrl}/api/realtime/rooms/${roomId}/health?accessToken=${encodeURIComponent(accessToken)}`,
-  );
+  const response = await fetch(`${baseUrl}/api/realtime/rooms/${roomId}/health`, {
+    headers: { authorization: `Bearer ${accessToken}` },
+  });
   if (!response.ok) {
     throw new Error(`Room health failed: ${response.status} ${response.statusText}`);
   }
@@ -76,23 +132,65 @@ const verifyRoomHealth = async (accessToken) => {
 
 const verifyWebSocket = async (accessToken) =>
   new Promise((resolve, reject) => {
-    const url = `${baseUrl.replace('http:', 'ws:')}/api/realtime/rooms/${roomId}/socket?accessToken=${encodeURIComponent(accessToken)}`;
+    const url = new URL(`${baseUrl.replace('http:', 'ws:')}/api/realtime/rooms/${roomId}/socket`);
+    url.searchParams.set('accessToken', accessToken);
+    url.searchParams.set('protocolVersion', '2');
+    if (url.searchParams.has('inviteToken')) {
+      reject(new Error('Realtime WebSocket URL must not contain an invite bearer'));
+      return;
+    }
     const socket = new WebSocket(url);
+    let hydrationUpdates = 0;
+    let phase = 'connecting';
     const timeout = setTimeout(() => {
       socket.close();
-      reject(new Error('Timed out waiting for realtime WebSocket pong'));
+      reject(new Error(`Timed out during realtime WebSocket ${phase}`));
     }, 10_000);
-
-    socket.addEventListener('open', () => {
-      socket.send(JSON.stringify({ type: 'ping', requestId: 'verify-realtime-runtime' }));
-    });
 
     socket.addEventListener('message', (event) => {
       const message = JSON.parse(String(event.data));
+      if (message.type === 'room-ready') {
+        if (phase !== 'connecting' || message.roomId !== roomId || message.protocolVersion !== 2) {
+          clearTimeout(timeout);
+          reject(new Error('Invalid room-ready hydration start'));
+          return;
+        }
+        phase = 'hydrating';
+        return;
+      }
+      if (message.type === 'yjs-update' && message.source === 'hydrate') {
+        if (phase !== 'hydrating' || message.roomId !== roomId) {
+          clearTimeout(timeout);
+          reject(new Error('Hydration update arrived outside the hydration window'));
+          return;
+        }
+        hydrationUpdates += 1;
+        return;
+      }
+      if (message.type === 'room-hydration-complete') {
+        if (
+          phase !== 'hydrating' ||
+          message.roomId !== roomId ||
+          message.protocolVersion !== 2 ||
+          message.persistedUpdates !== hydrationUpdates
+        ) {
+          clearTimeout(timeout);
+          reject(new Error('Invalid room hydration completion'));
+          return;
+        }
+        phase = 'ready';
+        socket.send(JSON.stringify({ type: 'ping', requestId: 'verify-realtime-runtime' }));
+        return;
+      }
       if (message.type === 'pong' && message.requestId === 'verify-realtime-runtime') {
+        if (phase !== 'ready') {
+          clearTimeout(timeout);
+          reject(new Error('Realtime pong arrived before hydration completion'));
+          return;
+        }
         clearTimeout(timeout);
         socket.close(1000, 'verified');
-        resolve(message);
+        resolve({ ...message, hydrationUpdates });
       }
     });
 
@@ -140,15 +238,20 @@ child.stderr.on('data', (chunk) => {
 try {
   const serviceHealth = await waitForHealth();
   const deniedWithoutToken = await verifyDeniedWithoutToken();
-  const accessToken = await requestSessionToken();
-  const roomHealth = await verifyRoomHealth(accessToken);
-  const socketResult = await verifyWebSocket(accessToken);
+  const inviteBearingGetDenied = await verifyInviteBearingGetDenied();
+  const loopbackGetCompatibility = await verifyLoopbackGetCompatibility();
+  const session = await requestSessionToken();
+  const roomHealth = await verifyRoomHealth(session.accessToken);
+  const socketResult = await verifyWebSocket(session.accessToken);
   console.log(
     JSON.stringify(
       {
         ok: true,
         baseUrl,
         deniedWithoutToken,
+        inviteBearingGetDenied,
+        loopbackGetCompatibility,
+        session: session.receipt,
         serviceHealth,
         roomHealth,
         socketResult,

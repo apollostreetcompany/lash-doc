@@ -1,0 +1,457 @@
+/** @vitest-environment jsdom */
+
+import { applyTextOperations } from '@lash/ai';
+import { createLashEditorExtensions } from '@lash/editor-core';
+import { createDocumentId, type EditPatch } from '@lash/types';
+import { Editor, type JSONContent } from '@tiptap/core';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+
+import { AIPanel } from '../../../../apps/web/components/editor/panels/AIPanel';
+import { getAiSelection, prepareAiReplacement } from '../../../../apps/web/lib/aiSelection';
+import { getWritingModelAvailability } from '../../../../apps/web/lib/browserWritingModel';
+import * as React from '../../../../apps/web/node_modules/react';
+import { createRoot, type Root } from '../../../../apps/web/node_modules/react-dom/client';
+
+globalThis.IS_REACT_ACT_ENVIRONMENT = true;
+Object.assign(globalThis, { React });
+
+const docId = createDocumentId('ai-selection-range');
+const mountedRoots: Root[] = [];
+const editors: Editor[] = [];
+
+const createEditor = (content: string | JSONContent) => {
+  const editor = new Editor({
+    extensions: createLashEditorExtensions(),
+    content,
+  });
+  editors.push(editor);
+  return editor;
+};
+
+const findOccurrencePmRange = (editor: Editor, needle: string, occurrence: number) => {
+  let seen = 0;
+  let match: { from: number; to: number } | null = null;
+
+  editor.state.doc.descendants((node, position) => {
+    if (!node.isText || !node.text || match) return;
+
+    let searchFrom = 0;
+    while (searchFrom <= node.text.length - needle.length) {
+      const index = node.text.indexOf(needle, searchFrom);
+      if (index < 0) return;
+      if (seen === occurrence) {
+        match = { from: position + index, to: position + index + needle.length };
+        return;
+      }
+      seen += 1;
+      searchFrom = index + needle.length;
+    }
+  });
+
+  if (!match) throw new Error(`Could not find occurrence ${occurrence} of "${needle}".`);
+  return match;
+};
+
+const renderPanel = async (editor: Editor, currentText: string, showTestControls = true) => {
+  const onApplyPatch = vi.fn(async (_patch: EditPatch) => ({ ok: true as const }));
+  const container = document.createElement('div');
+  document.body.appendChild(container);
+  const root = createRoot(container);
+  mountedRoots.push(root);
+
+  await React.act(async () => {
+    root.render(
+      React.createElement(AIPanel, {
+        editor,
+        docId,
+        baseVersion: 'base-version',
+        currentText,
+        schemaVersion: '1',
+        showTestControls,
+        onApplyPatch,
+      }),
+    );
+  });
+
+  return { container, onApplyPatch };
+};
+
+const stageAndAccept = async (container: HTMLElement) => {
+  const improve = container.querySelector<HTMLButtonElement>('[data-testid="ai-improve-button"]');
+  expect(improve?.disabled).toBe(false);
+
+  await React.act(async () => improve?.click());
+
+  const accept = container.querySelector<HTMLButtonElement>('[data-testid="ai-accept-button"]');
+  expect(accept).not.toBeNull();
+  await React.act(async () => accept?.click());
+};
+
+const readStagedPatch = (container: HTMLElement) => {
+  const serialized = container.querySelector('[data-testid="ai-patch-json"]')?.textContent;
+  expect(serialized).toBeTruthy();
+  return JSON.parse(serialized ?? 'null') as EditPatch;
+};
+
+afterEach(async () => {
+  while (mountedRoots.length) {
+    const root = mountedRoots.pop();
+    await React.act(async () => root?.unmount());
+  }
+  while (editors.length) editors.pop()?.destroy();
+  document.body.replaceChildren();
+  vi.unstubAllGlobals();
+  vi.useRealTimers();
+});
+
+describe('AIPanel exact selection scope', () => {
+  it('bounds how long the browser can leave model availability unresolved', async () => {
+    vi.useFakeTimers();
+    vi.stubGlobal('LanguageModel', { availability: () => new Promise<string>(() => {}) });
+    const settled = vi.fn();
+    void getWritingModelAvailability().then(settled);
+    await vi.advanceTimersByTimeAsync(8000);
+    expect(settled).toHaveBeenCalledWith('timed-out');
+  });
+
+  it('reports unavailability when the browser has no model, even with text selected', async () => {
+    const editor = createEditor('<p>A draft sentence.</p>');
+    editor.commands.setTextSelection(findOccurrencePmRange(editor, 'A draft sentence.', 0));
+    const { container, onApplyPatch } = await renderPanel(
+      editor,
+      editor.getText({ blockSeparator: '\n' }),
+      false,
+    );
+
+    expect(container.querySelector('[data-testid="ai-status"]')?.textContent).toMatch(
+      /On-device AI is unavailable/,
+    );
+    expect(container.querySelector('[data-testid="ai-review"]')).toBeNull();
+    expect(container.querySelector('[data-testid="ai-improve-button"]')).toBeNull();
+    expect(onApplyPatch).not.toHaveBeenCalled();
+  });
+
+  it('previews the browser model response with context and uses only the captured range on apply', async () => {
+    const editor = createEditor('<p>Before. The project is very nearly complete. After.</p>');
+    const selected = 'The project is very nearly complete.';
+    editor.commands.setTextSelection(findOccurrencePmRange(editor, selected, 0));
+    const modelPrompt = vi.fn(async (_input: string) =>
+      JSON.stringify({
+        revision: 'The project is nearly complete.',
+        rationale: 'Removes a redundant qualifier.',
+      }),
+    );
+    const destroy = vi.fn();
+    const create = vi.fn(async () => ({ prompt: modelPrompt, destroy }));
+    vi.stubGlobal('LanguageModel', { availability: async () => 'available', create });
+    const { container, onApplyPatch } = await renderPanel(editor, editor.getText(), false);
+
+    expect(create).not.toHaveBeenCalled();
+    await React.act(async () =>
+      container.querySelector<HTMLButtonElement>('[data-testid="ai-improve-button"]')?.click(),
+    );
+
+    expect(JSON.parse(modelPrompt.mock.calls[0][0])).toEqual({
+      beforeContext: 'Before. ',
+      afterContext: ' After.',
+      selectedText: selected,
+      instruction: 'Make this clearer and more concise.',
+    });
+    expect(destroy).toHaveBeenCalledOnce();
+    expect(container.querySelector('[data-testid="ai-original"]')?.textContent).toBe(selected);
+    expect(container.querySelector('[data-testid="ai-revision"]')?.textContent).toBe(
+      'The project is nearly complete.',
+    );
+    expect(container.querySelector('[data-testid="ai-patch-json"]')).toBeNull();
+    expect(onApplyPatch).not.toHaveBeenCalled();
+
+    await React.act(async () =>
+      container.querySelector<HTMLButtonElement>('[data-testid="ai-accept-button"]')?.click(),
+    );
+    expect(onApplyPatch.mock.calls[0][0].operations).toEqual([
+      { op: 'replace_text', from: 8, to: 44, text: 'The project is nearly complete.' },
+    ]);
+  });
+
+  it('discards a model response if the selection moves while waiting', async () => {
+    const editor = createEditor('<p>hello world hello</p>');
+    editor.commands.setTextSelection(findOccurrencePmRange(editor, 'hello', 0));
+    let resolvePrompt: (response: string) => void = () => {
+      throw new Error('Model was not invoked.');
+    };
+    const modelPrompt = vi.fn(
+      () =>
+        new Promise<string>((resolve) => {
+          resolvePrompt = resolve;
+        }),
+    );
+    vi.stubGlobal('LanguageModel', {
+      availability: async () => 'available',
+      create: async () => ({ prompt: modelPrompt, destroy: vi.fn() }),
+    });
+    const { container, onApplyPatch } = await renderPanel(editor, editor.getText(), false);
+    await React.act(async () =>
+      container.querySelector<HTMLButtonElement>('[data-testid="ai-improve-button"]')?.click(),
+    );
+    expect(modelPrompt).toHaveBeenCalledOnce();
+    editor.commands.setTextSelection(findOccurrencePmRange(editor, 'hello', 1));
+    await React.act(async () =>
+      resolvePrompt(JSON.stringify({ revision: 'hi', rationale: 'Shorter.' })),
+    );
+
+    expect(container.querySelector('[data-testid="ai-review"]')).toBeNull();
+    expect(container.querySelector('[data-testid="ai-status"]')?.textContent).toMatch(
+      /selection changed/,
+    );
+    expect(onApplyPatch).not.toHaveBeenCalled();
+  });
+
+  it('shows duplicate surrounding words in context and applies only the corrected selection', async () => {
+    const text = 'We will publish the beta on Tuesday.';
+    const editor = createEditor(`<p>${text}</p>`);
+    editor.commands.setTextSelection(findOccurrencePmRange(editor, 'publish the beta', 0));
+    vi.stubGlobal('LanguageModel', {
+      availability: async () => 'available',
+      create: async () => ({
+        prompt: async () =>
+          JSON.stringify({
+            revision: 'share the beta on Tuesday',
+            rationale: 'Uses a less formal verb.',
+          }),
+        destroy: vi.fn(),
+      }),
+    });
+    const { container, onApplyPatch } = await renderPanel(editor, text, false);
+    await React.act(async () =>
+      container.querySelector<HTMLButtonElement>('[data-testid="ai-improve-button"]')?.click(),
+    );
+    expect(container.querySelector('[data-testid="ai-revision-context"]')?.textContent).toBe(
+      'We will share the beta on Tuesday on Tuesday.',
+    );
+    expect(onApplyPatch).not.toHaveBeenCalled();
+
+    await React.act(async () =>
+      container.querySelector<HTMLButtonElement>('[data-testid="ai-edit-revision"]')?.click(),
+    );
+    const input = container.querySelector<HTMLInputElement>('[data-testid="ai-revision-input"]');
+    if (!input) throw new Error('Expected an editable proposal');
+    await React.act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set?.call(
+        input,
+        'share the beta',
+      );
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    expect(container.querySelector('[data-testid="ai-revision-context"]')?.textContent).toBe(
+      'We will share the beta on Tuesday.',
+    );
+    await React.act(async () =>
+      container.querySelector<HTMLButtonElement>('[data-testid="ai-accept-button"]')?.click(),
+    );
+    expect(onApplyPatch.mock.calls[0][0].operations).toEqual([
+      { op: 'replace_text', from: 8, to: 24, text: 'share the beta' },
+    ]);
+  });
+
+  it('preserves the untouched rich document through an exact replacement and rejects a stale source', async () => {
+    const editor = createEditor(
+      '<h2 data-heading-id="original-heading">Heading</h2><p><strong>same</strong> then same.</p><ul><li><p><em>List item</em></p></li></ul>',
+    );
+    editor.commands.setTextSelection(findOccurrencePmRange(editor, 'same', 1));
+    const before = editor.getText({ blockSeparator: '\n' });
+    const { container, onApplyPatch } = await renderPanel(editor, before);
+    await stageAndAccept(container);
+    const patch = onApplyPatch.mock.calls[0][0];
+    const selection = getAiSelection(editor, before);
+    expect(selection).not.toBeNull();
+    if (!selection) throw new Error('Missing selection');
+
+    const prepared = prepareAiReplacement(editor, patch, selection);
+    expect(prepared).not.toBeNull();
+    if (!prepared) throw new Error('Missing replacement');
+    const initial = editor.getJSON();
+    editor.view.dispatch(prepared.transaction);
+    const actual = editor.getJSON();
+    expect(actual.content?.[0]).toEqual(initial.content?.[0]);
+    expect(actual.content?.[1]?.content?.[0]).toEqual(initial.content?.[1]?.content?.[0]);
+    expect(actual.content?.[2]).toEqual(initial.content?.[2]);
+    expect(editor.getText({ blockSeparator: '\n' })).toBe(
+      before.replace('then same', 'then Polished same'),
+    );
+    expect(prepareAiReplacement(editor, patch, selection)).toBeNull();
+  });
+
+  it.each([
+    { action: 'Improve', testId: 'ai-improve-button' },
+    { action: 'Ask', testId: 'ai-chat-ask' },
+  ] as const)(
+    'recomputes the later repeated occurrence when $action runs after a post-mount selection change',
+    async ({ action, testId }) => {
+      const editor = createEditor('<p>hello world hello</p>');
+      const currentText = editor.getText({ blockSeparator: '\n' });
+      const firstPmRange = findOccurrencePmRange(editor, 'hello', 0);
+      const secondPmRange = findOccurrencePmRange(editor, 'hello', 1);
+      editor.commands.setTextSelection(firstPmRange);
+
+      const { container } = await renderPanel(editor, currentText);
+      editor.commands.setTextSelection(secondPmRange);
+
+      await React.act(async () => {
+        container.querySelector<HTMLButtonElement>(`[data-testid="${testId}"]`)?.click();
+      });
+
+      if (action === 'Improve') {
+        const patch = readStagedPatch(container);
+        expect(patch.operations).toEqual([
+          { op: 'replace_text', from: 12, to: 17, text: 'Polished hello' },
+        ]);
+        expect(patch.citations).toEqual([
+          { type: 'doc', baseVersion: 'base-version', rangeFrom: 12, rangeTo: 17 },
+        ]);
+        expect(container.querySelector('[data-testid="ai-chat-answer"]')).toBeNull();
+      } else {
+        expect(container.querySelector('[data-testid="ai-review"]')).toBeNull();
+        expect(container.querySelector('[data-testid="ai-chat-answer"]')?.textContent).toContain(
+          'AI answer grounded in "hello".',
+        );
+        const citation = container.querySelector<HTMLElement>('[data-testid="ai-chat-citation"]');
+        expect(citation?.dataset.rangeFrom).toBe('12');
+        expect(citation?.dataset.rangeTo).toBe('17');
+        expect(citation?.textContent).toContain('Citation: hello');
+      }
+    },
+  );
+
+  it('binds a repeated inline selection to the later selected occurrence', async () => {
+    const editor = createEditor('<p>hello world hello</p>');
+    const currentText = editor.getText({ blockSeparator: '\n' });
+    const selectedPmRange = findOccurrencePmRange(editor, 'hello', 1);
+    editor.commands.setTextSelection(selectedPmRange);
+
+    expect(editor.state.doc.textBetween(selectedPmRange.from, selectedPmRange.to, '\n')).toBe(
+      'hello',
+    );
+
+    const { container, onApplyPatch } = await renderPanel(editor, currentText);
+    await stageAndAccept(container);
+
+    const patch = onApplyPatch.mock.calls[0]?.[0];
+    expect(patch?.operations).toEqual([
+      { op: 'replace_text', from: 12, to: 17, text: 'Polished hello' },
+    ]);
+    expect(patch?.citations).toEqual([
+      { type: 'doc', baseVersion: 'base-version', rangeFrom: 12, rangeTo: 17 },
+    ]);
+    expect(patch && applyTextOperations(currentText, patch.operations)).toBe(
+      'hello world Polished hello',
+    );
+    expect(currentText.slice(0, 5)).toBe('hello');
+
+    editor.commands.setTextSelection({ from: 1, to: 1 });
+    await React.act(async () => {
+      container.querySelector<HTMLButtonElement>('[data-testid="ai-citation"]')?.click();
+    });
+    expect({
+      from: editor.state.selection.from,
+      to: editor.state.selection.to,
+    }).toEqual(selectedPmRange);
+  });
+
+  it('maps a duplicate in a later block through the editor plaintext serializer', async () => {
+    const editor = createEditor('<p>hello</p><p>hello</p>');
+    const currentText = editor.getText({ blockSeparator: '\n' });
+    const selectedPmRange = findOccurrencePmRange(editor, 'hello', 1);
+    editor.commands.setTextSelection(selectedPmRange);
+
+    expect(currentText).toBe('hello\nhello');
+    expect(editor.state.doc.textBetween(selectedPmRange.from, selectedPmRange.to, '\n')).toBe(
+      'hello',
+    );
+
+    const { container, onApplyPatch } = await renderPanel(editor, currentText);
+    await stageAndAccept(container);
+
+    const patch = onApplyPatch.mock.calls[0]?.[0];
+    expect(patch?.operations).toEqual([
+      { op: 'replace_text', from: 6, to: 11, text: 'Polished hello' },
+    ]);
+    expect(patch?.citations).toEqual([
+      { type: 'doc', baseVersion: 'base-version', rangeFrom: 6, rangeTo: 11 },
+    ]);
+    expect(patch && applyTextOperations(currentText, patch.operations)).toBe(
+      'hello\nPolished hello',
+    );
+    expect(currentText.slice(0, 5)).toBe('hello');
+  });
+
+  it('uses the Lash mention renderText prefix when deriving plaintext offsets', async () => {
+    const editor = createEditor({
+      type: 'doc',
+      content: [
+        {
+          type: 'paragraph',
+          content: [
+            {
+              type: 'mention',
+              attrs: { kind: 'user', refId: 'ada', display: 'Ada', iso: null },
+            },
+            { type: 'text', text: ' hello' },
+          ],
+        },
+      ],
+    });
+    const currentText = editor.getText({ blockSeparator: '\n' });
+    const selectedPmRange = findOccurrencePmRange(editor, 'hello', 0);
+    editor.commands.setTextSelection(selectedPmRange);
+
+    expect(currentText).toBe('@Ada hello');
+    expect(selectedPmRange.from).not.toBe(5);
+
+    const { container, onApplyPatch } = await renderPanel(editor, currentText);
+    await stageAndAccept(container);
+
+    const patch = onApplyPatch.mock.calls[0]?.[0];
+    expect(patch?.operations).toEqual([
+      { op: 'replace_text', from: 5, to: 10, text: 'Polished hello' },
+    ]);
+    expect(patch?.citations).toEqual([
+      { type: 'doc', baseVersion: 'base-version', rangeFrom: 5, rangeTo: 10 },
+    ]);
+    expect(patch && applyTextOperations(currentText, patch.operations)).toBe('@Ada Polished hello');
+  });
+
+  it.each([
+    {
+      action: 'Improve',
+      testId: 'ai-improve-button',
+      status: 'Select text before requesting an AI edit.',
+    },
+    {
+      action: 'Ask',
+      testId: 'ai-chat-ask',
+      status: 'Select text before asking AI.',
+    },
+  ] as const)(
+    'fails $action closed when currentText is stale at action time',
+    async ({ testId, status }) => {
+      const editor = createEditor('<p>hello world</p>');
+      const currentText = editor.getText({ blockSeparator: '\n' });
+      editor.commands.setTextSelection(findOccurrencePmRange(editor, 'hello', 0));
+
+      const { container, onApplyPatch } = await renderPanel(editor, currentText);
+      editor.commands.setContent('<p>stale world</p>');
+      editor.commands.setTextSelection(findOccurrencePmRange(editor, 'stale', 0));
+
+      await React.act(async () => {
+        container.querySelector<HTMLButtonElement>(`[data-testid="${testId}"]`)?.click();
+      });
+
+      expect(container.querySelector('[data-testid="ai-review"]')).toBeNull();
+      expect(container.querySelector('[data-testid="ai-accept-button"]')).toBeNull();
+      expect(container.querySelector('[data-testid="ai-chat-answer"]')).toBeNull();
+      expect(container.querySelector('[data-testid="ai-chat-citation"]')).toBeNull();
+      expect(onApplyPatch).not.toHaveBeenCalled();
+      expect(container.querySelector('[data-testid="ai-status"]')?.textContent).toBe(status);
+    },
+  );
+});

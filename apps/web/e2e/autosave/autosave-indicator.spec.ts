@@ -7,9 +7,9 @@ import { expect, test } from '@playwright/test';
  *    indicator updates; last saved time visible on hover."
  *
  * The indicator is wired via `useAutosave` in apps/web/lib/autosave.ts. When a
- * save lands, the hook also publishes `{ savedAt, docJson }` to
- * `window.__lashLastSave` so this spec can assert the snapshot reached the
- * persistence callback.
+ * save lands, the verified persistence callback publishes `{ savedAt,
+ * docJson }` to `window.__lashLastSave`. The hook must never publish this
+ * success receipt before the per-document body envelope can be read back.
  */
 test.describe('autosave-indicator', () => {
   test('shows "All changes saved" within ~500 ms of idle and exposes snapshot', async ({
@@ -32,12 +32,13 @@ test.describe('autosave-indicator', () => {
 
     await page.keyboard.type('Autosave smoke test');
 
-    // The hook debounces 500 ms after the last keystroke; allow up to ~2.5 s
-    // before asserting visibility (e2e SLO budget for the H.1 acceptance,
-    // generous to cover Playwright + CI scheduler jitter).
+    // The hook debounces 350 ms after the last keystroke, reserving headroom
+    // for the verified persistence write and React render under the 500 ms SLO.
+    // The broad assertion timeout still tolerates loaded-runner scheduling.
     const indicator = page.getByTestId('autosave-indicator');
     await expect(indicator).toBeVisible({ timeout: 2_500 });
     await expect(indicator).toContainText(/All changes saved/i, { timeout: 2_500 });
+    await expect(page.getByTestId('autosave-live-region')).toHaveText('All changes saved');
 
     // Hover tooltip = absolute ISO timestamp recorded at save time.
     // Poll the title attribute — React may commit `status` and `lastSavedAt`
@@ -64,5 +65,14 @@ test.describe('autosave-indicator', () => {
     expect(lastSave?.savedAt).toMatch(/\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/);
     expect(lastSave?.docJson).toBeTruthy();
     expect(typeof lastSave?.docJson).toBe('object');
+
+    const stored = await page.evaluate(() => {
+      const raw = window.localStorage.getItem('lash:body:demo-document');
+      return raw ? (JSON.parse(raw) as { writeId?: string; doc?: unknown }) : null;
+    });
+    expect(stored).toMatchObject({
+      writeId: expect.any(String),
+      doc: lastSave?.docJson,
+    });
   });
 });

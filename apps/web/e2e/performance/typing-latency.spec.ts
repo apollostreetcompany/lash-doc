@@ -23,6 +23,7 @@ type LashTypingMetrics = {
 
 test('typing-latency essay stays under p95 budget', async ({ page }) => {
   await page.goto('/');
+  await expect(page.locator('[data-body-mutation-locked="false"]')).toBeVisible();
   const editable = page.locator('.ProseMirror').first();
   await expect(editable).toBeVisible();
 

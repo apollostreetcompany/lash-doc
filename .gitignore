@@ -60,3 +60,9 @@ test-results/
 # Third-party visual references captured locally for UX analysis.
 # Keep source URLs and comparison notes in committed reports instead.
 artifacts/ux-sprint/raw/quip/*.png
+
+# Local credentials, provider state and comparative session evidence
+.env.*.local
+.dev.vars
+.dev.vars.*
+artifacts/lex-comparison/

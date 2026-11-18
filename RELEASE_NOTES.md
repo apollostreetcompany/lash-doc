@@ -1,5 +1,44 @@
 # Lash v1 Release Notes
 
+## Collaborative writing candidate
+
+Lash can take a local draft into a shared document. The owner can invite a named
+editor, co-edit the title and body, review anchored feedback and suggestions,
+restore an earlier version, and revoke the invitation.
+
+- **Write and return.** The Documents page lists recent drafts on this device
+  and supports title search. Markdown transfer preserves supported rich
+  structure and bounded embedded images. Local history preserves formatting
+  when restoring a version.
+  You can type straight into a new bullet and paste at the visible text caret
+  after returning from a suggestion.
+- **Recover a local draft.** History records ordinary edits after the browser
+  confirms the draft was saved. If the saved draft and a verified History
+  version disagree, you can keep writing and preview the other version's text.
+- **Invite a reviewer.** Owners can choose **Can comment** for a verified account.
+  The reviewer can select a passage, discuss it and suggest wording. The document
+  title and body stay read-only for that reviewer. **Show** highlights the
+  quoted passage in the document. Editors can accept or reject the suggestion.
+  Revoking access also closes an open reviewer session.
+- **Read a shared table.** Public readers see the status and select values the
+  author chose, including custom labels.
+- **Review a change.** Replies and suggestion decisions survive reopening the
+  document. Shared History lets both editors compare versions. Owners can
+  restore an earlier body as a new version.
+- **Keep feedback on the original words.** When an editor pastes an identical
+  phrase beside a quoted passage in the same paragraph, the comment and suggestion
+  follow the original passage. For a review affected by a duplicate paste in
+  an older build, use **Show** to check the target before accepting.
+- **Revise a selection.** On browsers with a ready on-device language model,
+  writers can review the proposed wording in context, edit it, and apply it
+  to the selected passage. The interface reports when the model is unavailable.
+- **Run locally.** `make dev-collab` starts a two-account workspace with a local
+  inbox. See the [setup and walkthrough](README.md).
+
+The candidate has been exercised on a compiled local web server with two
+independently authenticated browsers. Public rollout and the human 4.5/5
+qualification are separate release milestones.
+
 ## 2026-05-16 v1
 
 Lash v1 covers the local collaborative-editor acceptance stack in `agents.md`. Riddle remains optional and deferred; this release does not add Lash-Riddle integration code.

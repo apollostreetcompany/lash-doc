@@ -41,15 +41,14 @@ export function OutlinePanel({
         <h2 className="outline-title" id={titleId}>
           {title}
         </h2>
-        {onExpandAll ? (
+        {onExpandAll && hasCollapsed ? (
           <button
             type="button"
             className="outline-expand-all-button"
             data-testid={`${testIdPrefix}-expand-all`}
             onClick={onExpandAll}
-            disabled={!hasCollapsed}
             aria-label="Expand all headings"
-            title={hasCollapsed ? 'Expand all headings' : 'All headings expanded'}
+            title="Expand all headings"
           >
             Expand all
           </button>

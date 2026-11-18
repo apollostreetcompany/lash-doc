@@ -1,65 +1,36 @@
-import { expect, test, type Page } from '@playwright/test';
-
-const SAMPLE_DOCUMENT = `
-  <h1>Accessibility Title</h1>
-  <p>Opening paragraph.</p>
-  <h2>Section Alpha</h2>
-  <p>Alpha body.</p>
-  <h3>Nested Note</h3>
-  <p>Nested body.</p>
-`;
-
-const ready = async (page: Page) =>
-  page.waitForFunction(() =>
-    Boolean((window as unknown as { __lashEditor?: unknown }).__lashEditor),
-  );
-
-const loadDocument = async (page: Page) => {
-  await ready(page);
-
-  await page.evaluate((html) => {
-    const editor = (
-      window as unknown as {
-        __lashEditor?: { commands: { setContent: (content: string) => void } };
-      }
-    ).__lashEditor;
-    editor?.commands.setContent(html);
-  }, SAMPLE_DOCUMENT);
-
-  await page.waitForFunction(() => {
-    const outline = (window as unknown as { __lashOutlineItems?: Array<{ title: string }> })
-      .__lashOutlineItems;
-    return Array.isArray(outline) && outline.some((item) => item.title === 'Section Alpha');
-  });
-
-  return page.evaluate<Array<{ headingId: string; title: string }> | undefined>(() => {
-    return (
-      window as unknown as {
-        __lashOutlineItems?: Array<{ headingId: string; title: string }>;
-      }
-    ).__lashOutlineItems;
-  });
-};
+import { expect, test } from '@playwright/test';
 
 test('sr-headings', async ({ page }) => {
   await page.goto('/');
-  const outline = await loadDocument(page);
-  const alpha = outline?.find((item) => item.title === 'Section Alpha');
-  expect(alpha).toBeTruthy();
 
-  const editorRegion = page.getByRole('region', { name: 'Document editor' });
-  await expect(
-    editorRegion.getByRole('heading', { level: 1, name: 'Accessibility Title' }),
-  ).toBeVisible();
-  await expect(
-    editorRegion.getByRole('heading', { level: 2, name: 'Section Alpha' }),
-  ).toBeVisible();
-  await expect(editorRegion.getByRole('heading', { level: 3, name: 'Nested Note' })).toBeVisible();
+  const editorRegion = page.getByRole('region', { name: 'Writing canvas' });
+  const editor = editorRegion.getByRole('textbox', { name: 'Document editor' });
+  await expect(editor).toHaveAttribute('contenteditable', 'true');
+  await editor.click();
 
-  await expect(page.getByRole('navigation', { name: 'Outline' })).toBeVisible();
-  await expect(page.getByTestId(`outline-toggle-${alpha!.headingId}`)).toHaveAttribute(
-    'aria-label',
-    'Collapse Section Alpha',
+  const sections = [
+    { level: 1, heading: 'Accessibility Title', body: 'Opening paragraph.' },
+    { level: 2, heading: 'Section Alpha', body: 'Alpha body.' },
+    { level: 3, heading: 'Nested Note', body: 'Nested body.' },
+  ];
+  for (const [index, section] of sections.entries()) {
+    if (index > 0) await page.keyboard.press('Enter');
+    await page.keyboard.press(`ControlOrMeta+Alt+${section.level}`);
+    await page.keyboard.insertText(section.heading);
+    await page.keyboard.press('Enter');
+    await page.keyboard.insertText(section.body);
+  }
+
+  for (const { level, heading } of sections) {
+    await expect(editorRegion.getByRole('heading', { level, name: heading })).toBeVisible();
+  }
+
+  await page.getByRole('button', { name: 'Expand sidebar' }).click();
+  const outline = page.getByRole('navigation', { name: 'Outline' });
+  await expect(outline).toBeVisible();
+  await expect(outline.getByRole('button', { name: 'Collapse Section Alpha' })).toHaveAttribute(
+    'aria-expanded',
+    'true',
   );
-  await expect(page.getByRole('button', { name: 'Jump to Section Alpha' })).toBeVisible();
+  await expect(outline.getByRole('button', { name: 'Jump to Section Alpha' })).toBeVisible();
 });

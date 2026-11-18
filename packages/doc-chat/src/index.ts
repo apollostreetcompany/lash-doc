@@ -4,6 +4,26 @@
 
 import type { ActorRef, Anchor, DocumentId, EditorOp } from '@lash/types';
 
+import type { ReviewProposalView } from './suggestion';
+
+export type ChatRelativePosition = {
+  type?: { client: number; clock: number };
+  item?: { client: number; clock: number };
+  tname?: string;
+  assoc?: number;
+};
+
+export type ChatRelativeRange = { start: ChatRelativePosition; end: ChatRelativePosition };
+
+export type ChatAnchor<Version extends string | null = string | null> = Omit<
+  Anchor,
+  'baseVersion'
+> & {
+  /** Null for a thread anchored to the live document without a recorded revision. */
+  baseVersion: Version;
+  relativeRange?: ChatRelativeRange;
+};
+
 export interface ChatMessage {
   id: string;
   threadId: string;
@@ -19,7 +39,7 @@ export interface ChatMessage {
 export interface ChatThread {
   id: string;
   docId: DocumentId;
-  anchor: Anchor;
+  anchor: ChatAnchor;
   messages: ChatMessage[];
   filters: { authorId?: string; ai?: boolean; nodeType?: string };
   status?: 'open' | 'resolved';
@@ -27,7 +47,37 @@ export interface ChatThread {
   resolvedAt?: string | null;
   /** ISO-8601 UTC */
   updatedAt?: string;
+  proposal?: ReviewProposalView;
 }
+
+export type ChatThreadStatus = 'open' | 'resolved';
+
+export type StoredChatThread = ChatThread & {
+  historyText: string;
+  status: ChatThreadStatus;
+  resolvedAt: string | null;
+  updatedAt: string;
+};
+
+export { parseCommentReviewThread, type CommentReviewThread } from './comment-projection';
+export { parseChatThread, parseChatThreads } from './thread-payload';
+export {
+  hasSuggestionEdges,
+  MAX_SUGGESTION_TEXT,
+  readSuggestionContent,
+  type ReviewProposal,
+  type ReviewProposalView,
+  type SuggestionContent,
+  type SuggestionDecision,
+} from './suggestion';
+export {
+  collectReviewThreads,
+  isReviewId,
+  parseCommittedReviewOperation,
+  parseReviewMutation,
+  type CommittedReviewOperation,
+  type ReviewMutation,
+} from './review';
 
 export interface ThreadStore {
   create(docId: DocumentId, anchor: Anchor): Promise<ChatThread>;
@@ -35,16 +85,16 @@ export interface ThreadStore {
   list(docId: DocumentId, filter?: ChatThread['filters']): Promise<ChatThread[]>;
 }
 
-export interface MapAnchorInput {
-  anchor: Anchor;
+export interface MapAnchorInput<Version extends string | null = string> {
+  anchor: ChatAnchor;
   /** Doc JSON at `anchor.baseVersion`. */
   baseDoc: unknown;
   /** Ops applied since `anchor.baseVersion`, in order. */
   ops: EditorOp[];
   /** Doc JSON after `ops` are applied. */
   currentDoc: unknown;
-  /** sha256 of `currentDoc`. */
-  targetVersion: string;
+  /** Recorded revision of `currentDoc`, if available. */
+  targetVersion: Version;
 }
 
 const textOf = (doc: unknown): string => {
@@ -78,12 +128,12 @@ const findOccurrence = (text: string, needle: string, occurrence: number): numbe
   return -1;
 };
 
-export const createAnchor = (input: {
-  baseVersion: string;
+export const createAnchor = <Version extends string | null>(input: {
+  baseVersion: Version;
   docText: string;
   from: number;
   to: number;
-}): Anchor => {
+}): ChatAnchor<Version> => {
   const from = Math.max(0, Math.min(input.from, input.docText.length));
   const to = Math.max(from, Math.min(input.to, input.docText.length));
   const selectedText = input.docText.slice(from, to);
@@ -101,7 +151,9 @@ export const createAnchor = (input: {
   };
 };
 
-export const mapAnchor = (input: MapAnchorInput): Anchor => {
+export const mapAnchor = <Version extends string | null>(
+  input: MapAnchorInput<Version>,
+): ChatAnchor<Version> => {
   const currentText = textOf(input.currentDoc);
   const selectedText = input.anchor.token.text;
   const nextFrom = findOccurrence(currentText, selectedText, input.anchor.token.occurrence);

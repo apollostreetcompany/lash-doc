@@ -21,11 +21,12 @@ export interface LashImageOptions {
 
 interface UploadEntry {
   file: File;
-  previewURL: string | null;
+  resized: boolean;
 }
 
 interface UploadManager {
   plugin: Plugin;
+  hasFile(uploadId: string): boolean;
   /** insert via direct view.dispatch — used by paste/drop handlers (outside CM context) */
   insert(view: { state: EditorState; dispatch: (tr: Transaction) => void }, file: File): void;
   /** retry via direct view.dispatch — used outside CM context */
@@ -47,13 +48,17 @@ interface LashImageStorage {
 
 const uploadPluginKey = new PluginKey('lashImageUpload');
 
-const generateUploadId = (() => {
-  let counter = 0;
-  return () => {
-    counter += 1;
-    return `lash-image-${counter}`;
-  };
-})();
+// Leave room for Yjs encoding and the verified 1 MiB collaboration body limit.
+const MAX_BODY_BYTES_WITH_NEW_IMAGE = 768 * 1024;
+
+export class ImageUploadError extends Error {
+  constructor(
+    message: string,
+    readonly retryable: boolean,
+  ) {
+    super(message);
+  }
+}
 
 const findImageByUploadId = (doc: ProseMirrorNode, uploadId: string) => {
   let found: { pos: number; node: ProseMirrorNode } | null = null;
@@ -91,7 +96,7 @@ const scheduleUpload = (
   uploadId: string,
   entry: UploadEntry,
   onSuccess: () => void,
-  onFailure: () => void,
+  onFailure: (retryable: boolean) => void,
 ) => {
   let cancelled = false;
   const onProgress = (progress: number) => {
@@ -116,6 +121,7 @@ const scheduleUpload = (
         uploadId: null,
         progress: 1,
         previewSrc: null,
+        error: null,
       };
       const current = findImageByUploadId(view.state.doc, uploadId) as {
         pos: number;
@@ -125,13 +131,24 @@ const scheduleUpload = (
       if (
         typeof result.width === 'number' &&
         result.width > 0 &&
+        !entry.resized &&
         (typeof currentWidth !== 'number' || currentWidth === initialWidth)
       ) {
         attrs.width = result.width;
       }
       const successTr = updateImageAttrs(view.state, uploadId, attrs);
       if (successTr) {
+        const encoded = new TextEncoder().encode(JSON.stringify(successTr.doc.toJSON()));
+        if (encoded.byteLength > MAX_BODY_BYTES_WITH_NEW_IMAGE) {
+          throw new ImageUploadError('This document is too large to add this image.', true);
+        }
         view.dispatch(successTr);
+        if (findImageByUploadId(view.state.doc, uploadId)) {
+          throw new ImageUploadError(
+            'The image could not be added. Try again when editing is available.',
+            true,
+          );
+        }
       }
       onSuccess();
     })
@@ -139,19 +156,18 @@ const scheduleUpload = (
       if (cancelled) {
         return;
       }
+      onFailure(!(error instanceof ImageUploadError) || error.retryable);
       const failureTr = updateImageAttrs(view.state, uploadId, {
         status: 'error',
-        error: error instanceof Error ? error.message : 'Upload failed',
+        error: error instanceof Error ? error.message : 'The image could not be added.',
       });
       if (failureTr) {
         view.dispatch(failureTr);
       }
-      onFailure();
     });
 
   return () => {
     cancelled = true;
-    onFailure();
   };
 };
 
@@ -161,16 +177,6 @@ const createUploadManager = (options: LashImageOptions): UploadManager => {
   // Flipped by the plugin's view().destroy() — used by deferred microtasks
   // to skip uploads after editor teardown (proconsult-m0/A P1).
   let destroyed = false;
-
-  const revokePreview = (entry: UploadEntry) => {
-    if (
-      entry.previewURL &&
-      typeof window !== 'undefined' &&
-      typeof window.URL?.revokeObjectURL === 'function'
-    ) {
-      window.URL.revokeObjectURL(entry.previewURL);
-    }
-  };
 
   const startUpload = (
     view: { state: EditorState; dispatch: (tr: Transaction) => void },
@@ -185,49 +191,34 @@ const createUploadManager = (options: LashImageOptions): UploadManager => {
       uploadId,
       entry,
       () => {
-        revokePreview(entry);
         uploads.delete(uploadId);
         disposers.delete(uploadId);
       },
-      () => {
-        // keep preview for retries
+      (retryable) => {
+        if (!retryable) uploads.delete(uploadId);
+        disposers.delete(uploadId);
       },
     );
     disposers.set(uploadId, disposer);
   };
 
-  /** Guard wrapper for deferred (microtask) startUpload from CM-managed paths.
-   *  Skips when the editor has been destroyed OR when the placeholder no
-   *  longer exists in the doc (e.g., user undid the insert before the
-   *  microtask ran). Either case, revoke the preview URL so we don't leak. */
+  // Defer work from command transactions until the placeholder has committed.
   const startUploadIfPlaceholderAlive = (
     view: { state: EditorState; dispatch: (tr: Transaction) => void },
     uploadId: string,
     entry: UploadEntry,
   ) => {
-    if (destroyed) {
-      revokePreview(entry);
-      return;
-    }
-    if (!findImageByUploadId(view.state.doc, uploadId)) {
-      revokePreview(entry);
+    if (destroyed || !findImageByUploadId(view.state.doc, uploadId)) {
+      uploads.delete(uploadId);
       return;
     }
     startUpload(view, uploadId, entry);
   };
 
-  const buildPlaceholderNode = (
-    state: EditorState,
-    file: File,
-  ): { uploadId: string; previewURL: string | null; node: ProseMirrorNode } => {
-    const uploadId = generateUploadId();
-    const previewURL =
-      typeof window !== 'undefined' && typeof window.URL?.createObjectURL === 'function'
-        ? window.URL.createObjectURL(file)
-        : null;
+  const buildPlaceholderNode = (state: EditorState) => {
+    const uploadId = `lash-image-${crypto.randomUUID()}`;
     const node = state.schema.nodes.image.create({
       src: '',
-      previewSrc: previewURL,
       alt: '',
       width: options.initialWidth,
       status: 'uploading',
@@ -235,7 +226,16 @@ const createUploadManager = (options: LashImageOptions): UploadManager => {
       progress: 0,
       error: null,
     });
-    return { uploadId, previewURL, node };
+    return { uploadId, node };
+  };
+
+  // Collapse a range without deleting it before an asynchronous file read.
+  const insertPlaceholder = (tr: Transaction, node: ProseMirrorNode) => {
+    if (!tr.selection.empty) {
+      const pos = tr.selection.to;
+      return tr.replaceRangeWith(pos, pos, node).scrollIntoView();
+    }
+    return tr.replaceSelectionWith(node).scrollIntoView();
   };
 
   // Direct-dispatch path: used by paste/drop handlers, outside CM context.
@@ -243,10 +243,12 @@ const createUploadManager = (options: LashImageOptions): UploadManager => {
     view: { state: EditorState; dispatch: (tr: Transaction) => void },
     file: File,
   ) => {
-    const { uploadId, previewURL, node } = buildPlaceholderNode(view.state, file);
-    const tr = view.state.tr.replaceSelectionWith(node).scrollIntoView();
+    const { uploadId, node } = buildPlaceholderNode(view.state);
+    const tr = insertPlaceholder(view.state.tr, node);
+    const entry = { file, resized: false };
+    uploads.set(uploadId, entry);
     view.dispatch(tr);
-    startUpload(view, uploadId, { file, previewURL });
+    startUploadIfPlaceholderAlive(view, uploadId, entry);
   };
 
   const retry = (
@@ -254,10 +256,9 @@ const createUploadManager = (options: LashImageOptions): UploadManager => {
     uploadId: string,
   ) => {
     const entry = uploads.get(uploadId);
-    if (!entry) {
+    if (!entry || disposers.has(uploadId)) {
       return;
     }
-    startUpload(view, uploadId, entry);
     const resetTr = updateImageAttrs(view.state, uploadId, {
       status: 'uploading',
       progress: 0,
@@ -265,23 +266,25 @@ const createUploadManager = (options: LashImageOptions): UploadManager => {
     });
     if (resetTr) {
       view.dispatch(resetTr);
+      startUploadIfPlaceholderAlive(view, uploadId, entry);
     }
   };
 
   // Tr-mutation path: used by addCommands so TipTap CommandManager dispatches a single
   // coherent tr. Upload start is deferred to a microtask to ensure the placeholder is
   // committed to view.state before scheduleUpload's first onProgress runs. The deferred
-  // start is guarded so that an undo or editor-destroy before the microtask runs does
-  // not leak an upload against a missing placeholder (proconsult-m0/A P1).
+  // start is guarded in case the insert is undone or the editor closes first.
   const insertIntoTransaction = (
     state: EditorState,
     tr: Transaction,
     view: EditorView,
     file: File,
   ) => {
-    const { uploadId, previewURL, node } = buildPlaceholderNode(state, file);
-    tr.replaceSelectionWith(node).scrollIntoView();
-    queueMicrotask(() => startUploadIfPlaceholderAlive(view, uploadId, { file, previewURL }));
+    const { uploadId, node } = buildPlaceholderNode(state);
+    insertPlaceholder(tr, node);
+    const entry = { file, resized: false };
+    uploads.set(uploadId, entry);
+    queueMicrotask(() => startUploadIfPlaceholderAlive(view, uploadId, entry));
   };
 
   const retryIntoTransaction = (
@@ -291,7 +294,7 @@ const createUploadManager = (options: LashImageOptions): UploadManager => {
     uploadId: string,
   ) => {
     const entry = uploads.get(uploadId);
-    if (!entry) {
+    if (!entry || disposers.has(uploadId)) {
       return;
     }
     const result = findImageByUploadId(state.doc, uploadId);
@@ -313,6 +316,7 @@ const createUploadManager = (options: LashImageOptions): UploadManager => {
     key: uploadPluginKey,
     props: {
       handlePaste(view, event) {
+        if (!view.editable) return false;
         const items = event.clipboardData?.items;
         if (!items) {
           return false;
@@ -335,6 +339,7 @@ const createUploadManager = (options: LashImageOptions): UploadManager => {
         return true;
       },
       handleDrop(view, event) {
+        if (!view.editable) return false;
         // Some synthetic DragEvent payloads (Playwright tests, programmatic
         // DataTransfer) populate `items` but not `files`. Read from both,
         // preferring `files` when populated, otherwise extracting from items.
@@ -365,13 +370,15 @@ const createUploadManager = (options: LashImageOptions): UploadManager => {
       },
     },
     appendTransaction(transactions, _oldState, newState) {
-      if (!transactions.some((tr) => tr.docChanged)) {
+      if (!uploads.size || !transactions.some((tr) => tr.docChanged)) {
         return null;
       }
       const active = new Set<string>();
       newState.doc.descendants((node) => {
         if (node.type.name === 'image' && typeof node.attrs.uploadId === 'string') {
           active.add(node.attrs.uploadId);
+          const entry = uploads.get(node.attrs.uploadId);
+          if (entry && node.attrs.width !== options.initialWidth) entry.resized = true;
         }
         return true;
       });
@@ -382,14 +389,6 @@ const createUploadManager = (options: LashImageOptions): UploadManager => {
         }
       });
       removed.forEach((id) => {
-        const entry = uploads.get(id);
-        if (
-          entry?.previewURL &&
-          typeof window !== 'undefined' &&
-          typeof window.URL?.revokeObjectURL === 'function'
-        ) {
-          window.URL.revokeObjectURL(entry.previewURL);
-        }
         uploads.delete(id);
         const disposer = disposers.get(id);
         disposer?.();
@@ -403,14 +402,20 @@ const createUploadManager = (options: LashImageOptions): UploadManager => {
           destroyed = true;
           disposers.forEach((dispose) => dispose());
           disposers.clear();
-          uploads.forEach((entry) => revokePreview(entry));
           uploads.clear();
         },
       };
     },
   });
 
-  return { plugin, insert, retry, insertIntoTransaction, retryIntoTransaction };
+  return {
+    plugin,
+    hasFile: (uploadId) => uploads.has(uploadId),
+    insert,
+    retry,
+    insertIntoTransaction,
+    retryIntoTransaction,
+  };
 };
 
 class LashImageNodeView implements NodeView {
@@ -450,12 +455,13 @@ class LashImageNodeView implements NodeView {
     this.progressEl = document.createElement('div');
     this.progressEl.className = 'lash-image-progress';
     this.progressEl.setAttribute('data-testid', 'image-upload-progress');
+    this.progressEl.setAttribute('role', 'status');
     wrapper.appendChild(this.progressEl);
 
     this.retryButton = document.createElement('button');
     this.retryButton.type = 'button';
     this.retryButton.className = 'lash-image-retry';
-    this.retryButton.textContent = 'Retry upload';
+    this.retryButton.textContent = 'Try again';
     this.retryButton.setAttribute('data-testid', 'image-retry-button');
     this.retryButton.addEventListener('click', (event) => {
       event.preventDefault();
@@ -495,6 +501,7 @@ class LashImageNodeView implements NodeView {
     this.widthSlider.step = '10';
     this.widthSlider.className = 'lash-image-width-slider';
     this.widthSlider.setAttribute('data-testid', 'image-width-slider');
+    this.widthSlider.setAttribute('aria-label', 'Image width');
     this.widthSlider.addEventListener('input', (event) => {
       const value = Number.parseInt((event.currentTarget as HTMLInputElement).value, 10);
       this.updateNodeAttrs({ width: value });
@@ -581,25 +588,20 @@ class LashImageNodeView implements NodeView {
     this.dom.setAttribute('data-status', status);
     this.widthSlider.value = String(width);
     this.imageEl.style.width = `${width}px`;
+    this.imageEl.hidden = status !== 'idle' || !attrs.src;
 
     if (status === 'uploading') {
-      const preview = attrs.previewSrc ?? '';
-      if (preview) {
-        this.imageEl.src = preview;
-      }
       this.progressEl.style.display = 'block';
       const percent = Math.round((attrs.progress ?? 0) * 100);
-      this.progressEl.textContent = `Uploading… ${percent}%`;
+      this.progressEl.textContent = this.uploadManager.hasFile(attrs.uploadId)
+        ? `Adding image… ${percent}%`
+        : 'Image unavailable. If you added it, paste or drop the original file again.';
       this.retryButton.style.display = 'none';
     } else if (status === 'error') {
-      if (attrs.previewSrc) {
-        this.imageEl.src = attrs.previewSrc;
-      } else {
-        this.imageEl.removeAttribute('src');
-      }
-      this.progressEl.style.display = 'none';
-      this.progressEl.textContent = '';
-      this.retryButton.style.display = 'inline-flex';
+      this.progressEl.style.display = 'block';
+      this.progressEl.textContent = attrs.error || 'Paste or drop the original image again.';
+      this.retryButton.style.display =
+        this.view.editable && this.uploadManager.hasFile(attrs.uploadId) ? 'inline-flex' : 'none';
     } else {
       this.retryButton.style.display = 'none';
       this.progressEl.style.display = 'none';
@@ -608,6 +610,7 @@ class LashImageNodeView implements NodeView {
         this.imageEl.src = attrs.src;
       }
     }
+    if (status !== 'idle' || !attrs.src) this.imageEl.removeAttribute('src');
 
     const alt = attrs.alt ?? '';
     this.imageEl.alt = alt;

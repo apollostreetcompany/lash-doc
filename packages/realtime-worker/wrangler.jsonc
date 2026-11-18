@@ -13,6 +13,10 @@
       {
         "name": "LASH_REALTIME_ROOM",
         "class_name": "LashRealtimeRoom"
+      },
+      {
+        "name": "LASH_DOCUMENT_CLAIM",
+        "class_name": "LashDocumentClaim"
       }
     ]
   },
@@ -20,6 +24,10 @@
     {
       "tag": "v1",
       "new_sqlite_classes": ["LashRealtimeRoom"]
+    },
+    {
+      "tag": "v2",
+      "new_sqlite_classes": ["LashDocumentClaim"]
     }
   ]
 }

@@ -1,26 +1,37 @@
 import { expect, test, type Page } from '@playwright/test';
 
-const ready = async (page: Page) =>
-  page.waitForFunction(() =>
-    Boolean(
-      (
-        window as unknown as {
-          __lashEditor?: unknown;
-          __lashInsertTable?: unknown;
-          __lashSelectTableCells?: unknown;
-          __lashTable?: unknown;
-        }
-      ).__lashEditor,
-    ),
-  );
+interface TableTestNode {
+  type: string;
+  attrs?: { cellType?: string; value?: string };
+  content?: TableTestNode[];
+}
+
+const ready = async (page: Page) => {
+  await expect(page.getByRole('textbox', { name: 'Document editor' })).toBeEditable();
+  await page.waitForFunction(() => {
+    const win = window as Window & {
+      __lashEditor?: unknown;
+      __lashInsertTable?: unknown;
+      __lashSelectTableCells?: unknown;
+      __lashTable?: { setCellType?: unknown; setCellValue?: unknown };
+    };
+    return (
+      win.__lashEditor &&
+      typeof win.__lashInsertTable === 'function' &&
+      typeof win.__lashSelectTableCells === 'function' &&
+      typeof win.__lashTable?.setCellType === 'function' &&
+      typeof win.__lashTable.setCellValue === 'function'
+    );
+  });
+};
 
 test('table-perf-100x20', async ({ page }) => {
-  await page.goto('/');
+  await page.goto('/doc/table-performance');
   await ready(page);
 
   const metrics = await page.evaluate(async () => {
     const win = window as unknown as {
-      __lashEditor?: { state: { doc: { toJSON: () => any } } };
+      __lashEditor?: { state: { doc: { toJSON: () => TableTestNode } } };
       __lashInsertTable?: (rows?: number, cols?: number) => void;
       __lashSelectTableCells?: (
         anchorRow: number,
@@ -40,14 +51,12 @@ test('table-perf-100x20', async ({ page }) => {
     await nextFrame();
     const insertMs = performance.now() - insertStart;
 
-    const wrapper = document.querySelector<HTMLElement>('.lash-editor-content-wrapper');
+    const scroller = document.querySelector<HTMLTableElement>('.ProseMirror table');
     const scrollStart = performance.now();
-    if (wrapper) {
-      wrapper.scrollLeft = wrapper.scrollWidth;
-      wrapper.scrollTop = wrapper.scrollHeight;
-    }
+    if (scroller) scroller.scrollLeft = scroller.scrollWidth - scroller.clientWidth;
     await nextFrame();
     const scrollMs = performance.now() - scrollStart;
+    const scrollLeft = scroller?.scrollLeft ?? 0;
 
     const selectStart = performance.now();
     const selected = win.__lashSelectTableCells?.(99, 19) ?? false;
@@ -65,16 +74,15 @@ test('table-perf-100x20', async ({ page }) => {
     const commitFrameMs = performance.now() - commitFrameStart;
 
     const doc = win.__lashEditor?.state.doc.toJSON();
-    const table = doc?.content?.find((node: { type: string }) => node.type === 'table');
+    const table = doc?.content?.find((node) => node.type === 'table');
     const rows = table?.content?.length ?? 0;
-    const cells = table?.content?.reduce(
-      (count: number, row: { content?: unknown[] }) => count + (row.content?.length ?? 0),
-      0,
-    );
+    const cells = table?.content?.reduce((count, row) => count + (row.content?.length ?? 0), 0);
+    const committedCell = table?.content?.[99]?.content?.[19]?.attrs;
 
     return {
       insertMs,
       scrollMs,
+      scrollLeft,
       selectDispatchMs,
       selectFrameMs,
       commitDispatchMs,
@@ -84,6 +92,7 @@ test('table-perf-100x20', async ({ page }) => {
       valued,
       rows,
       cells,
+      committedCell,
     };
   });
 
@@ -94,7 +103,9 @@ test('table-perf-100x20', async ({ page }) => {
   expect(metrics.selected).toBe(true);
   expect(metrics.typed).toBe(true);
   expect(metrics.valued).toBe(true);
+  expect(metrics.committedCell).toMatchObject({ cellType: 'status', value: 'Done' });
   expect(metrics.insertMs).toBeLessThan(2_500);
+  expect(metrics.scrollLeft).toBeGreaterThan(0);
   expect(metrics.scrollMs).toBeLessThan(120);
   expect(metrics.selectDispatchMs).toBeLessThan(50);
   // Dispatch is the product latency budget. Frame settling is still bounded,

@@ -24,6 +24,7 @@ const ready = async (page: Page) =>
   );
 
 const loadSectionAlpha = async (page: Page): Promise<TestOutlineItem> => {
+  await expect(page.locator('[data-body-mutation-locked="false"]')).toBeVisible();
   await page.evaluate((html) => {
     const editor = (window as unknown as { __lashEditor: import('@tiptap/core').Editor })
       .__lashEditor;
@@ -50,6 +51,7 @@ test.describe('sidebar regression', () => {
   test('keeps document outline reachable with collapsed desktop sidebar and focuses clicked heading', async ({
     page,
   }) => {
+    await page.setViewportSize({ width: 1024, height: 768 });
     await page.goto('/');
     await ready(page);
     const section = await loadSectionAlpha(page);
@@ -58,9 +60,12 @@ test.describe('sidebar regression', () => {
 
     const outlineAccess = page.getByTestId('sidebar-outline-access');
     await expect(outlineAccess).toBeVisible();
-    await expect(page.getByTestId('lash-document-outline')).toBeVisible();
+    await expect(page.getByTestId('lash-document-outline')).toBeHidden();
+    await outlineAccess.click();
+    await expect(page.locator('.lash-app')).toHaveAttribute('data-sidebar-collapsed', 'false');
+    await expect(page.getByTestId('lash-sidebar-outline-panel')).toBeVisible();
 
-    const jump = page.getByTestId(`outline-jump-${section.headingId}`);
+    const jump = page.getByTestId(`sidebar-outline-jump-${section.headingId}`);
     await expect(jump).toBeVisible();
     await jump.click();
 
@@ -73,9 +78,6 @@ test.describe('sidebar regression', () => {
         }),
       )
       .toBe(section.from);
-
-    await outlineAccess.click();
-    await expect(page.locator('.lash-app')).toHaveAttribute('data-sidebar-collapsed', 'false');
   });
 
   test('mobile drawer closes from its visible close button and restores focus', async ({

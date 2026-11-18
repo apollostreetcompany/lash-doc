@@ -9,8 +9,13 @@ test('blame-filter', async ({ page }) => {
   await page.getByTestId('lash-editor-content').click();
   await page.keyboard.type('Filter attribution');
 
-  await expect(page.getByTestId('history-version').first()).toBeVisible();
-  await page.getByTestId('blame-line').first().click();
+  await page.getByTestId('topbar-discussion-button').click();
+  await page.getByTestId('rail-tab-history').click();
+  await page.getByTestId('history-authorship-toggle').click();
+
+  const blameLine = page.getByTestId('blame-line').first();
+  await expect(blameLine).toContainText('local-user');
+  await blameLine.click();
   await expect(page.getByTestId('history-filter-author')).toContainText('local-user');
   await expect(page.getByTestId('history-filtered-counts')).toContainText(/matching versions?/);
   await expect(page.getByTestId('history-version').first()).toBeVisible();
