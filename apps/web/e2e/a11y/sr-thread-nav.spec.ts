@@ -32,10 +32,17 @@ test('sr-thread-nav', async ({ page }) => {
     });
 
   const wordModifier = process.platform === 'darwin' ? 'Alt' : 'Control';
-  await editor.click();
-  await editor.press('End');
-  await editor.press(`${wordModifier}+ArrowLeft`);
-  await editor.press('ArrowLeft');
+  await editor.scrollIntoViewIfNeeded();
+  const caret = await editor.evaluate((element, offset) => {
+    const text = element.querySelector('p')?.firstChild;
+    if (!(text instanceof Text)) throw new Error('Expected a plain-text paragraph.');
+    const range = document.createRange();
+    range.setStart(text, offset);
+    range.collapse(true);
+    const { x, y, height } = range.getBoundingClientRect();
+    return { x, y: y + height / 2 };
+  }, prefix.length + target.length);
+  await page.mouse.click(caret.x, caret.y);
   await expect.poll(nativeSelection).toEqual({ prefix: `${prefix}${target}`, text: '' });
   // Select the whole word in one native keyboard action.
   await editor.press(`${wordModifier}+Shift+ArrowLeft`);
