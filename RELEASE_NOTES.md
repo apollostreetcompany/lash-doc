@@ -6,16 +6,22 @@ Lash can take a local draft into a shared document. The owner can invite a named
 editor, co-edit the title and body, review anchored feedback and suggestions,
 restore an earlier version, and revoke the invitation.
 
-- **Write and return.** Documents lists recent drafts on this device and supports
-  title search. Markdown transfer preserves supported rich structure and bounded
-  embedded images. Local history preserves formatting when restoring a version.
+- **Write and return.** The Documents page lists recent drafts on this device
+  and supports title search. Markdown transfer preserves supported rich
+  structure and bounded embedded images. Local history preserves formatting
+  when restoring a version.
   You can type straight into a new bullet and paste at the visible text caret
   after returning from a suggestion.
+- **Recover a local draft.** History records ordinary edits after the browser
+  confirms the draft was saved. If the saved draft and a verified History
+  version disagree, you can keep writing and preview the other version's text.
 - **Invite a reviewer.** Owners can choose **Can comment** for a verified account.
   The reviewer can select a passage, discuss it and suggest wording. The document
   title and body stay read-only for that reviewer. **Show** highlights the
   quoted passage in the document. Editors can accept or reject the suggestion.
   Revoking access also closes an open reviewer session.
+- **Read a shared table.** Public readers see the status and select values the
+  author chose, including custom labels.
 - **Review a change.** Replies and suggestion decisions survive reopening the
   document. Shared History lets both editors compare versions. Owners can
   restore an earlier body as a new version.

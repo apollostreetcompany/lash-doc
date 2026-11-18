@@ -6,7 +6,7 @@
 import { entryHasHistoryBody } from '@lash/history';
 import type { DiffJSON, DiffSpan, HistoryEntry } from '@lash/types';
 import type { Editor } from '@tiptap/core';
-import { useEffect, useState } from 'react';
+import { useEffect, useId, useState } from 'react';
 
 export type HistoryTimeFilter = 'last-7-days' | null;
 export type HistoryAvailabilityState =
@@ -14,6 +14,7 @@ export type HistoryAvailabilityState =
   | 'ready'
   | 'empty-baseline'
   | 'capacity-reached'
+  | 'body-history-diverged'
   | 'body-saving-unavailable'
   | 'recovery-available'
   | 'unavailable'
@@ -29,6 +30,8 @@ type SuggestionResolutionRecord = {
   ts: string;
   actorId: string;
 };
+type SavedHistorySnapshot = { readonly text: string };
+type LoadSavedHistoryPreview = () => Promise<SavedHistorySnapshot | null>;
 
 export interface HistoryPanelProps {
   editor: Editor | null;
@@ -44,6 +47,7 @@ export interface HistoryPanelProps {
   authorshipVisible: boolean;
   open?: boolean;
   restoreNotice?: string;
+  loadSavedHistoryPreview?: LoadSavedHistoryPreview;
   loadDiff: (fromSha: string, toSha: string) => Promise<DiffJSON>;
   onSelect: (entryId: string) => void;
   onRestore: (entry: HistoryEntry) => void;
@@ -133,6 +137,93 @@ const renderSpan = (span: DiffSpan) => {
   );
 };
 
+function SavedHistorySnapshotContent({ load }: { load: LoadSavedHistoryPreview }) {
+  const fieldId = useId();
+  const helpId = useId();
+  const [result, setResult] = useState<{
+    load: LoadSavedHistoryPreview;
+    snapshot: SavedHistorySnapshot | null;
+  } | null>(null);
+  useEffect(() => {
+    let active = true;
+    void load().then(
+      (snapshot) => {
+        if (active) setResult({ load, snapshot });
+      },
+      () => {
+        if (active) setResult({ load, snapshot: null });
+      },
+    );
+    return () => {
+      active = false;
+    };
+  }, [load]);
+
+  if (result?.load !== load) {
+    return (
+      <p className="history-empty" role="status">
+        Checking the saved version…
+      </p>
+    );
+  }
+  if (!result.snapshot) {
+    return (
+      <p className="history-empty" role="status">
+        This saved version is no longer available to preview.
+      </p>
+    );
+  }
+  if (!result.snapshot.text) {
+    return (
+      <p className="history-empty" role="status">
+        This saved version has no plain text.
+      </p>
+    );
+  }
+
+  return (
+    <div className="history-diff-card">
+      <label className="history-diff-meta" htmlFor={fieldId}>
+        Saved version text
+      </label>
+      <p className="history-empty" id={helpId}>
+        This read-only snapshot omits formatting and non-text content. Select and copy the text you
+        need.
+      </p>
+      <textarea
+        aria-describedby={helpId}
+        className="history-diff"
+        id={fieldId}
+        readOnly
+        rows={6}
+        value={result.snapshot.text}
+      />
+    </div>
+  );
+}
+
+function SavedHistoryPreview({ load }: { load: LoadSavedHistoryPreview }) {
+  const previewId = useId();
+  const [expanded, setExpanded] = useState(false);
+
+  return (
+    <>
+      <button
+        type="button"
+        className="history-filter-button"
+        aria-controls={previewId}
+        aria-expanded={expanded}
+        onClick={() => setExpanded((visible) => !visible)}
+      >
+        {expanded ? 'Hide saved version' : 'Preview saved version'}
+      </button>
+      <div id={previewId} hidden={!expanded}>
+        {expanded ? <SavedHistorySnapshotContent load={load} /> : null}
+      </div>
+    </>
+  );
+}
+
 export function HistoryPanel({
   editor,
   entries,
@@ -147,6 +238,7 @@ export function HistoryPanel({
   authorshipVisible,
   open = true,
   restoreNotice,
+  loadSavedHistoryPreview,
   loadDiff,
   onSelect,
   onRestore,
@@ -205,6 +297,15 @@ export function HistoryPanel({
       ) : null}
       {availability === 'body-saving-unavailable' ? (
         <p className="history-empty">Version history is paused while local saving is unavailable.</p>
+      ) : null}
+      {availability === 'body-history-diverged' ? (
+        <p className="history-empty" role="status">
+          Version history is paused because it does not match the saved draft. You can keep editing
+          and saving the draft.
+        </p>
+      ) : null}
+      {availability === 'body-history-diverged' && loadSavedHistoryPreview ? (
+        <SavedHistoryPreview load={loadSavedHistoryPreview} />
       ) : null}
       <div className="history-panel-header">
         <div className="history-panel-header-actions">

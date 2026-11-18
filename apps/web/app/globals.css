@@ -3112,6 +3112,13 @@ li[data-type='taskItem'] > div p {
   overflow-y: auto;
 }
 
+textarea.history-diff {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  resize: vertical;
+  border: 1px solid var(--color-border);
+}
+
 .history-diff-insert {
   color: var(--color-success);
   background: var(--color-success-bg);

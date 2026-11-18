@@ -41,7 +41,13 @@ import {
   type EditPatch,
   type HistoryEntry,
 } from '@lash/types';
-import { Extension, type Editor, type EditorEvents } from '@tiptap/core';
+import {
+  Extension,
+  getTextBetween,
+  getTextSerializersFromSchema,
+  type Editor,
+  type EditorEvents,
+} from '@tiptap/core';
 import type { Node as EditorNode } from '@tiptap/pm/model';
 import { Plugin, PluginKey, Selection } from '@tiptap/pm/state';
 import { EditorContent, useEditor, useEditorState } from '@tiptap/react';
@@ -747,6 +753,7 @@ function ResolvedDocumentWorkspace({
   const [historyEntries, setHistoryEntries] = useState<HistoryEntry[]>([]);
   const [historyAvailability, setHistoryAvailability] =
     useState<HistoryAvailabilityState>('loading');
+  const [divergentHistoryHead, setDivergentHistoryHead] = useState<string | null>(null);
   const [selectedHistoryEntryId, setSelectedHistoryEntryId] = useState<string | null>(null);
   const [historyAuthorFilter, setHistoryAuthorFilter] = useState<string | null>(null);
   const [historyTimeFilter, setHistoryTimeFilter] = useState<HistoryTimeFilter>(null);
@@ -795,6 +802,7 @@ function ResolvedDocumentWorkspace({
   const historyCapacityReachedRef = useRef(false);
   const historyQueueRef = useRef<Promise<unknown>>(Promise.resolve());
   const historyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const recordSavedLocalHistoryRef = useRef<((saved: LocalBodyEnvelope) => void) | null>(null);
   const applyingHistoryRef = useRef(false);
   const restoringLocalHistoryRef = useRef(false);
   const [historyRestoreNotice, setHistoryRestoreNotice] = useState('');
@@ -869,6 +877,7 @@ function ResolvedDocumentWorkspace({
   >('loading');
   const [localBodyNotice, setLocalBodyNotice] = useState<LocalBodyNotice | null>(null);
   const localBodyExpectedRef = useRef<LocalBodyExpectedRevision | null>(null);
+  const divergentHistoryMarkerRef = useRef<LocalBodyEnvelope['divergentHistoryHead']>(undefined);
   const recoveredLocalBodyRef = useRef<{
     envelope: LocalBodyEnvelope;
     recoveryToken: Readonly<LocalBodyRecoveryToken>;
@@ -886,7 +895,8 @@ function ResolvedDocumentWorkspace({
     !localBodySavingUnavailable &&
     historyAvailability !== 'ready' &&
     historyAvailability !== 'empty-baseline' &&
-    historyAvailability !== 'capacity-reached';
+    historyAvailability !== 'capacity-reached' &&
+    historyAvailability !== 'body-history-diverged';
   const documentMutationLocked =
     localBodyMutationLocked || localHistoryMutationLocked || !canEditDocument;
   const runDocumentMetadataMutation = useCallback(
@@ -1384,6 +1394,7 @@ function ResolvedDocumentWorkspace({
     if (!editor || hydratedLocalEditorRef.current === editor) return;
     hydratedLocalEditorRef.current = editor;
     localBodyExpectedRef.current = null;
+    divergentHistoryMarkerRef.current = undefined;
     localSuggestionsRef.current = [];
     setLocalSuggestions([]);
     recoveredLocalBodyRef.current = null;
@@ -1424,6 +1435,7 @@ function ResolvedDocumentWorkspace({
         localSuggestionsRef.current = result.envelope.suggestions ?? [];
         setLocalSuggestions(localSuggestionsRef.current);
         localBodyExpectedRef.current = result.expected;
+        divergentHistoryMarkerRef.current = result.envelope.divergentHistoryHead;
         setLocalBodyState('ready');
         return;
       }
@@ -1606,6 +1618,7 @@ function ResolvedDocumentWorkspace({
   }, [editor, localBodyConsumersReady]);
 
   useEffect(() => {
+    setDivergentHistoryHead(null);
     if (!editor || !localBodyConsumersReady) {
       setHistoryEntries([]);
       setHistoryAvailability('loading');
@@ -1620,9 +1633,14 @@ function ResolvedDocumentWorkspace({
     }
 
     let disposed = false;
-    let listenerAttached = false;
     setHistoryEntries([]);
-    setHistoryAvailability(realtimeEnabled ? 'remote-disabled' : localBodySavingUnavailable ? 'body-saving-unavailable' : 'loading');
+    setHistoryAvailability(
+      realtimeEnabled
+        ? 'remote-disabled'
+        : localBodySavingUnavailable
+          ? 'body-saving-unavailable'
+          : 'loading',
+    );
     setSelectedHistoryEntryId(null);
     setAcceptedSuggestionIds(acceptedIdsFromResolutions(suggestionResolutionsRef.current));
     setBlameLines([]);
@@ -1640,10 +1658,11 @@ function ResolvedDocumentWorkspace({
       };
     }
 
-    const recordHistory = (event?: EditorEvents['transaction']) => {
+    const recordHistory = (saved: LocalBodyEnvelope) => {
       if (
-        (event && !event.transaction.docChanged) ||
-        applyingHistoryRef.current ||
+        saved.documentId !== activeDocumentId ||
+        saved.divergentHistoryHead !== undefined ||
+        restoringLocalHistoryRef.current ||
         historyCapacityReachedRef.current
       )
         return;
@@ -1662,10 +1681,39 @@ function ResolvedDocumentWorkspace({
             console.warn('[lash] history queue recovered from error:', err);
           })
           .then(async () => {
-            if (disposed || !mutationAuthority.allowsBodyMutation(ticket)) return;
-            const doc = editor.state.doc;
+            if (disposed || editor.isDestroyed || !mutationAuthority.allowsBodyMutation(ticket))
+              return;
+            // The body writer verified these exact JSON bytes before handing over this receipt.
+            const expectedRaw = JSON.stringify(saved);
+            const bodyKey = localDocumentBodyKey(activeDocumentId);
+            const canCommit = () => {
+              const expected = localBodyExpectedRef.current;
+              if (
+                disposed ||
+                editor.isDestroyed ||
+                !mutationAuthority.allowsBodyMutation(ticket) ||
+                expected?.revision !== saved.revision ||
+                expected.writeId !== saved.writeId
+              ) {
+                return false;
+              }
+              try {
+                return browserLocalStorage()?.getItem(bodyKey) === expectedRaw;
+              } catch {
+                return false;
+              }
+            };
+            if (!canCommit()) return;
+            const doc = editor.schema.nodeFromJSON(saved.doc);
             const before = historyTextRef.current;
-            const after = editorText(editor);
+            const after = getTextBetween(
+              doc,
+              { from: 0, to: doc.content.size },
+              {
+                blockSeparator: '\n',
+                textSerializers: getTextSerializersFromSchema(editor.schema),
+              },
+            );
             const body = captureHistoryBody(doc);
             const expectedParentSha = historyHeadRef.current;
             if (
@@ -1693,9 +1741,7 @@ function ResolvedDocumentWorkspace({
                 intent: 'edit',
                 audit: HISTORY_AUDIT,
               },
-              {
-                commitGuard: () => !disposed && mutationAuthority.allowsBodyMutation(ticket),
-              },
+              { commitGuard: canCommit },
             );
             if (!result.ok) {
               if (result.reason === 'commit-uncertain') {
@@ -1712,7 +1758,7 @@ function ResolvedDocumentWorkspace({
               }
               return;
             }
-            if (!mutationAuthority.allowsBodyMutation(ticket)) return;
+            if (disposed || !mutationAuthority.allowsBodyMutation(ticket)) return;
             historyTextRef.current = after;
             historyBodyRef.current = body;
             commitHistoryHead(result.entry.resultSha);
@@ -1726,13 +1772,69 @@ function ResolvedDocumentWorkspace({
       }, HISTORY_RECORD_DEBOUNCE_MS);
     };
 
-    const initialBody = captureHistoryBody(editor.state.doc);
+    const document = editor.state.doc;
+    const currentBody = captureHistoryBody(document);
+    const liveText = editorText(editor);
+    const expectedBody = localBodyExpectedRef.current;
+    const ticket = mutationAuthority.capture();
+    const readVerifiedCurrentBody = () => {
+      const storage = browserLocalStorage();
+      if (
+        disposed ||
+        editor.isDestroyed ||
+        editor.state.doc !== document ||
+        !storage ||
+        !expectedBody ||
+        !mutationAuthority.allowsBodyMutation(ticket)
+      ) {
+        return null;
+      }
+      const persisted = loadLocalDocumentBody({
+        storage,
+        documentId: activeDocumentId,
+        validateSchema: validateLocalBodySchema,
+      });
+      return persisted.state === 'ready' &&
+        persisted.expected.revision === expectedBody.revision &&
+        persisted.expected.writeId === expectedBody.writeId &&
+        canonicalize(persisted.envelope.doc) === canonicalize(currentBody)
+        ? persisted.envelope
+        : null;
+    };
+    const historyStore = historyStoreRef.current;
+    const existingDivergence = divergentHistoryMarkerRef.current;
+    if (existingDivergence !== undefined) {
+      const verified = readVerifiedCurrentBody();
+      setHistoryAvailability(verified ? 'body-history-diverged' : 'corrupt');
+      if (verified && existingDivergence !== null) {
+        // A delayed or failed History read cannot lock a verified saved draft.
+        void historyStore
+          .hydrate(historyDocumentId)
+          .then((hydration) => {
+            if (
+              !disposed &&
+              mutationAuthority.allowsBodyMutation(ticket) &&
+              hydration.state === 'ready' &&
+              hydration.head === existingDivergence
+            ) {
+              setDivergentHistoryHead(existingDivergence);
+            }
+          })
+          .catch(() => {
+            // Leave the preview unavailable.
+          });
+      }
+      return () => {
+        disposed = true;
+      };
+    }
+
     const initialHistory: HistoryDocumentState = {
       type: 'doc',
-      text: editorText(editor),
-      body: initialBody,
+      text: liveText,
+      body: currentBody,
     };
-    void historyStoreRef.current
+    void historyStore
       .hydrate(historyDocumentId, initialHistory)
       .then(async (hydration) => {
         if (disposed) return;
@@ -1741,7 +1843,6 @@ function ResolvedDocumentWorkspace({
           return;
         }
 
-        const historyStore = historyStoreRef.current;
         let entries = await historyStore.list(historyDocumentId);
         let headDocument = (await historyStore.loadAt(
           historyDocumentId,
@@ -1750,43 +1851,24 @@ function ResolvedDocumentWorkspace({
         let head = hydration.head;
         if (disposed) return;
         let capacityReached = false;
-        const currentBody = captureHistoryBody(editor.state.doc);
-        const liveText = editorText(editor);
         const bodyDiffersFromHistory =
           headDocument.text !== liveText ||
           (headDocument.body && canonicalize(headDocument.body) !== canonicalize(currentBody));
         if (bodyDiffersFromHistory) {
-          const storage = browserLocalStorage();
-          const expectedBody = localBodyExpectedRef.current;
           const historicalTimestamp = entries.at(-1)?.ts;
-          const ticket = mutationAuthority.capture();
-          const document = editor.state.doc;
-          const currentBodyIsDurableAndNewer = () => {
-            if (
-              disposed ||
-              editor.isDestroyed ||
-              editor.state.doc !== document ||
-              !storage ||
-              !expectedBody ||
-              !historicalTimestamp ||
-              !mutationAuthority.allowsBodyMutation(ticket)
-            )
-              return false;
-            const persisted = loadLocalDocumentBody({
-              storage,
-              documentId: activeDocumentId,
-              validateSchema: validateLocalBodySchema,
-            });
-            return (
-              persisted.state === 'ready' &&
-              persisted.expected.revision === expectedBody.revision &&
-              persisted.expected.writeId === expectedBody.writeId &&
-              Date.parse(persisted.envelope.savedAt) > Date.parse(historicalTimestamp) &&
-              canonicalize(persisted.envelope.doc) === canonicalize(currentBody)
-            );
-          };
-          if (!currentBodyIsDurableAndNewer()) {
+          const isNewerThanHistory = (verified: LocalBodyEnvelope | null) =>
+            verified !== null &&
+            historicalTimestamp !== undefined &&
+            Date.parse(verified.savedAt) > Date.parse(historicalTimestamp);
+          const verified = readVerifiedCurrentBody();
+          if (!verified) {
             setHistoryAvailability('corrupt');
+            return;
+          }
+          if (!isNewerThanHistory(verified)) {
+            divergentHistoryMarkerRef.current = head;
+            if (entries.length) setDivergentHistoryHead(head);
+            setHistoryAvailability('body-history-diverged');
             return;
           }
           const repaired: HistoryDocumentState = { type: 'doc', text: liveText, body: currentBody };
@@ -1800,7 +1882,7 @@ function ResolvedDocumentWorkspace({
               intent: 'edit',
               audit: HISTORY_AUDIT,
             },
-            { commitGuard: currentBodyIsDurableAndNewer },
+            { commitGuard: () => isNewerThanHistory(readVerifiedCurrentBody()) },
           );
           if (disposed || !mutationAuthority.allowsBodyMutation(ticket)) return;
           if (!result.ok && result.reason !== 'history-capacity') {
@@ -1828,8 +1910,7 @@ function ResolvedDocumentWorkspace({
         setHistoryAvailability(
           capacityReached ? 'capacity-reached' : entries.length > 0 ? 'ready' : 'empty-baseline',
         );
-        editor.on('transaction', recordHistory);
-        listenerAttached = true;
+        recordSavedLocalHistoryRef.current = recordHistory;
       })
       .catch(() => {
         if (!disposed) {
@@ -1843,8 +1924,8 @@ function ResolvedDocumentWorkspace({
         clearTimeout(historyTimerRef.current);
         historyTimerRef.current = null;
       }
-      if (listenerAttached) {
-        editor.off('transaction', recordHistory);
+      if (recordSavedLocalHistoryRef.current === recordHistory) {
+        recordSavedLocalHistoryRef.current = null;
       }
     };
   }, [
@@ -1857,6 +1938,31 @@ function ResolvedDocumentWorkspace({
     mutationAuthority,
     realtimeEnabled,
     validateLocalBodySchema,
+  ]);
+
+  const loadSavedHistoryPreview = useCallback(async () => {
+    if (!divergentHistoryHead || realtimeEnabled) return null;
+    const ticket = mutationAuthority.capture();
+    const canRead = () =>
+      ticket.routeDocumentId === activeDocumentId && mutationAuthority.allowsBodyMutation(ticket);
+    if (!canRead()) return null;
+    // Use a fresh validated persisted read rather than the mounted History cache.
+    const history = createHistoryStore({ persistence: createLocalDocumentHistoryPersistence() });
+    const hydration = await history.hydrate(historyDocumentId);
+    if (hydration.state !== 'ready' || hydration.head !== divergentHistoryHead || !canRead()) {
+      return null;
+    }
+    const version = (await history.loadAt(
+      historyDocumentId,
+      divergentHistoryHead,
+    )) as HistoryDocumentState;
+    return canRead() ? { text: version.text } : null;
+  }, [
+    activeDocumentId,
+    divergentHistoryHead,
+    historyDocumentId,
+    mutationAuthority,
+    realtimeEnabled,
   ]);
 
   useEffect(() => {
@@ -2966,10 +3072,12 @@ function ResolvedDocumentWorkspace({
       documentId: activeDocumentId,
       doc: projectDocumentHeadingIds(doc).toJSON() as LocalBodyDocJson,
       suggestions: next,
+      divergentHistoryHead: divergentHistoryMarkerRef.current,
       expected: localBodyExpectedRef.current,
       validateSchema: validateLocalBodySchema,
     });
     localBodyExpectedRef.current = localBodyExpectedRevision(envelope);
+    recordSavedLocalHistoryRef.current?.(envelope);
     localSuggestionsRef.current = next;
     setLocalSuggestions(next);
     setLocalBodyNotice(null);
@@ -3422,6 +3530,13 @@ function ResolvedDocumentWorkspace({
           legacySuggestionError={legacySuggestionError}
           restoreNotice={historyRestoreNotice}
           loadDiff={loadHistoryDiff}
+          loadSavedHistoryPreview={
+            !realtimeEnabled &&
+            historyAvailability === 'body-history-diverged' &&
+            divergentHistoryHead
+              ? loadSavedHistoryPreview
+              : undefined
+          }
           availability={historyAvailability}
           canRestore={
             !realtimeEnabled &&
@@ -3873,9 +3988,11 @@ function ResolvedDocumentWorkspace({
           expected: localBodyExpectedRef.current,
           savedAt,
           suggestions: localSuggestionsRef.current,
+          divergentHistoryHead: divergentHistoryMarkerRef.current,
           validateSchema: validateLocalBodySchema,
         });
         localBodyExpectedRef.current = localBodyExpectedRevision(envelope);
+        recordSavedLocalHistoryRef.current?.(envelope);
         setDocuments(
           upsertDocument(storage, {
             id: activeDocumentId,
@@ -3922,6 +4039,7 @@ function ResolvedDocumentWorkspace({
         validateSchema: validateLocalBodySchema,
       });
       localBodyExpectedRef.current = localBodyExpectedRevision(promoted);
+      divergentHistoryMarkerRef.current = promoted.divergentHistoryHead;
       recoveredLocalBodyRef.current = null;
       localBodyMutationsAllowedRef.current = true;
       if (canEditDocument) localRecoveryFocusDocumentRef.current = activeDocumentId;

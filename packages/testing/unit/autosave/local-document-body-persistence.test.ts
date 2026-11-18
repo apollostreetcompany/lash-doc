@@ -128,6 +128,96 @@ const envelope = (
 });
 
 describe('local document body persistence', () => {
+  it('commits divergence with the body and carries it through later saves and backup recovery', () => {
+    const storage = new MemoryStorage();
+    const documentId = 'history-divergence';
+    const primary = localDocumentBodyKey(documentId);
+    const backup = localDocumentBodyBackupKey(documentId);
+    const options = { storage, documentId, validateSchema };
+    const head = 'a'.repeat(64);
+    const initial = saveLocalDocumentBody({
+      ...options,
+      doc: paragraphDoc('Verified'),
+      expected: null,
+    });
+    const initialRaw = storage.getItem(primary);
+    expect(initial).not.toHaveProperty('divergentHistoryHead');
+
+    storage.failures.set(primary, new DOMException('Test quota', 'QuotaExceededError'));
+    expect(() =>
+      saveLocalDocumentBody({
+        ...options,
+        doc: paragraphDoc('Rejected'),
+        expected: initial,
+        divergentHistoryHead: head,
+      }),
+    ).toThrow(expect.objectContaining({ code: 'quota' }));
+    expect(storage.getItem(primary)).toBe(initialRaw);
+    storage.failures.delete(primary);
+
+    const paused = saveLocalDocumentBody({
+      ...options,
+      doc: paragraphDoc('Continued from verified body'),
+      expected: initial,
+      divergentHistoryHead: head,
+    });
+    const next = saveLocalDocumentBody({
+      ...options,
+      doc: paragraphDoc('Second continued save'),
+      expected: paused,
+    });
+    expect(next.divergentHistoryHead).toBe(head);
+    expect(loadLocalDocumentBody(options)).toMatchObject({
+      state: 'ready',
+      envelope: { divergentHistoryHead: head, doc: paragraphDoc('Second continued save') },
+    });
+
+    const backupRaw = storage.getItem(backup);
+    storage.setItem(primary, '{invalid');
+    const recovery = loadLocalDocumentBody(options);
+    if (recovery.state !== 'recovered-awaiting-confirmation')
+      throw new Error('Missing backup fixture');
+    const promoted = promoteRecoveredLocalDocumentBody({
+      ...options,
+      recovered: recovery.envelope,
+      recoveryToken: recovery.recoveryToken,
+    });
+    expect(promoted).toMatchObject({
+      divergentHistoryHead: head,
+      doc: paragraphDoc('Continued from verified body'),
+    });
+    expect(storage.getItem(backup)).toBe(backupRaw);
+  });
+
+  it.each(['invalid-head', { head: 'b'.repeat(64) }, null])(
+    'keeps a verified body when divergence metadata is invalid or unresolved',
+    (marker) => {
+      const storage = new MemoryStorage();
+      const documentId = 'history-unresolved';
+      const key = localDocumentBodyKey(documentId);
+      const options = { storage, documentId, validateSchema };
+      const first = saveLocalDocumentBody({
+        ...options,
+        doc: paragraphDoc('Readable'),
+        expected: null,
+      });
+      const raw = JSON.stringify({ ...first, divergentHistoryHead: marker });
+      storage.setItem(key, raw);
+      const loaded = loadLocalDocumentBody(options);
+      expect(loaded).toMatchObject({
+        state: 'ready',
+        envelope: { divergentHistoryHead: null, doc: paragraphDoc('Readable') },
+      });
+      expect(storage.getItem(key)).toBe(raw);
+      const saved = saveLocalDocumentBody({
+        ...options,
+        doc: paragraphDoc('Still writable'),
+        expected: first,
+      });
+      expect(saved.divergentHistoryHead).toBeNull();
+    },
+  );
+
   it('round-trips a versioned primary under the normalized document id', () => {
     const storage = new MemoryStorage();
     const saved = saveLocalDocumentBody({

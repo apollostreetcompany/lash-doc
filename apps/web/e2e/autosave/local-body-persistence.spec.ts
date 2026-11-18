@@ -75,6 +75,24 @@ const editorText = (page: Page) =>
     () => (window as LashTestWindow).__lashEditor?.getText({ blockSeparator: '\n' }) ?? '',
   );
 
+const readLocalHistoryPrimary = (page: Page, documentId: string) =>
+  page.evaluate(async (id) => {
+    const request = indexedDB.open('lash-history');
+    const database = await new Promise<IDBDatabase>((resolve, reject) => {
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+    try {
+      return await new Promise<string | null>((resolve, reject) => {
+        const row = database.transaction('primary').objectStore('primary').get(id);
+        row.onsuccess = () => resolve(row.result?.raw ?? null);
+        row.onerror = () => reject(row.error);
+      });
+    } finally {
+      database.close();
+    }
+  }, documentId);
+
 const typeIntoEditor = async (page: Page, text: string) => {
   await page.locator('.ProseMirror').click();
   await page.keyboard.type(text);
@@ -581,15 +599,26 @@ test.describe('local document body persistence', () => {
     ).toEqual({ primary: '{"primary":', backup: '{"backup":' });
   });
 
-  test('shows Save failed and preserves the last verified primary on quota failure', async ({ page }, testInfo) => {
+  test('shows Save failed and preserves the last verified primary on quota failure', async ({
+    page,
+  }, testInfo) => {
     const documentId = 'local-body-quota';
     await clearBodyState(page, [documentId]);
     await page.goto(route(documentId));
-    await waitForEditor(page);
-    await typeIntoEditor(page, 'Verified before quota');
+    const editor = page.getByRole('textbox', { name: 'Document editor' });
+    const appendText = async (text: string) => {
+      await editor.click();
+      await page.keyboard.press('End');
+      await page.keyboard.insertText(text);
+      await expect(editor).toContainText(text.trim());
+    };
+    await expect(editor).toHaveAttribute('contenteditable', 'true');
+    await appendText('Verified before quota');
     await waitForSaved(page);
-    await typeIntoEditor(page, ' and rotated backup');
+    await appendText(' and rotated backup');
     await waitForSaved(page);
+    await expect.poll(() => readLocalHistoryPrimary(page, documentId)).toContain('rotated backup');
+    const verifiedHistory = await readLocalHistoryPrimary(page, documentId);
     const verifiedSlots = await page.evaluate(
       (id) => ({
         primary: window.localStorage.getItem(`lash:body:${id}`),
@@ -612,9 +641,8 @@ test.describe('local document body persistence', () => {
         }
         return originalSetItem.call(this, key, value);
       };
-      delete (window as LashTestWindow & { __lashLastSave?: unknown }).__lashLastSave;
     });
-    await typeIntoEditor(page, ' plus unsaved quota text');
+    await appendText(' plus unsaved quota text');
 
     await expect(page.getByTestId('autosave-indicator')).toHaveAttribute('data-status', 'error', {
       timeout: 2_500,
@@ -636,16 +664,8 @@ test.describe('local document body persistence', () => {
         documentId,
       ),
     ).toEqual(verifiedSlots);
-    expect(
-      await page.evaluate(
-        () => (window as LashTestWindow & { __lashLastSave?: unknown }).__lashLastSave ?? null,
-      ),
-    ).toBeNull();
-    await page.evaluate(() => {
-      const editor = (window as LashTestWindow).__lashEditor;
-      if (!editor) throw new Error('Lash editor test hook is unavailable');
-      editor.commands.focus('start');
-    });
+    await editor.focus();
+    await page.keyboard.press('Home');
     expect(await page.getByTestId('autosave-indicator').getAttribute('data-status')).toBe('error');
     await page.waitForTimeout(700);
     expect(
@@ -695,6 +715,201 @@ test.describe('local document body persistence', () => {
       path: testInfo.outputPath('save-failed.png'),
       fullPage: true,
     });
+    // History used to wait independently of the storage acknowledgement.
+    await page.waitForTimeout(1_900);
+    expect(await readLocalHistoryPrimary(page, documentId)).toBe(verifiedHistory);
+
+    await page.reload();
+    await expect(editor).toHaveText('Verified before quota and rotated backup');
+    await expect(editor).toHaveAttribute('contenteditable', 'true');
+    await appendText(' and saved after reload');
+    await waitForSaved(page);
+    await expect
+      .poll(() => readLocalHistoryPrimary(page, documentId))
+      .toContain('saved after reload');
+    expect(await readLocalHistoryPrimary(page, documentId)).not.toContain('unsaved quota text');
+  });
+
+  test('records History after a failed first save only when a later save verifies', async ({
+    page,
+  }) => {
+    const documentId = 'local-history-first-save-retry';
+    await clearBodyState(page, [documentId]);
+    await page.goto(route(documentId));
+    const editor = page.getByRole('textbox', { name: 'Document editor' });
+    await expect(editor).toHaveAttribute('contenteditable', 'true');
+    await page.evaluate((id) => {
+      const write = Storage.prototype.setItem;
+      Storage.prototype.setItem = function (key, value) {
+        if (key === `lash:body:${id}`)
+          throw new DOMException('Forced quota failure', 'QuotaExceededError');
+        write.call(this, key, value);
+      };
+      (window as LashTestWindow).__lashRestoreBodySetItem = () => {
+        Storage.prototype.setItem = write;
+      };
+    }, documentId);
+
+    await editor.click();
+    await page.keyboard.insertText('First attempt');
+    await expect(page.getByTestId('autosave-indicator')).toHaveAttribute('data-status', 'error');
+    await page.waitForTimeout(1_900);
+    expect(await readLocalHistoryPrimary(page, documentId)).toBeNull();
+    await page.evaluate(() => (window as LashTestWindow).__lashRestoreBodySetItem?.());
+    await page.keyboard.press('End');
+    await page.keyboard.insertText(' saved on retry');
+    await waitForSaved(page);
+    await expect
+      .poll(() => readLocalHistoryPrimary(page, documentId))
+      .toContain('First attempt saved on retry');
+    await page.reload();
+    await expect(editor).toHaveText('First attempt saved on retry');
+    await expect(editor).toHaveAttribute('contenteditable', 'true');
+  });
+
+  test('keeps a verified older body writable and preserves divergent legacy History', async ({
+    page,
+  }) => {
+    const documentId = 'local-history-legacy-divergence';
+    await clearBodyState(page, [documentId]);
+    await page.goto(route(documentId));
+    const editor = page.getByRole('textbox', { name: 'Document editor' });
+    await expect(editor).toHaveAttribute('contenteditable', 'true');
+    await editor.click();
+    await page.keyboard.insertText('Last verified draft');
+    await waitForSaved(page);
+    await expect
+      .poll(() => readLocalHistoryPrimary(page, documentId))
+      .toContain('Last verified draft');
+    const olderHistory = await readLocalHistoryPrimary(page, documentId);
+    const verifiedPrimary = await page.evaluate(
+      (id) => localStorage.getItem(`lash:body:${id}`),
+      documentId,
+    );
+    if (!verifiedPrimary || !olderHistory) throw new Error('Missing verified fixture');
+
+    await page.keyboard.press('End');
+    await page.keyboard.insertText(' with divergent history');
+    await waitForSaved(page);
+    await expect
+      .poll(() => readLocalHistoryPrimary(page, documentId))
+      .toContain('with divergent history');
+    const divergentHistory = await readLocalHistoryPrimary(page, documentId);
+    if (!divergentHistory) throw new Error('Missing divergent History fixture');
+    const { head } = JSON.parse(divergentHistory).payload as { head: string };
+    await page.goto('/');
+    // Recreate a pre-fix split state without fabricating format or integrity bytes.
+    await page.evaluate(({ id, raw }) => localStorage.setItem(`lash:body:${id}`, raw), {
+      id: documentId,
+      raw: verifiedPrimary,
+    });
+    await page.goto(route(documentId));
+
+    await expect(editor).toHaveText('Last verified draft');
+    await expect(editor).toHaveAttribute('contenteditable', 'true');
+    await selectDiscussionTab(page, 'history');
+    const history = page.getByRole('tabpanel', { name: 'History' });
+    await expect(history).toContainText(
+      'Version history is paused because it does not match the saved draft.',
+    );
+    await expect(history.getByRole('button', { name: 'Restore', exact: true })).toHaveCount(0);
+    const preview = history.getByRole('button', { name: 'Preview saved version' });
+    const snapshot = history.getByRole('textbox', { name: 'Saved version text' });
+    await preview.focus();
+    await page.keyboard.press('Enter');
+    await expect(snapshot).toHaveValue('Last verified draft with divergent history');
+    await expect(snapshot).toHaveAttribute('readonly', '');
+    expect(await page.evaluate((id) => localStorage.getItem(`lash:body:${id}`), documentId)).toBe(
+      verifiedPrimary,
+    );
+    expect(await readLocalHistoryPrimary(page, documentId)).toBe(divergentHistory);
+
+    await editor.click();
+    await page.keyboard.press('End');
+    await page.keyboard.insertText(' and safely continued');
+    await waitForSaved(page);
+    await page.waitForTimeout(1_900);
+    expect(await readLocalHistoryPrimary(page, documentId)).toBe(divergentHistory);
+    await page.reload();
+    await expect(editor).toHaveText('Last verified draft and safely continued');
+    await expect(editor).toHaveAttribute('contenteditable', 'true');
+    await editor.click();
+    await page.keyboard.press('End');
+    await page.keyboard.insertText(' through one more save');
+    await waitForSaved(page);
+    await page.reload();
+    await expect(editor).toHaveText(
+      'Last verified draft and safely continued through one more save',
+    );
+    await expect(editor).toHaveAttribute('contenteditable', 'true');
+    expect(
+      await page.evaluate(
+        (id) => JSON.parse(localStorage.getItem(`lash:body:${id}`) ?? '{}').divergentHistoryHead,
+        documentId,
+      ),
+    ).toBe(head);
+    expect(await readLocalHistoryPrimary(page, documentId)).toBe(divergentHistory);
+
+    await selectDiscussionTab(page, 'history');
+    await expect(history).toContainText(
+      'Version history is paused because it does not match the saved draft.',
+    );
+    await preview.click();
+    await expect(snapshot).toHaveValue('Last verified draft with divergent history');
+    await history.getByRole('button', { name: 'Hide saved version' }).click();
+    await page.evaluate(
+      async ({ id, raw }) => {
+        const request = indexedDB.open('lash-history');
+        const database = await new Promise<IDBDatabase>((resolve, reject) => {
+          request.onsuccess = () => resolve(request.result);
+          request.onerror = () => reject(request.error);
+        });
+        try {
+          const transaction = database.transaction('primary', 'readwrite');
+          transaction.objectStore('primary').put({ documentId: id, raw });
+          await new Promise<void>((resolve, reject) => {
+            transaction.oncomplete = () => resolve();
+            transaction.onerror = () => reject(transaction.error);
+          });
+        } finally {
+          database.close();
+        }
+      },
+      { id: documentId, raw: olderHistory },
+    );
+    await preview.click();
+    await expect(history).toContainText('This saved version is no longer available to preview.');
+    await expect(snapshot).toHaveCount(0);
+    await expect(editor).toHaveAttribute('contenteditable', 'true');
+
+    await page.addInitScript(() => {
+      const open = IDBFactory.prototype.open;
+      IDBFactory.prototype.open = function (name, version) {
+        // Keep History's open pending. Browser-local body writes still use real storage.
+        return name === 'lash-history'
+          ? (new EventTarget() as unknown as IDBOpenDBRequest)
+          : open.call(this, name, version);
+      };
+    });
+    await page.reload();
+    await expect(editor).toHaveText(
+      'Last verified draft and safely continued through one more save',
+    );
+    await expect(editor).toHaveAttribute('contenteditable', 'true');
+    await selectDiscussionTab(page, 'history');
+    await expect(history).toContainText(
+      'Version history is paused because it does not match the saved draft.',
+    );
+    await expect(preview).toHaveCount(0);
+    await editor.click();
+    await page.keyboard.press('End');
+    await page.keyboard.insertText(' while History is loading');
+    await waitForSaved(page);
+    await page.reload();
+    await expect(editor).toHaveText(
+      'Last verified draft and safely continued through one more save while History is loading',
+    );
+    await expect(editor).toHaveAttribute('contenteditable', 'true');
   });
 
   test('shows a truthful save failure when a failed image retains a blob preview', async ({

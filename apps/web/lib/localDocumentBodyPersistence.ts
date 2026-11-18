@@ -31,6 +31,8 @@ export interface LocalBodyEnvelope {
   savedAt: string;
   doc: LocalBodyDocJson;
   suggestions?: LocalSuggestion[];
+  /** A known divergent History head, or null when its identity could not be verified. */
+  divergentHistoryHead?: string | null;
 }
 
 export interface LocalBodyExpectedRevision {
@@ -107,6 +109,7 @@ export interface LocalBodyPersistenceOptions {
 export interface SaveLocalDocumentBodyOptions extends LocalBodyPersistenceOptions {
   doc: LocalBodyDocJson;
   suggestions?: LocalSuggestion[];
+  divergentHistoryHead?: string | null;
   expected: LocalBodyExpectedRevision | null;
   savedAt?: string;
   now?: () => Date;
@@ -531,6 +534,9 @@ const validateDocument = (doc: unknown, validateSchema: LocalBodySchemaValidator
   return detached;
 };
 
+const normalizeDivergentHistoryHead = (value: unknown) =>
+  typeof value === 'string' && /^[a-f0-9]{64}$/u.test(value) ? value : null;
+
 const parseEnvelope = (
   raw: string,
   requestedDocumentId: string,
@@ -606,6 +612,9 @@ const parseEnvelope = (
     savedAt: value.savedAt,
     doc: validateDocument(value.doc, validateSchema),
     ...(suggestions?.length ? { suggestions } : {}),
+    ...(Object.hasOwn(value, 'divergentHistoryHead')
+      ? { divergentHistoryHead: normalizeDivergentHistoryHead(value.divergentHistoryHead) }
+      : {}),
   };
 };
 
@@ -752,6 +761,10 @@ export const saveLocalDocumentBody = (options: SaveLocalDocumentBodyOptions): Lo
   if (current.error) throw current.error;
   assertExpectedRevision(current.envelope, options.expected);
 
+  const divergentHistoryHead =
+    current.envelope?.divergentHistoryHead === undefined
+      ? options.divergentHistoryHead
+      : current.envelope.divergentHistoryHead;
   const envelope: LocalBodyEnvelope = {
     version: LOCAL_BODY_ENVELOPE_VERSION,
     schemaVersion: LOCAL_BODY_SCHEMA_VERSION,
@@ -761,6 +774,9 @@ export const saveLocalDocumentBody = (options: SaveLocalDocumentBodyOptions): Lo
     savedAt: nextSavedAt(options),
     doc,
     ...(options.suggestions?.length ? { suggestions: options.suggestions } : {}),
+    ...(divergentHistoryHead !== undefined
+      ? { divergentHistoryHead: normalizeDivergentHistoryHead(divergentHistoryHead) }
+      : {}),
   };
   const nextRaw = serializeEnvelope(envelope);
   // Validate generated metadata as an envelope before rotating either slot.
@@ -829,6 +845,9 @@ export const promoteRecoveredLocalDocumentBody = (
     savedAt: nextSavedAt(options),
     doc,
     ...(currentBackup.suggestions ? { suggestions: currentBackup.suggestions } : {}),
+    ...(currentBackup.divergentHistoryHead !== undefined
+      ? { divergentHistoryHead: currentBackup.divergentHistoryHead }
+      : {}),
   };
   const promotedRaw = serializeEnvelope(promoted);
   parseEnvelope(promotedRaw, id, options.validateSchema);
