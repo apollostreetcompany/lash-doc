@@ -387,6 +387,26 @@ describe('account-owner access cutover', () => {
     vi.useRealTimers();
   });
 
+  it('keeps an interrupted owner-session response body or unavailable gateway retryable', async () => {
+    const interrupted = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode('{"ok":true,'));
+        controller.error(new TypeError('Connection reset'));
+      },
+    });
+    for (const response of [
+      new Response(interrupted, { status: 200, headers: { 'content-type': 'application/json' } }),
+      new Response('Gateway unavailable', { status: 503 }),
+    ]) {
+      await expect(requestBrowserOwnerSession({
+        actorId: ACTOR_ID,
+        routeDocumentId: ROUTE_DOCUMENT_ID,
+        signal: new AbortController().signal,
+        fetcher: async () => response,
+      })).resolves.toEqual({ ok: false, reason: 'network-error', retryable: true });
+    }
+  });
+
   it('keeps the committed local projection visible and mutation-frozen until exact owner hydration parity commits', async () => {
     let finishHydration!: () => void;
     const waitForHydration = new Promise<void>((resolve) => {

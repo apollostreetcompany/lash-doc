@@ -34,8 +34,15 @@ const requestNamedEdit = async (
       body: JSON.stringify({ version: 1, ...fields }),
       signal,
     });
-    const body: unknown = response.status === 200 ? await response.json() : null;
-    return { status: response.status, body };
+    const { status } = response;
+    const body: unknown =
+      status === 200 || (operation === 'session' && status === 502)
+        ? await response.json().catch((error: unknown) => {
+            if (error instanceof SyntaxError) return null;
+            throw error;
+          })
+        : null;
+    return { status, body };
   } catch {
     return { status: 503, body: null };
   }
@@ -43,7 +50,9 @@ const requestNamedEdit = async (
 
 export type NamedEditSessionResult =
   | { ok: true; session: NamedEditSession }
-  | { ok: false; retryable: boolean; signInRequired?: true };
+  | { ok: false; retryable: boolean; signInRequired?: true; protocolInvalid?: true };
+
+const invalidSessionResponse = { ok: false, retryable: false, protocolInvalid: true } as const;
 
 export async function requestNamedEditSession(
   roomId: string,
@@ -60,6 +69,17 @@ export async function requestNamedEditSession(
   if (status === 401) return { ok: false, retryable: false, signInRequired: true };
   if (status === 403 || status === 404) return { ok: false, retryable: false };
   if (
+    status === 502 &&
+    isObject(body) &&
+    hasKeys(body, ['ok', 'version', 'error']) &&
+    body.ok === false &&
+    body.version === 1 &&
+    body.error === 'invalid-response'
+  ) {
+    return invalidSessionResponse;
+  }
+  if (status !== 200) return { ok: false, retryable: true };
+  if (
     !isObject(body) ||
     !hasKeys(body, ['ok', 'version', 'session']) ||
     body.ok !== true ||
@@ -69,7 +89,7 @@ export async function requestNamedEditSession(
     typeof body.session.socketUrl !== 'string' ||
     !validNamedEditSocketUrl(body.session.socketUrl, roomId, String(body.session.actorId))
   )
-    return { ok: false, retryable: true };
+    return invalidSessionResponse;
 
   return { ok: true, session: body.session as NamedEditSession };
 }

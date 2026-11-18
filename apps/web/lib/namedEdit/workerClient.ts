@@ -21,7 +21,7 @@ type WorkerResult =
   | { ok: true; kind: 'issue' | 'revoke'; invite: WorkerNamedInvite }
   | { ok: true; kind: 'list'; invites: WorkerNamedInvite[] }
   | { ok: true; kind: 'session'; session: Omit<NamedEditSession, 'socketUrl'> }
-  | { ok: false; status: 400 | 403 | 404 | 409 | 429 | 503 };
+  | { ok: false; status: 400 | 403 | 404 | 409 | 429 | 502 | 503 };
 
 type WorkerRequest = {
   workerOrigin: string;
@@ -43,6 +43,8 @@ const workerInvite = (value: unknown): value is WorkerNamedInvite =>
   isNamedEditStatus(value.status) &&
   isIsoDate(value.expiresAt);
 
+const interruptedBody = Symbol('interrupted named edit response body');
+
 export async function readNamedEditJson(
   request: Request | Response,
   limit: number,
@@ -60,7 +62,9 @@ export async function readNamedEditJson(
   let body = '';
   try {
     while (true) {
-      const { done, value } = await reader.read();
+      const chunk = await reader.read().catch(() => null);
+      if (!chunk) return interruptedBody;
+      const { done, value } = chunk;
       if (done) break;
       bytes += value.byteLength;
       if (bytes > limit) {
@@ -78,14 +82,19 @@ export async function readNamedEditJson(
 }
 
 const parseResult = (data: unknown, status: number, request: WorkerRequest): WorkerResult => {
-  if (!isObject(data) || data.version !== 1) return { ok: false, status: 503 };
+  if (data === interruptedBody) return { ok: false, status: 503 };
+  const invalidResponse = {
+    ok: false,
+    status: status === 200 && request.operation === 'session' ? 502 : 503,
+  } as const;
+  if (!isObject(data) || data.version !== 1) return invalidResponse;
   if (status !== 200 || data.ok !== true) {
     if (
       data.ok !== false ||
       !hasKeys(data, ['ok', 'version', 'error', 'retryable']) ||
       typeof data.retryable !== 'boolean'
     )
-      return { ok: false, status: 503 };
+      return invalidResponse;
     if (
       request.operation === 'session' &&
       status === 503 &&
@@ -94,10 +103,18 @@ const parseResult = (data: unknown, status: number, request: WorkerRequest): Wor
     ) {
       return { ok: false, status: 404 };
     }
+    if (
+      request.operation === 'session' &&
+      data.retryable === false &&
+      ((status === 400 && data.error === 'invalid-request') ||
+        (status === 401 && data.error === 'unauthorized'))
+    ) {
+      return { ok: false, status: 502 };
+    }
     if (status === 403 && data.error === 'forbidden') return { ok: false, status: 403 };
     if (status === 409 && data.error === 'conflict') return { ok: false, status: 409 };
     if (status === 429 && data.error === 'rate-limited') return { ok: false, status: 429 };
-    return { ok: false, status: 503 };
+    return invalidResponse;
   }
   const operation = request.operation;
   if (
@@ -141,7 +158,7 @@ const parseResult = (data: unknown, status: number, request: WorkerRequest): Wor
   ) {
     return { ok: true, kind: operation, invite: data.invite };
   }
-  return { ok: false, status: 503 };
+  return invalidResponse;
 };
 
 export async function callNamedEditWorker(
@@ -183,7 +200,7 @@ export async function callNamedEditWorker(
       signal: AbortSignal.timeout(8000),
     });
     if (response.headers.get('content-type')?.split(';', 1)[0]?.trim() !== 'application/json') {
-      return { ok: false, status: 503 };
+      return parseResult(null, response.status, request);
     }
     return parseResult(await readNamedEditJson(response, 640 * 1024), response.status, request);
   } catch {

@@ -63,8 +63,41 @@ describe('named editor account session', () => {
         requestNamedEditSession(roomId, new AbortController().signal, fetcher),
       ).resolves.toEqual({
         ok: false,
-        retryable: true,
+        retryable: false,
+        protocolInvalid: true,
       });
+    }
+  });
+
+  it('distinguishes an invalid successful response from HTTP or network unavailability', async () => {
+    const request = (fetcher: typeof fetch) =>
+      requestNamedEditSession(roomId, new AbortController().signal, fetcher);
+    for (const fetcher of [
+      async () => new Response('invalid JSON', { status: 200 }),
+      async () => Response.json({
+        ok: false, version: 1, error: 'invalid-response',
+      }, { status: 502 }),
+    ]) {
+      await expect(request(fetcher)).resolves.toEqual({
+        ok: false,
+        retryable: false,
+        protocolInvalid: true,
+      });
+    }
+    for (const fetcher of [
+      async () => new Response('upstream unavailable', { status: 502 }),
+      async () => new Response(new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(new TextEncoder().encode('{"ok":true,'));
+          controller.error(new TypeError('Connection reset'));
+        },
+      }), { status: 200 }),
+      async () => Response.json({ ok: false, version: 1, error: 'temporarily-unavailable' }, {
+        status: 503,
+      }),
+      async () => { throw new TypeError('Network unavailable'); },
+    ]) {
+      await expect(request(fetcher)).resolves.toEqual({ ok: false, retryable: true });
     }
   });
 });

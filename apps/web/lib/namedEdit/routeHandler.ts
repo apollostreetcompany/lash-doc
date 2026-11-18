@@ -52,9 +52,11 @@ const failure = (status: number) =>
             ? 'invalid-request'
             : status === 409
               ? 'conflict'
-              : status === 503 || status === 429
-                ? 'temporarily-unavailable'
-                : 'unavailable',
+              : status === 502
+                ? 'invalid-response'
+                : status === 503 || status === 429
+                  ? 'temporarily-unavailable'
+                  : 'unavailable',
     },
     status,
   );

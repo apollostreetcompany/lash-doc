@@ -1066,7 +1066,7 @@ export class LashRealtimeYjsProvider {
   private socketEpoch = 0;
   private connectionAttempt = 0;
   private suppressAutoReconnect = false;
-  private onlineWakeTarget: Window | null = null;
+  private networkEventTarget: Window | null = null;
   private ownerRefreshController: AbortController | null = null;
   private readonly usedOwnerTickets = new Set<string>();
   private readonly ownerAuthorityCandidate: boolean;
@@ -1243,7 +1243,7 @@ export class LashRealtimeYjsProvider {
     this.abortOwnerRefresh();
     this.clearReconnectTimer();
     this.clearHydrationTimer();
-    this.stopOnlineWake();
+    this.stopBrowserNetworkListeners();
     if (this.localListenerAttached) {
       this.doc.off('update', this.handleLocalUpdate);
       this.localListenerAttached = false;
@@ -1435,6 +1435,7 @@ export class LashRealtimeYjsProvider {
   }
 
   private async refreshAndOpenOwnerSocket(epoch: number) {
+    if (this.lifecycleState !== 'active' || epoch !== this.socketEpoch) return;
     const binding = this.ownerSessionBinding;
     const refresh = this.refreshOwnerSession;
     if (!binding || !refresh) {
@@ -1746,7 +1747,8 @@ export class LashRealtimeYjsProvider {
     this.hasHydratedOnce = true;
     this.connectionAttempt = 0;
     if (firstHydration && this.canRetryOpenAccountSession() && typeof window !== 'undefined') {
-      this.onlineWakeTarget = window;
+      this.networkEventTarget = window;
+      window.addEventListener('offline', this.handleBrowserOffline);
       window.addEventListener('online', this.wakeAfterNetworkRestored);
     }
     if (this.pendingUpdates.size === 0 && this.queuedUpdates.length === 0) {
@@ -1889,13 +1891,24 @@ export class LashRealtimeYjsProvider {
     return this.hasHydratedOnce && this.session !== null && isAccountRealtimeSession(this.session);
   }
 
-  private wakeAfterNetworkRestored = () => {
-    if (!this.suppressAutoReconnect) this.reconnectNow();
+  private handleBrowserOffline = () => {
+    if (this.suppressAutoReconnect) return;
+    this.detachTransientTransport('Browser went offline');
+    this.handleTransientSocketFailure(this.socketEpoch);
   };
 
-  private stopOnlineWake() {
-    this.onlineWakeTarget?.removeEventListener('online', this.wakeAfterNetworkRestored);
-    this.onlineWakeTarget = null;
+  private wakeAfterNetworkRestored = () => {
+    if (this.suppressAutoReconnect || this.hydrated) return;
+    if (this.socket || this.ownerRefreshController) {
+      this.detachTransientTransport('Browser network restored');
+    }
+    this.reconnectNow();
+  };
+
+  private stopBrowserNetworkListeners() {
+    this.networkEventTarget?.removeEventListener('offline', this.handleBrowserOffline);
+    this.networkEventTarget?.removeEventListener('online', this.wakeAfterNetworkRestored);
+    this.networkEventTarget = null;
   }
 
   private scheduleReconnect(delayMs: number) {
@@ -1922,18 +1935,7 @@ export class LashRealtimeYjsProvider {
 
   private expireTransportAttempt(epoch: number) {
     if (this.destroyed || this.lifecycleState !== 'active' || epoch !== this.socketEpoch) return;
-    this.socketEpoch += 1;
-    this.abortOwnerRefresh();
-    this.clearHydrationTimer();
-    this.clearReconnectTimer();
-    const socket = this.socket;
-    this.detachSocket(socket);
-    this.socket = null;
-    socket?.close(4000, 'Realtime attempt timed out');
-    this.requeuePendingUpdates();
-    this.hydrated = false;
-    this.hydrationStarted = false;
-    this.peers.clear();
+    this.detachTransientTransport('Realtime attempt timed out');
     if (this.canRetryOpenAccountSession()) {
       this.handleTransientSocketFailure(this.socketEpoch);
       return;
@@ -1949,6 +1951,22 @@ export class LashRealtimeYjsProvider {
       ),
     );
     this.emit();
+  }
+
+  private detachTransientTransport(reason: string) {
+    this.socketEpoch += 1;
+    this.abortOwnerRefresh();
+    this.clearHydrationTimer();
+    this.clearReconnectTimer();
+    this.sharedHistory.disconnect();
+    const socket = this.socket;
+    this.detachSocket(socket);
+    this.socket = null;
+    socket?.close(4000, reason);
+    this.requeuePendingUpdates();
+    this.hydrated = false;
+    this.hydrationStarted = false;
+    this.peers.clear();
   }
 
   private failProtocol(epoch: number, message: string) {
@@ -1970,7 +1988,7 @@ export class LashRealtimeYjsProvider {
     this.abortOwnerRefresh();
     this.clearHydrationTimer();
     this.clearReconnectTimer();
-    this.stopOnlineWake();
+    this.stopBrowserNetworkListeners();
     const socket = this.socket;
     this.detachSocket(socket);
     this.socket = null;

@@ -1317,6 +1317,107 @@ describe('authorized realtime provider lifecycle', () => {
     }
   });
 
+  it('closes a socket still marked open on browser offline and wakes with a fresh ticket', async () => {
+    vi.useFakeTimers();
+    const browserEvents = new EventTarget();
+    const remove = vi.spyOn(browserEvents, 'removeEventListener');
+    vi.stubGlobal('window', browserEvents);
+    const first = new FakeSocket();
+    const second = new FakeSocket();
+    const doc = createRealtimeDocument();
+    const refreshed = namedSession('reconnected');
+    const refreshOwnerSession = vi.fn().mockResolvedValue(refreshed);
+    const createSocket = vi.fn().mockReturnValueOnce(first).mockReturnValueOnce(second);
+    const provider = new LashRealtimeYjsProvider({
+      createSocket,
+      doc,
+      refreshOwnerSession,
+      session: namedSession('before-offline'),
+    });
+
+    try {
+      const starting = provider.start();
+      hydrateSocket(first, namedRoomId, 5);
+      await starting;
+      doc.getText('body').insert(0, 'An edit waiting for acknowledgment');
+      const original = first.sent.map((frame) => JSON.parse(frame))
+        .find((frame) => frame.type === 'yjs-update');
+
+      browserEvents.dispatchEvent(new Event('offline'));
+      expect(first.readyState).toBe(3);
+      expect(provider.getSnapshot()).toMatchObject({
+        syncState: 'reconnecting',
+        pendingUpdateCount: 0,
+        queuedUpdateCount: 1,
+      });
+
+      browserEvents.dispatchEvent(new Event('online'));
+      await vi.advanceTimersByTimeAsync(0);
+      expect(createSocket).toHaveBeenCalledTimes(2);
+      expect(createSocket).toHaveBeenLastCalledWith(expect.any(String), [
+        'lash-realtime-v5',
+        refreshed.ticketProtocol,
+      ]);
+      hydrateSocket(second, namedRoomId, 5);
+      const replay = second.sent.map((frame) => JSON.parse(frame))
+        .filter((frame) => frame.type === 'yjs-update');
+      expect(replay).toEqual([original]);
+      second.emit('message', {
+        data: JSON.stringify({ type: 'sync-ack', roomId: namedRoomId, updateId: original.updateId }),
+      });
+      expect(provider.getSnapshot().syncState).toBe('saved');
+
+      browserEvents.dispatchEvent(new Event('online'));
+      expect(second.readyState).toBe(1);
+      expect(provider.destroy()).toBe(true);
+      expect(remove).toHaveBeenCalledWith('online', expect.any(Function));
+      expect(remove).toHaveBeenCalledWith('offline', expect.any(Function));
+      browserEvents.dispatchEvent(new Event('offline'));
+      browserEvents.dispatchEvent(new Event('online'));
+      await vi.advanceTimersByTimeAsync(30_000);
+      expect(createSocket).toHaveBeenCalledTimes(2);
+    } finally {
+      provider.destroy();
+      doc.destroy();
+      vi.unstubAllGlobals();
+      vi.useRealTimers();
+    }
+  });
+
+  it('does not renew a session sealed by a subscriber during reconnect', async () => {
+    vi.useFakeTimers();
+    const socket = new FakeSocket();
+    const doc = createRealtimeDocument();
+    const refreshOwnerSession = vi.fn(async () => ownerSession('retired-renewal'));
+    const provider = new LashRealtimeYjsProvider({
+      createSocket: () => socket,
+      doc,
+      refreshOwnerSession,
+      session: ownerSession('before-sealing'),
+    });
+    try {
+      const starting = provider.start();
+      hydrateSocket(socket, 'opaque-room-47', 3);
+      await starting;
+      socket.emit('close', { code: 1006 });
+      let sealOnReconnect = false;
+      const unsubscribe = provider.subscribe(({ syncState }) => {
+        if (sealOnReconnect && syncState === 'reconnecting') provider.destroy();
+      });
+      sealOnReconnect = true;
+      try {
+        await vi.advanceTimersByTimeAsync(30_000);
+        expect(refreshOwnerSession).not.toHaveBeenCalled();
+      } finally {
+        unsubscribe();
+      }
+    } finally {
+      provider.destroy();
+      doc.destroy();
+      vi.useRealTimers();
+    }
+  });
+
   it.each([
     ['authorization', 'scope-mismatch'],
     ['protocol', 'protocol-error'],

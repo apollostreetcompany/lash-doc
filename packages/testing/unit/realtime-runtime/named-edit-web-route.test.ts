@@ -108,6 +108,34 @@ describe('named edit browser and Worker contract', () => {
     });
   });
 
+  it('classifies a malformed successful Worker grant without returning its contents', async () => {
+    configure();
+    auth.principal.mockResolvedValue({ id: member, email: 'member@example.test' });
+    const worker = vi.fn()
+      .mockResolvedValueOnce(Response.json({
+        ok: true,
+        version: 1,
+        session: { roomId: `doc-v1-${'b'.repeat(64)}`, ticketProtocol: 'synthetic-opaque-value' },
+      }))
+      .mockResolvedValueOnce(new Response('unexpected upstream payload', { status: 200 }))
+      .mockResolvedValueOnce(namedEditResponse(namedEditFailure('unauthorized')))
+      .mockResolvedValueOnce(namedEditResponse(namedEditFailure('invalid-request')))
+      .mockResolvedValueOnce(new Response(new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(new TextEncoder().encode('{"ok":true,'));
+          controller.error(new TypeError('Connection reset'));
+        },
+      }), { status: 200, headers: { 'content-type': 'application/json' } }));
+    vi.stubGlobal('fetch', worker);
+
+    for (let attempt = 0; attempt < 4; attempt++) {
+      const invalid = await post('session', { token: null });
+      expect(invalid.status).toBe(502);
+      expect(await invalid.json()).toEqual({ ok: false, version: 1, error: 'invalid-response' });
+    }
+    expect((await post('session', { token: null })).status).toBe(503);
+  });
+
   it('commits only encrypted email and a hash to Worker, then carries the raw token only in a continuation cookie', async () => {
     configure();
     const email = 'recipient@example.test';

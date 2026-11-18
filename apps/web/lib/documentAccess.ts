@@ -388,15 +388,19 @@ const readBoundedOwnerSessionResponse = async (response: Response) => {
   const reader = response.body.getReader();
   const chunks: Uint8Array[] = [];
   let total = 0;
-  while (true) {
-    const next = await reader.read();
-    if (next.done) break;
-    total += next.value.byteLength;
-    if (total > OWNER_SESSION_RESPONSE_BYTES) {
-      await reader.cancel();
-      return null;
+  try {
+    while (true) {
+      const next = await reader.read();
+      if (next.done) break;
+      total += next.value.byteLength;
+      if (total > OWNER_SESSION_RESPONSE_BYTES) {
+        await reader.cancel().catch(() => {});
+        return null;
+      }
+      chunks.push(next.value);
     }
-    chunks.push(next.value);
+  } finally {
+    reader.releaseLock();
   }
   const body = new Uint8Array(total);
   let offset = 0;
@@ -444,6 +448,10 @@ const requestBrowserOwnerSessionOnce = async (
       : ownerSessionFailure('network-error', true);
   }
   if (input.signal.aborted) return ownerSessionFailure('aborted', false);
+  const invalidResponse = () =>
+    response.status === 408 || response.status === 429 || response.status >= 500
+      ? ownerSessionFailure('network-error', true)
+      : ownerSessionFailure('invalid-response', false);
   const declaredLength = response.headers.get('content-length');
   const mediaType = response.headers.get('content-type')?.split(';', 1)[0]?.trim();
   if (
@@ -452,18 +460,25 @@ const requestBrowserOwnerSessionOnce = async (
       (!/^(?:0|[1-9][0-9]*)$/u.test(declaredLength) ||
         Number(declaredLength) > OWNER_SESSION_RESPONSE_BYTES))
   ) {
-    return ownerSessionFailure('invalid-response', false);
+    return invalidResponse();
   }
-  const raw = await readBoundedOwnerSessionResponse(response);
-  if (raw === null) return ownerSessionFailure('invalid-response', false);
+  let raw: string | null;
+  try {
+    raw = await readBoundedOwnerSessionResponse(response);
+  } catch {
+    return input.signal.aborted
+      ? ownerSessionFailure('aborted', false)
+      : ownerSessionFailure('network-error', true);
+  }
+  if (raw === null) return invalidResponse();
   let value: unknown;
   try {
     value = JSON.parse(raw) as unknown;
   } catch {
-    return ownerSessionFailure('invalid-response', false);
+    return invalidResponse();
   }
   if (!isPlainObject(value) || value.version !== 1 || typeof value.ok !== 'boolean') {
-    return ownerSessionFailure('invalid-response', false);
+    return invalidResponse();
   }
   if (value.ok) {
     if (
@@ -489,7 +504,7 @@ const requestBrowserOwnerSessionOnce = async (
       !isPlainObject(value.socket) ||
       !hasExactKeys(value.socket, ['url', 'protocol', 'ticketProtocol', 'expiresAt'])
     ) {
-      return ownerSessionFailure('invalid-response', false);
+      return invalidResponse();
     }
     const session: unknown = {
       protocolVersion: 3,
@@ -515,9 +530,7 @@ const requestBrowserOwnerSessionOnce = async (
     !hasExactKeys(value, ['ok', 'version', 'error', 'retryable']) ||
     typeof value.error !== 'string' ||
     typeof value.retryable !== 'boolean'
-  ) {
-    return ownerSessionFailure('invalid-response', false);
-  }
+  ) return invalidResponse();
   const expected: Record<string, { retryable: boolean; statuses: readonly number[] }> = {
     'invalid-request': { retryable: false, statuses: [400, 403] },
     unauthenticated: { retryable: false, statuses: [401] },
@@ -532,7 +545,7 @@ const requestBrowserOwnerSessionOnce = async (
         value.error as Extract<OwnerSessionRequestResult, { ok: false }>['reason'],
         failure.retryable,
       )
-    : ownerSessionFailure('invalid-response', false);
+    : invalidResponse();
 };
 
 export const requestBrowserOwnerSession = async (
@@ -1275,6 +1288,12 @@ class BrowserDocumentAccessController implements DocumentAccessController {
         refreshOwnerSession: async (roomId, refreshSignal) => {
           const refreshed = await requestSession(roomId, refreshSignal);
           if (!refreshed.ok) {
+            if (refreshed.protocolInvalid) {
+              throw new RealtimeProviderStartError(
+                'protocol',
+                'Invalid shared document access response.',
+              );
+            }
             throw new RealtimeProviderStartError(
               refreshed.retryable ? 'transient-exhausted' : 'authorization',
               'Could not renew shared document access.',
@@ -1545,6 +1564,9 @@ class BrowserDocumentAccessController implements DocumentAccessController {
           signal: refreshSignal,
         });
         if (!refreshed.ok) {
+          if (refreshed.reason === 'invalid-response') {
+            throw new RealtimeProviderStartError('protocol', 'Invalid owner access response.');
+          }
           throw new RealtimeProviderStartError(
             refreshed.retryable ? 'transient-exhausted' : 'authorization',
             'Owner realtime session refresh failed.',
