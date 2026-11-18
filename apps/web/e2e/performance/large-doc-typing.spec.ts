@@ -3,6 +3,7 @@ import { expect, test, type Page } from '@playwright/test';
 const editor = '.ProseMirror[contenteditable="true"]';
 const probe = ' Large document typing probe.';
 const lifecycle = ['keydown', 'beforeinput', 'input'];
+const traceDeliveryTimeoutMs = 60_000;
 
 type TextNode = { type: 'text'; text: string };
 type Block = {
@@ -56,7 +57,7 @@ const p95 = (samples: number[]) =>
 for (const words of [10_000, 50_000]) {
   test(
     words.toLocaleString('en-US') + '-word typing stays within the editor budget',
-    async ({ context, page }) => {
+    async ({ context, page }, testInfo) => {
       const documentId = 'large-doc-' + words;
       const key = 'lash:body:' + documentId;
       const doc = fixture(words);
@@ -144,8 +145,20 @@ for (const words of [10_000, 50_000]) {
         });
       } finally {
         await cdp.send('Tracing.end');
-        await completedTrace;
-        await cdp.detach();
+        // Chrome delivers the finished trace after the measured typing window.
+        // Exclude only the elapsed delivery wait from the test's normal budget.
+        const testTimeout = testInfo.timeout;
+        const deliveryStartedAt = performance.now();
+        testInfo.setTimeout(testTimeout + traceDeliveryTimeoutMs);
+        try {
+          await test.step('Receive the completed Chromium trace', () => completedTrace, {
+            timeout: traceDeliveryTimeoutMs,
+          });
+        } finally {
+          const deliveryTime = Math.ceil(performance.now() - deliveryStartedAt);
+          testInfo.setTimeout(testTimeout + Math.min(deliveryTime, traceDeliveryTimeoutMs));
+          await cdp.detach();
+        }
       }
 
       const start = events.find(({ name }) => name === 'lash-typing-start');

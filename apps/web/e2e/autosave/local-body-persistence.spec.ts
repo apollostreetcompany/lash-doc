@@ -152,7 +152,7 @@ test.describe('local document body persistence', () => {
     await expect(page.locator('.ProseMirror')).toContainText(durableText);
     await expect(page.locator('.lash-app')).toHaveAttribute('data-entrance', 'false');
     await page.screenshot({
-      path: 'artifacts/stranger-test/final/FLOW-01-reload.png',
+      path: test.info().outputPath('FLOW-01-reload.png'),
       fullPage: true,
     });
 

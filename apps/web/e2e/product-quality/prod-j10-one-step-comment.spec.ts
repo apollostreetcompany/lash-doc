@@ -232,7 +232,7 @@ test.describe('PROD-J10 one-step selected-text comment', () => {
     const composer = page.getByTestId('chat-new-thread-composer');
     await expect(composer).toBeVisible();
     await page.screenshot({
-      path: 'artifacts/stranger-test/prod-j10/after-mobile-composer.png',
+      path: test.info().outputPath('after-mobile-composer.png'),
     });
     const metrics = await composer.evaluate((node) => {
       const textarea = node.querySelector<HTMLTextAreaElement>('textarea');

@@ -188,37 +188,51 @@ const ONLINE_PEER_PROBE = 'The connected editor kept writing.';
 
 export async function appendBrowserParagraph(page: Page, text: string) {
   await page.bringToFront();
-  const paragraph = editor(page).locator('p').last();
-  await paragraph.scrollIntoViewIfNeeded();
-  const tail = await paragraph.evaluate((element) => {
-    const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT);
-    let tail: Text | null = null;
-    for (let node = walker.nextNode(); node; node = walker.nextNode()) {
-      if (node instanceof Text && node.length > 0) tail = node;
-    }
-    if (!tail) throw new Error('Expected a populated last paragraph.');
-    const range = document.createRange();
-    range.setStart(tail, tail.length - 1);
-    range.setEnd(tail, tail.length);
-    const rect = range.getBoundingClientRect();
-    return { x: rect.right + 2, y: rect.top + rect.height / 2 };
-  });
-  await page.mouse.click(tail.x, tail.y);
-  await expect
-    .poll(() =>
-      paragraph.evaluate((element) => {
-        const selection = window.getSelection();
-        if (!selection?.anchorNode || !element.contains(selection.anchorNode)) return false;
-        const after = document.createRange();
-        after.setStart(selection.anchorNode, selection.anchorOffset);
-        after.setEnd(element, element.childNodes.length);
-        return !after.toString();
-      }),
-    )
-    .toBe(true);
+  const body = editor(page);
+  const paragraphs = body.locator(':scope > p');
+  const originalCount = await paragraphs.count();
+  const originalTail = paragraphs.nth(originalCount - 1);
+  const originalText = await originalTail.textContent();
+  const caretAtEnd = (paragraph: Locator) =>
+    paragraph.evaluate(async (element) => {
+      // The editor reconciles the DOM selection on animation frames after focus or navigation.
+      await new Promise<void>((resolve) => {
+        requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+      });
+      const selection = window.getSelection();
+      if (
+        document.activeElement !== element.parentElement ||
+        !selection?.isCollapsed ||
+        !selection.anchorNode ||
+        !element.contains(selection.anchorNode)
+      ) {
+        return false;
+      }
+      const remainder = document.createRange();
+      remainder.setStart(selection.anchorNode, selection.anchorOffset);
+      remainder.setEnd(element, element.childNodes.length);
+      const content = remainder.cloneContents();
+      content.querySelectorAll('.ProseMirror-widget').forEach((widget) => widget.remove());
+      return content.textContent === '';
+    });
+
+  await expect(body).toBeEditable();
+  await expect(originalTail).toBeVisible();
+  await body.focus();
+  const documentEnd = await page.evaluate(() =>
+    navigator.platform.startsWith('Mac') ? 'Meta+ArrowDown' : 'Control+End',
+  );
+  await page.keyboard.press(documentEnd);
+  await expect.poll(() => caretAtEnd(originalTail)).toBe(true);
+
   await page.keyboard.press('Enter');
+  const newParagraph = paragraphs.nth(originalCount);
+  await expect(paragraphs).toHaveCount(originalCount + 1);
+  await expect(originalTail).toHaveText(originalText ?? '');
+  await expect(newParagraph).toHaveText('');
+  await expect.poll(() => caretAtEnd(newParagraph)).toBe(true);
   await page.keyboard.insertText(text);
-  await expect(editor(page).locator('p').last()).toHaveText(text);
+  await expect(newParagraph).toHaveText(text);
 }
 
 export async function exerciseBrowserNetworkRecovery(input: {
