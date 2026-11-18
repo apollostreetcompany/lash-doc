@@ -25,7 +25,19 @@
   gap: 0.5rem;
 }
 
-.fieldRow,
+.fieldRow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) max-content;
+  align-items: end;
+  gap: 0.75rem;
+}
+
+.field {
+  display: grid;
+  gap: 0.35rem;
+  min-width: 0;
+}
+
 .invite {
   display: flex;
   align-items: center;
@@ -33,16 +45,22 @@
   gap: 0.75rem;
 }
 
-.fieldRow input {
-  flex: 1;
+.fieldRow input,
+.fieldRow select {
   min-width: 0;
-  min-height: 2.25rem;
+  min-height: 2.75rem;
   padding-inline: 0.55rem;
   border: 1px solid var(--lash-border, #a3a3a3);
   border-radius: 0.4rem;
+  font: inherit;
 }
 
-.fieldRow span,
+.role {
+  display: grid;
+  align-items: center;
+  min-height: 2.75rem;
+}
+
 .invite button {
   flex-shrink: 0;
 }
@@ -72,7 +90,7 @@
 }
 
 .section button:focus-visible,
-.fieldRow input:focus-visible {
+.fieldRow :is(input, select):focus-visible {
   outline: 2px solid rgba(185, 79, 55, 0.72);
   outline-offset: 2px;
 }

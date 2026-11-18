@@ -3,7 +3,11 @@ import { createRequire } from 'node:module';
 import { describe, expect, it } from 'vitest';
 import * as Y from 'yjs';
 
-import { parseNamedEditCommand } from '../../../realtime-worker/src/namedEdit';
+import {
+  parseNamedCommentSocketProtocols,
+  parseNamedEditCommand,
+  parseNamedEditSocketProtocols,
+} from '../../../realtime-worker/src/namedEdit';
 import {
   applyNamedEditYjsUpdate,
   encodePublicYjsProjection,
@@ -11,9 +15,11 @@ import {
   loadRoomYjsProjection,
 } from '../../../realtime-worker/src/namedEditProjection';
 import {
+  consumeNamedCommentTicket,
   consumeNamedEditTicket,
   executeNamedEdit,
   initializeNamedEditStorage,
+  isCurrentNamedCommentGrant,
   isCurrentNamedEditGrant,
 } from '../../../realtime-worker/src/namedEditStore';
 
@@ -81,6 +87,341 @@ const makeRoom = () => {
   initializeNamedEditStorage(storage);
   return { db, storage };
 };
+
+const openCommentRoom = () => {
+  const { db, storage } = makeRoom();
+  const dispatch = (
+    command: Parameters<typeof executeNamedEdit>[0]['command'],
+    principalId = owner,
+    overrides: Partial<
+      Pick<
+        Parameters<typeof executeNamedEdit>[0],
+        'nowMs' | 'commentEnabled' | 'commentProjectionAvailable'
+      >
+    > = {},
+  ) =>
+    executeNamedEdit({
+      storage,
+      command,
+      principalId,
+      roomId,
+      requestId: randomUUID(),
+      nowMs: now,
+      commentEnabled: true,
+      commentProjectionAvailable: () => true,
+      ...overrides,
+    });
+  return { db, storage, dispatch };
+};
+
+const commentIssue = { ...issue, role: 'comment' as const };
+
+describe('named commenter room authority', () => {
+  it('issues a distinct role, validates the verified recipient and origin, and immediately revokes tickets and grants', async () => {
+    const { db, storage, dispatch } = openCommentRoom();
+    try {
+      expect(await dispatch(commentIssue, stranger)).toMatchObject({
+        ok: false,
+        error: 'forbidden',
+      });
+      const issued = await dispatch(commentIssue);
+      expect(issued).toMatchObject({
+        ok: true,
+        invite: { inviteId, role: 'comment', status: 'pending' },
+      });
+      expect(await dispatch({ ...commentIssue, emailCiphertext: 'email-v1.retry' })).toEqual(
+        issued,
+      );
+      expect(await dispatch(issue)).toMatchObject({ ok: false, error: 'conflict' });
+      expect(
+        await dispatch({ ...issue, inviteId: randomUUID(), tokenHash: 'f'.repeat(43) }),
+      ).toMatchObject({
+        ok: false,
+        error: 'conflict',
+      });
+      expect(await dispatch({ action: 'list', includeComment: true }, editor)).toMatchObject({
+        ok: false,
+        error: 'forbidden',
+      });
+      expect(
+        await dispatch({ ...redeem, emailDigest: `email-v1-${'f'.repeat(43)}` }, stranger),
+      ).toMatchObject({ ok: false, error: 'forbidden' });
+
+      const accepted = await dispatch(redeem, editor);
+      if (!accepted.ok || !('session' in accepted)) throw new Error('Missing Comment session.');
+      const { session } = accepted;
+      expect(session).toEqual({
+        source: 'named',
+        role: 'comment',
+        protocolVersion: 6,
+        roomId,
+        actorId: expect.stringMatching(/^named-[a-f0-9]{32}$/u),
+        capabilities: ['doc.read', 'doc.comment', 'doc.suggest'],
+        socketProtocol: 'lash-realtime-v6',
+        ticketProtocol: expect.stringMatching(/^lash-named-comment-ticket\.[A-Za-z0-9_-]{43}$/u),
+        expiresAt: new Date(now + 60_000).toISOString(),
+      });
+      expect(await dispatch(redeem, stranger)).toMatchObject({ ok: false, error: 'forbidden' });
+      const socketProtocols = `${session.socketProtocol}, ${session.ticketProtocol}`;
+      const token = parseNamedCommentSocketProtocols(socketProtocols);
+      if (!token) throw new Error('Invalid v6 Comment transport.');
+      expect(parseNamedEditSocketProtocols(socketProtocols)).toBeNull();
+      expect(
+        parseNamedEditSocketProtocols(`lash-realtime-v5, ${session.ticketProtocol}`),
+      ).toBeNull();
+      expect(
+        parseNamedCommentSocketProtocols(`lash-realtime-v6, lash-named-ticket.${token}`),
+      ).toBeNull();
+
+      const socket = {
+        storage,
+        roomId,
+        actorId: session.actorId,
+        browserOrigin: origin,
+        token,
+        nowMs: now + 1,
+      };
+      expect(await consumeNamedEditTicket(socket)).toBeNull();
+      expect(
+        await consumeNamedCommentTicket({ ...socket, browserOrigin: 'https://other.example.test' }),
+      ).toBeNull();
+      expect(
+        await consumeNamedCommentTicket({ ...socket, actorId: `named-${'f'.repeat(32)}` }),
+      ).toBeNull();
+      expect(await consumeNamedCommentTicket({ ...socket, nowMs: now + 60_000 })).toBeNull();
+      const grant = await consumeNamedCommentTicket(socket);
+      if (!grant) throw new Error('Comment socket not admitted.');
+      expect(await consumeNamedCommentTicket(socket)).toBeNull();
+      expect(isCurrentNamedCommentGrant({ storage, roomId, grant, nowMs: now + 2 })).toBe(true);
+      expect(isCurrentNamedEditGrant({ storage, roomId, grant, nowMs: now + 2 })).toBe(false);
+      expect(isCurrentNamedCommentGrant({ storage, roomId, grant, nowMs: grant.expiresAtMs })).toBe(
+        false,
+      );
+
+      const reopened = await dispatch(reopen, editor);
+      if (!reopened.ok || !('session' in reopened)) throw new Error('Comment reopen was denied.');
+      expect(reopened.session).toMatchObject({ role: 'comment', actorId: session.actorId });
+      expect(reopened.session.ticketProtocol).not.toBe(session.ticketProtocol);
+      expect(await dispatch({ action: 'list', includeComment: true })).toMatchObject({
+        ok: true,
+        invites: [{ inviteId, role: 'comment', status: 'accepted' }],
+      });
+      expect(
+        await dispatch({ action: 'revoke', inviteId, role: 'comment' }, owner, {
+          commentEnabled: false,
+        }),
+      ).toMatchObject({
+        ok: true,
+        invite: { inviteId, role: 'comment', status: 'revoked' },
+      });
+      expect(isCurrentNamedCommentGrant({ storage, roomId, grant, nowMs: now + 2 })).toBe(false);
+      expect(
+        await consumeNamedCommentTicket({
+          ...socket,
+          token: reopened.session.ticketProtocol.split('.')[1]!,
+        }),
+      ).toBeNull();
+      expect(await dispatch(reopen, editor)).toMatchObject({ ok: false, error: 'forbidden' });
+    } finally {
+      db.close();
+    }
+  });
+
+  it('fails closed to ineligible accounts or projection failures and preserves pending invitation state', async () => {
+    const { db, dispatch } = openCommentRoom();
+    try {
+      const projection = { commentProjectionAvailable: () => false };
+      expect(await dispatch(commentIssue, stranger, projection)).toMatchObject({
+        error: 'forbidden',
+      });
+      expect(await dispatch(commentIssue, owner, { commentEnabled: false })).toMatchObject({
+        error: 'named-comment-disabled',
+      });
+      expect(await dispatch(commentIssue, owner, projection)).toMatchObject({
+        error: 'comment-projection-unavailable',
+      });
+      expect(await dispatch({ action: 'list', includeComment: true })).toMatchObject({
+        ok: true,
+        invites: [],
+      });
+      expect(await dispatch(commentIssue)).toMatchObject({ ok: true });
+      expect(await dispatch(commentIssue, owner, projection)).toMatchObject({
+        error: 'comment-projection-unavailable',
+      });
+      expect(
+        await dispatch(
+          { ...redeem, emailDigest: `email-v1-${'f'.repeat(43)}` },
+          stranger,
+          projection,
+        ),
+      ).toMatchObject({ error: 'forbidden' });
+      expect(await dispatch(redeem, editor, projection)).toMatchObject({
+        error: 'comment-projection-unavailable',
+      });
+      expect(await dispatch(redeem, editor, { commentEnabled: false })).toMatchObject({
+        error: 'named-comment-disabled',
+      });
+      expect(await dispatch({ action: 'list', includeComment: true })).toMatchObject({
+        ok: true,
+        invites: [{ inviteId, role: 'comment', status: 'pending' }],
+      });
+      expect(
+        db.prepare('SELECT COUNT(*) AS count FROM named_comment_ticket_v1').get(),
+      ).toMatchObject({ count: 0 });
+      const expiresAt = now + 7 * 24 * 60 * 60 * 1000;
+      expect(await dispatch(redeem, editor, { nowMs: expiresAt })).toMatchObject({
+        error: 'forbidden',
+      });
+      expect(
+        await dispatch({ action: 'list', includeComment: true }, owner, { nowMs: expiresAt }),
+      ).toMatchObject({
+        ok: true,
+        invites: [{ inviteId, role: 'comment', status: 'expired' }],
+      });
+    } finally {
+      db.close();
+    }
+  });
+
+  it('keeps legacy management Edit-only even with existing Comment invitations', async () => {
+    const { db, dispatch } = openCommentRoom();
+    try {
+      const editInvite = {
+        ...issue,
+        inviteId: randomUUID(),
+        emailDigest: `email-v1-${'f'.repeat(43)}`,
+        tokenHash: 'g'.repeat(43),
+      };
+      expect(await dispatch(commentIssue)).toMatchObject({ ok: true });
+      expect(await dispatch(editInvite)).toMatchObject({ ok: true });
+      expect(await dispatch({ action: 'list' })).toMatchObject({
+        ok: true,
+        invites: [{ inviteId: editInvite.inviteId, role: 'edit' }],
+      });
+      const fullInventory = await dispatch({ action: 'list', includeComment: true }, owner, {
+        commentEnabled: false,
+      });
+      if (!fullInventory.ok || !('invites' in fullInventory))
+        throw new Error('Missing owner inventory.');
+      expect(fullInventory.invites.map((invite) => invite.role).sort()).toEqual([
+        'comment',
+        'edit',
+      ]);
+      expect(await dispatch({ action: 'revoke', inviteId })).toMatchObject({ error: 'forbidden' });
+      expect(
+        await dispatch({ action: 'revoke', inviteId: editInvite.inviteId, role: 'comment' }),
+      ).toMatchObject({
+        error: 'forbidden',
+      });
+      expect(await dispatch({ action: 'revoke', inviteId: editInvite.inviteId })).toMatchObject({
+        invite: { role: 'edit', status: 'revoked' },
+      });
+      expect(await dispatch({ action: 'revoke', inviteId, role: 'comment' })).toMatchObject({
+        invite: { role: 'comment', status: 'revoked' },
+      });
+    } finally {
+      db.close();
+    }
+  });
+
+  it('keeps one active role for a verified principal even when email changes', async () => {
+    const { db, dispatch } = openCommentRoom();
+    try {
+      const editInvite = {
+        ...issue,
+        inviteId: randomUUID(),
+        emailDigest: `email-v1-${'f'.repeat(43)}`,
+        tokenHash: 'g'.repeat(43),
+      };
+      expect(await dispatch(commentIssue)).toMatchObject({ ok: true });
+      expect(await dispatch(editInvite)).toMatchObject({ ok: true });
+      expect(await dispatch(redeem, editor)).toMatchObject({ session: { role: 'comment' } });
+      const editRedeem = {
+        ...redeem,
+        emailDigest: editInvite.emailDigest,
+        tokenHash: editInvite.tokenHash,
+      };
+      expect(await dispatch(editRedeem, editor)).toMatchObject({ error: 'forbidden' });
+      expect(await dispatch({ action: 'revoke', inviteId, role: 'comment' })).toMatchObject({
+        ok: true,
+      });
+      expect(await dispatch(editRedeem, editor)).toMatchObject({
+        session: { role: 'edit', protocolVersion: 5, capabilities: ['doc.read', 'doc.edit'] },
+      });
+    } finally {
+      db.close();
+    }
+  });
+
+  it('retries a redemption after a failed ticket write without binding the pending invite', async () => {
+    const { db, storage, dispatch } = openCommentRoom();
+    try {
+      expect(await dispatch(commentIssue)).toMatchObject({ ok: true });
+      const attempt = {
+        storage,
+        command: redeem,
+        principalId: editor,
+        roomId,
+        requestId: randomUUID(),
+        nowMs: now,
+        commentEnabled: true,
+        commentProjectionAvailable: () => true,
+      };
+      db.exec(`
+        CREATE TRIGGER unavailable_comment_ticket
+        BEFORE INSERT ON named_comment_ticket_v1
+        BEGIN
+          SELECT RAISE(ABORT, 'ticket write unavailable');
+        END
+      `);
+      await expect(executeNamedEdit(attempt)).rejects.toThrow('ticket write unavailable');
+      expect(await dispatch({ action: 'list', includeComment: true })).toMatchObject({
+        ok: true,
+        invites: [{ inviteId, role: 'comment', status: 'pending' }],
+      });
+      expect(await dispatch(reopen, editor)).toMatchObject({ error: 'forbidden' });
+      db.exec('DROP TRIGGER unavailable_comment_ticket');
+      expect(await executeNamedEdit(attempt)).toMatchObject({
+        session: { role: 'comment', protocolVersion: 6 },
+      });
+      expect(await executeNamedEdit(attempt)).toMatchObject({ error: 'conflict' });
+    } finally {
+      db.close();
+    }
+  });
+
+  it('preserves an Edit membership written by a rollback and fences overlapping Comment access', async () => {
+    const { db, storage, dispatch } = openCommentRoom();
+    try {
+      expect(await dispatch(commentIssue)).toMatchObject({ ok: true });
+      const accepted = await dispatch(redeem, editor);
+      if (!accepted.ok || !('session' in accepted)) throw new Error('Missing Comment session.');
+      const socket = {
+        storage,
+        roomId,
+        actorId: accepted.session.actorId,
+        browserOrigin: origin,
+        token: accepted.session.ticketProtocol.split('.')[1]!,
+        nowMs: now + 1,
+      };
+      const grant = await consumeNamedCommentTicket(socket);
+      if (!grant) throw new Error('Missing Comment grant.');
+      // An older Worker only knows its separate Edit table.
+      db.prepare(
+        `INSERT INTO named_edit_invite_v1
+         (invite_id, email_digest, email_ciphertext, token_hash, expires_at_ms, accepted_principal_id)
+         VALUES (?, ?, ?, ?, ?, ?)`,
+      ).run(randomUUID(), emailDigest, issue.emailCiphertext, 'f'.repeat(43), now + 60_000, editor);
+      expect(await dispatch(reopen, editor)).toMatchObject({
+        session: { role: 'edit', protocolVersion: 5 },
+      });
+      expect(await dispatch(redeem, editor)).toMatchObject({ error: 'forbidden' });
+      expect(isCurrentNamedCommentGrant({ storage, roomId, grant, nowMs: now + 2 })).toBe(false);
+    } finally {
+      db.close();
+    }
+  });
+});
 
 describe('named editor room authority', () => {
   it('issues one durable invitation, accepts its matching account, and fences the revoked grant', async () => {
@@ -173,6 +514,30 @@ describe('named editor room authority', () => {
         browserOrigin: origin,
       }),
     ).toEqual(redeem);
+  });
+
+  it('accepts an explicit Comment role while retaining the closed legacy Edit command', () => {
+    const { action, ...body } = issue;
+    expect(parseNamedEditCommand(action, { version: 1, ...body })).toEqual(issue);
+    expect(parseNamedEditCommand(action, { version: 1, ...body, role: 'comment' })).toEqual({
+      ...issue,
+      role: 'comment',
+    });
+    expect(parseNamedEditCommand(action, { version: 1, ...body, role: 'owner' })).toBeNull();
+    expect(parseNamedEditCommand('list', { version: 1, role: 'comment' })).toBeNull();
+    expect(parseNamedEditCommand('list', { version: 1, includeComment: true })).toEqual({
+      action: 'list',
+      includeComment: true,
+    });
+    expect(parseNamedEditCommand('list', { version: 1, includeComment: false })).toBeNull();
+    expect(parseNamedEditCommand('revoke', { version: 1, inviteId, role: 'comment' })).toEqual({
+      action: 'revoke',
+      inviteId,
+      role: 'comment',
+    });
+    expect(
+      parseNamedEditCommand('revoke', { version: 1, inviteId, includeComment: true }),
+    ).toBeNull();
   });
 
   it('applies named title and body edits through the canonical projection without making private review shared', () => {

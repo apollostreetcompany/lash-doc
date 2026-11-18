@@ -7,11 +7,13 @@ import {
   NAMED_EDIT_ROOM_ID,
   NAMED_EDIT_TOKEN,
   hasKeys,
+  isNamedInviteRole,
   isObject,
   namedEditPath,
   namedEditSocketPath,
   type NamedEditInvite,
   type NamedEditOperation,
+  type NamedInviteRole,
 } from './contract';
 import {
   decryptNamedEditValue,
@@ -62,9 +64,9 @@ const failure = (status: number) =>
   );
 
 type BrowserRequest =
-  | { kind: 'issue'; inviteId: string; email: string }
-  | { kind: 'list' }
-  | { kind: 'revoke'; inviteId: string }
+  | { kind: 'issue'; inviteId: string; email: string; role: NamedInviteRole }
+  | { kind: 'list'; includeComment: boolean }
+  | { kind: 'revoke'; inviteId: string; role: NamedInviteRole }
   | { kind: 'session'; accept: boolean; token: string | null };
 
 const parseBrowserRequest = (
@@ -72,7 +74,12 @@ const parseBrowserRequest = (
   value: unknown,
 ): BrowserRequest | null => {
   if (!isObject(value) || value.version !== 1) return null;
-  if (operation === 'list') return hasKeys(value, ['version']) ? { kind: 'list' } : null;
+  if (operation === 'list') {
+    if (hasKeys(value, ['version'])) return { kind: 'list', includeComment: false };
+    return hasKeys(value, ['version', 'includeComment']) && value.includeComment === true
+      ? { kind: 'list', includeComment: true }
+      : null;
+  }
   if (operation === 'session') {
     if (!hasKeys(value, ['version', 'token']) && !hasKeys(value, ['version', 'token', 'accept'])) {
       return null;
@@ -87,18 +94,22 @@ const parseBrowserRequest = (
       : null;
   }
   if (typeof value.inviteId !== 'string' || !NAMED_EDIT_INVITE_ID.test(value.inviteId)) return null;
+  const roleField = Object.hasOwn(value, 'role') ? ['role'] : [];
+  const role = roleField.length ? value.role : 'edit';
+  if (!isNamedInviteRole(role)) return null;
   if (operation === 'revoke') {
-    return hasKeys(value, ['version', 'inviteId'])
-      ? { kind: 'revoke', inviteId: value.inviteId }
+    return hasKeys(value, ['version', 'inviteId', ...roleField])
+      ? { kind: 'revoke', inviteId: value.inviteId, role }
       : null;
   }
-  const email =
-    typeof value.email === 'string' &&
-    value.email.length <= 512 &&
-    hasKeys(value, ['version', 'inviteId', 'email'])
-      ? normalizeNamedEditEmail(value.email)
-      : null;
-  return email ? { kind: 'issue', inviteId: value.inviteId, email } : null;
+  if (
+    !hasKeys(value, ['version', 'inviteId', 'email', ...roleField]) ||
+    typeof value.email !== 'string' ||
+    value.email.length > 512
+  )
+    return null;
+  const email = normalizeNamedEditEmail(value.email);
+  return email ? { kind: 'issue', inviteId: value.inviteId, email, role } : null;
 };
 
 export async function handleNamedEdit(request: NextRequest, roomId: string, operation: string) {
@@ -194,8 +205,15 @@ export async function handleNamedEdit(request: NextRequest, roomId: string, oper
   }
 
   const body: Record<string, unknown> = { version: 1 };
+  const commentInvitesEnabled = process.env.LASH_NAMED_COMMENT_PHASE === 'enabled';
   let inviteToken: string | null = null;
   if (parsed.kind === 'issue') {
+    if (parsed.role === 'comment') {
+      if (!commentInvitesEnabled) {
+        return finalize(response({ ok: false, error: 'named-comment-disabled' }, 503));
+      }
+      body.role = parsed.role;
+    }
     inviteToken = namedEditInviteToken(key, roomId, principal.id, parsed.inviteId, parsed.email);
     body.inviteId = parsed.inviteId;
     body.tokenHash = hashNamedEditToken(inviteToken);
@@ -204,6 +222,9 @@ export async function handleNamedEdit(request: NextRequest, roomId: string, oper
       'email-v1.' + encryptNamedEditValue(key, 'email', parsed.email, roomId, parsed.inviteId);
   } else if (parsed.kind === 'revoke') {
     body.inviteId = parsed.inviteId;
+    if (parsed.role === 'comment') body.role = parsed.role;
+  } else if (parsed.kind === 'list') {
+    if (parsed.includeComment) body.includeComment = true;
   } else if (parsed.kind === 'session') {
     const token = parsed.accept ? (parsed.token ?? preservedToken()) : null;
     const email = token ? normalizeNamedEditEmail(principal.email) : null;
@@ -213,19 +234,32 @@ export async function handleNamedEdit(request: NextRequest, roomId: string, oper
     body.emailDigest = email ? namedEditEmailDigest(key, email) : null;
   }
 
-  const result = await callNamedEditWorker({
+  const workerRequest = {
     workerOrigin: worker.workerOrigin,
     controlSecret: worker.controlSecret,
     operation,
     roomId,
     principalId: principal.id,
     body,
-  });
-  if (!result.ok) return finalize(failure(result.status), result.status === 403);
+  };
+  let result = await callNamedEditWorker(workerRequest);
+  const legacyList = parsed.kind === 'list' && !result.ok && result.status === 400;
+  if (legacyList) {
+    result = await callNamedEditWorker({ ...workerRequest, body: { version: 1 } });
+  }
+  if (!result.ok) {
+    if (result.commentError) {
+      if (parsed.kind === 'issue' && parsed.role === 'comment') {
+        return finalize(response({ ok: false, error: result.commentError }, result.status));
+      }
+      return finalize(failure(403), true);
+    }
+    return finalize(failure(result.status), result.status === 403);
+  }
   if (result.kind === 'session') {
     if (accepting) return finalize(response({ ok: true }), true);
     const socketUrl = new URL(
-      namedEditSocketPath(roomId, result.session.actorId),
+      namedEditSocketPath(roomId, result.session.actorId, result.session.protocolVersion),
       worker.workerOrigin,
     );
     socketUrl.protocol = socketUrl.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -248,12 +282,20 @@ export async function handleNamedEdit(request: NextRequest, roomId: string, oper
     return email && normalizeNamedEditEmail(email) === email ? { ...rest, email } : null;
   };
   if (result.kind === 'list') {
+    if (parsed.kind !== 'list') return finalize(failure(503));
     const invites = result.invites.map(decodeInvite);
-    return finalize(invites.every(Boolean) ? response({ ok: true, invites }) : failure(503));
+    const available =
+      parsed.includeComment && commentInvitesEnabled && !legacyList
+        ? { commentInvitesEnabled: true }
+        : {};
+    return finalize(
+      invites.every(Boolean) ? response({ ok: true, invites, ...available }) : failure(503),
+    );
   }
   const invite = decodeInvite(result.invite);
   if (!invite) return finalize(failure(503));
   if (result.kind === 'issue') {
+    if (parsed.kind !== 'issue' || invite.email !== parsed.email) return finalize(failure(503));
     if (invite.status !== 'pending' || !inviteToken) return finalize(failure(409));
     return finalize(response({ ok: true, invite, token: inviteToken }));
   }

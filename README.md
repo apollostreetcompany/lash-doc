@@ -2,7 +2,7 @@
 
 Lash is a local-first collaborative writing editor. Open a draft, write and format,
 then use **Documents** to find it again. **Share** lets a signed-in writer move a
-draft to their account and invite another editor. The status beside the title tells
+draft to their account and invite an editor or reviewer. The status beside the title tells
 you where the document is saved.
 
 ## Run the editor
@@ -34,8 +34,13 @@ address such as `writer@example.test`. Open its sign-in link from
 Create a **Can edit** invitation for `reviewer@example.test` and copy the link.
 Open it in the second profile and sign in there using its own message from the
 local inbox. Both writers can now edit the same document. Reload both tabs to
-check the saved result. Ctrl-C stops the app and Worker. Local account and room
-data survive a restart.
+check the saved result.
+
+For a review, invite a different account with **Can comment**. That person can
+select a passage, start a discussion and suggest new wording. The owner can
+apply the suggestion, and both people can reopen the result.
+
+Ctrl-C stops the app and Worker. Local account and room data survive a restart.
 
 ## Verify a change
 

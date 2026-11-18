@@ -516,6 +516,7 @@ export function EditorWorkspace({
     accessSnapshot.phase === 'remote-authorized' ||
     accessSnapshot.phase === 'remote-hydrating';
   const canonicalNamedRoute = NAMED_EDIT_ROOM_ID.test(activeDocumentId);
+  const commentConnectionLost = accessSnapshot.reason === 'comment-connection-lost';
   const authorityUnavailable =
     accessSnapshot.reason === 'invite-authority-unavailable' ||
     accessSnapshot.reason === 'unavailable';
@@ -615,20 +616,24 @@ export function EditorWorkspace({
                 ? recoveryPresentation.heading
                 : accessSnapshot.reason === 'sign-in-required'
                   ? 'Sign in to open this shared document'
-                  : canonicalNamedRoute
-                    ? 'Shared document unavailable'
-                    : authorityUnavailable
-                      ? 'This invite cannot load a shared document on this build'
-                      : 'This invite could not be opened'}
+                  : commentConnectionLost
+                    ? 'Connection to the shared document ended'
+                    : canonicalNamedRoute
+                      ? 'Shared document unavailable'
+                      : authorityUnavailable
+                        ? 'This invite cannot load a shared document on this build'
+                        : 'This invite could not be opened'}
           </h1>
           <p>
             {checking
               ? 'Lash will show the document only after access and shared content have been checked.'
               : recoveryPresentation
                 ? recoveryPresentation.detail
-                : canonicalNamedRoute
-                  ? 'Use the account that accepted the invitation, or ask the owner to check your access.'
-                  : 'No document content was opened. Return to your local documents to keep writing safely.'}
+                : commentConnectionLost
+                  ? 'Reconnect to open the latest copy and continue the discussion.'
+                  : canonicalNamedRoute
+                    ? 'Use the account that accepted the invitation, or ask the owner to check your access.'
+                    : 'No document content was opened. Return to your local documents to keep writing safely.'}
           </p>
         </div>
         {!checking && recoveryPresentation ? (
@@ -854,6 +859,11 @@ function ResolvedDocumentWorkspace({
   const runtimeMode = resolution.runtime.mode;
   const mutationAuthority = resolution.authority;
   const canEditDocument = mutationAuthority.getSnapshot().bodyWrite;
+  const namedMember =
+    realtimeEnabled &&
+    NAMED_EDIT_ROOM_ID.test(activeDocumentId) &&
+    !accessSnapshot.authoritativeOwner;
+  const namedComment = namedMember && accessSnapshot.scope === 'comment';
   const [localBodyState, setLocalBodyState] = useState<
     'loading' | 'ready' | 'recovered-awaiting-confirmation' | 'conflict' | 'unavailable' | 'failed'
   >('loading');
@@ -886,9 +896,11 @@ function ResolvedDocumentWorkspace({
   const chatRealtimeStore = useMemo(
     () =>
       realtimeDoc && realtimeProvider
-        ? withLegacyChatThreads(realtimeProvider.reviewStore, realtimeDoc)
+        ? namedComment
+          ? realtimeProvider.reviewStore
+          : withLegacyChatThreads(realtimeProvider.reviewStore, realtimeDoc)
         : null,
-    [realtimeDoc, realtimeProvider],
+    [namedComment, realtimeDoc, realtimeProvider],
   );
   const [sharedSuggestionsReady, setSharedSuggestionsReady] = useState(false);
   useEffect(() => {
@@ -1325,12 +1337,14 @@ function ResolvedDocumentWorkspace({
   const editor = useEditor(
     {
       extensions,
-      autofocus: 'end',
+      autofocus: namedComment ? false : 'end',
+      editable: !namedComment,
       immediatelyRender: false,
       shouldRerenderOnTransaction: false,
       editorProps: {
         attributes: {
           class: 'lash-editor-content',
+          ...(namedComment ? { tabindex: '0' } : {}),
         },
       },
     },
@@ -2878,7 +2892,7 @@ function ResolvedDocumentWorkspace({
 
   const historyPanelEditor = documentMutationLocked || realtimeEnabled ? null : editor;
   const canStartSuggestion = realtimeEnabled
-    ? Boolean(editor && sharedSuggestionsReady && canEditDocument)
+    ? Boolean(editor && sharedSuggestionsReady && (namedComment || canEditDocument))
     : Boolean(editor && !documentMutationLocked && localBodyState === 'ready');
 
   const handleStartSuggestion = (trigger: HTMLButtonElement) => {
@@ -3271,10 +3285,11 @@ function ResolvedDocumentWorkspace({
               baseVersion={realtimeEnabled ? null : historyHead}
               currentText={currentText}
               open={activeTab === 'chat'}
-              showTestAiReply={syntheticAiFixtureEnabled}
-              mutationEnabled={!documentMutationLocked}
+              showTestAiReply={!namedComment && syntheticAiFixtureEnabled}
+              mutationEnabled={namedComment || !documentMutationLocked}
+              statusChangesEnabled={!namedComment}
               mutationUnavailableReason={
-                inviteScope === 'comment' || inviteScope === 'suggest'
+                !namedComment && (inviteScope === 'comment' || inviteScope === 'suggest')
                   ? `${inviteScope === 'comment' ? 'Comment' : 'Suggest'} access is read-only in this runtime. Existing threads remain available to read and navigate.`
                   : undefined
               }
@@ -3324,7 +3339,7 @@ function ResolvedDocumentWorkspace({
                       thread.proposal.actorId === realtimeSnapshot.actorId ? 'You' : 'Collaborator'
                     }
                     createdAt={thread.proposal.createdAt}
-                    quote={thread.anchor.token.text}
+                    quote={namedComment && stale ? '' : thread.anchor.token.text}
                     replacement={thread.proposal.replacement}
                     status={thread.proposal.status}
                     stale={stale}
@@ -3626,12 +3641,10 @@ function ResolvedDocumentWorkspace({
   const showRealtimeRetry =
     remoteAccessEstablished &&
     (realtimeSnapshot.syncState === 'reconnecting' || realtimeSnapshot.syncState === 'offline');
-  const namedEditMember =
-    realtimeEnabled &&
-    NAMED_EDIT_ROOM_ID.test(activeDocumentId) &&
-    !accessSnapshot.authoritativeOwner;
-  const sharedAccessLabel = namedEditMember
-    ? 'Can edit'
+  const sharedAccessLabel = namedMember
+    ? namedComment
+      ? 'Can comment'
+      : 'Can edit'
     : inviteScope
       ? `${inviteScope.charAt(0).toUpperCase()}${inviteScope.slice(1)} access`
       : 'Owner access';
@@ -4021,10 +4034,10 @@ function ResolvedDocumentWorkspace({
       onToggleFocusMode={handleFocusModeToggle}
       onStartSuggestion={handleStartSuggestion}
       onDiscussionClick={handleDiscussionClick}
-      onShareClick={namedEditMember ? undefined : handleShareClick}
-      onSettingsClick={namedEditMember ? undefined : handleDocumentSettingsClick}
+      onShareClick={namedMember ? undefined : handleShareClick}
+      onSettingsClick={namedMember ? undefined : handleDocumentSettingsClick}
       onOpenMobileSidebar={handleOpenMobileSidebar}
-      extras={documentControls}
+      extras={namedComment ? undefined : documentControls}
     />
   );
 
@@ -4047,7 +4060,7 @@ function ResolvedDocumentWorkspace({
     <RightRail
       active={activeTab}
       onChange={setActiveTab}
-      tabs={railTabs}
+      tabs={namedComment ? railTabs.filter(({ id }) => id === 'chat') : railTabs}
       jumpRequest={railJumpRequest}
       onClose={closeActivityRail}
     />
@@ -4076,7 +4089,7 @@ function ResolvedDocumentWorkspace({
           <EditorToolbar
             editor={editor}
             groups={TOOLBAR_META}
-            hidden={isFocusMode}
+            hidden={isFocusMode || namedComment}
             disabled={documentMutationLocked}
             onClick={handleToolbarClick}
             trailing={
@@ -4110,10 +4123,11 @@ function ResolvedDocumentWorkspace({
                     aria-label="Document title"
                     className="lash-doc-title lash-doc-title-input"
                     data-testid="lash-doc-title-input"
-                    disabled={documentMutationLocked}
+                    disabled={!namedComment && documentMutationLocked}
                     id="lash-doc-title-text"
                     onBlur={handleDocTitleBlur}
                     onChange={handleDocTitleChange}
+                    readOnly={namedComment}
                     type="text"
                     value={docTitle}
                   />

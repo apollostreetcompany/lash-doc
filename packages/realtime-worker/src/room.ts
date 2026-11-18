@@ -1,7 +1,8 @@
-import type {
-  PublicDocumentAccessModeV1,
-  PublicRoomHydrationCompleteFrameV1,
-  PublicRoomReadyFrameV1,
+import {
+  createDocumentId,
+  type PublicDocumentAccessModeV1,
+  type PublicRoomHydrationCompleteFrameV1,
+  type PublicRoomReadyFrameV1,
 } from '@lash/types';
 import { DurableObject } from 'cloudflare:workers';
 import type * as Y from 'yjs';
@@ -14,10 +15,18 @@ import {
 import {
   commitCollaboratorReviewOperation,
   initializeCollaboratorReviewStorage,
+  projectNamedCommentReview,
   readCollaboratorReviewSnapshot,
 } from './collaboratorReviewStore';
-import { isCurrentRoomSuggestion, prepareRoomSuggestionDecision } from './collaboratorSuggestion';
 import {
+  createRoomCommentAnchorReader,
+  isCurrentRoomSuggestion,
+  prepareRoomSuggestionDecision,
+} from './collaboratorSuggestion';
+import {
+  NAMED_COMMENT_CAPABILITIES,
+  NAMED_COMMENT_PROTOCOL_VERSION,
+  NAMED_COMMENT_SOCKET_PROTOCOL,
   NAMED_EDIT_CAPABILITIES,
   NAMED_EDIT_PROTOCOL_VERSION,
   NAMED_EDIT_REQUEST_LIMIT,
@@ -27,16 +36,20 @@ import {
   isNamedEditOrigin,
   isNamedEditPrincipal,
   isNamedEditRoomId,
+  namedCommentEnabled,
   namedEditEnabled,
   namedEditFailure,
   namedEditResponse,
   parseNamedEditCommand,
+  parseNamedCommentSocketProtocols,
   parseNamedEditSocketProtocols,
   type NamedEditAction,
 } from './namedEdit';
 import {
   applyNamedEditYjsUpdate,
   applyRoomYjsUpdate,
+  canShareNamedCommentProjection,
+  encodeNamedCommentYjsProjection,
   encodePublicYjsProjection,
   encodeRoomYjsStateVector,
   isSafePublicYjsProjection,
@@ -44,10 +57,13 @@ import {
   readCanonicalRoomYjsBody,
 } from './namedEditProjection';
 import {
+  consumeNamedCommentTicket,
   consumeNamedEditTicket,
   executeNamedEdit,
   initializeNamedEditStorage,
+  isCurrentNamedCommentGrant,
   isCurrentNamedEditGrant,
+  type NamedCommentGrant,
   type NamedEditGrant,
 } from './namedEditStore';
 import {
@@ -157,6 +173,7 @@ type StandardSocketAttachment = {
   capabilities: RealtimeCapability[];
   scope?: RealtimeInviteScope;
   namedEditGrant?: NamedEditGrant;
+  namedCommentGrant?: undefined;
   historyGeneration?: number;
   connectedAt: number;
   awareness?: AwarenessState;
@@ -176,10 +193,28 @@ export interface PublicSocketAttachment {
   scope?: undefined;
   awareness?: undefined;
   namedEditGrant?: undefined;
+  namedCommentGrant?: undefined;
   historyGeneration?: undefined;
 }
 
-type SocketAttachment = StandardSocketAttachment | PublicSocketAttachment;
+type NamedCommentSocketAttachment = {
+  protocolVersion: typeof NAMED_COMMENT_PROTOCOL_VERSION;
+  hydrated: boolean;
+  actorId: string;
+  roomId: string;
+  capabilities: [...typeof NAMED_COMMENT_CAPABILITIES];
+  scope: 'comment';
+  namedCommentGrant: NamedCommentGrant;
+  namedEditGrant?: undefined;
+  awareness?: undefined;
+  historyGeneration: number;
+  connectedAt: number;
+};
+
+type SocketAttachment =
+  | StandardSocketAttachment
+  | PublicSocketAttachment
+  | NamedCommentSocketAttachment;
 
 type ClientMessage = {
   type?: string;
@@ -498,9 +533,32 @@ export const isCurrentSocketAttachment = (value: unknown): value is SocketAttach
     scope?: unknown;
     awareness?: unknown;
     namedEditGrant?: unknown;
+    namedCommentGrant?: unknown;
     historyGeneration?: unknown;
   };
   const capabilities = attachment.capabilities;
+  if (attachment.protocolVersion === NAMED_COMMENT_PROTOCOL_VERSION) {
+    return (
+      typeof attachment.hydrated === 'boolean' &&
+      isNamedEditActorId(attachment.actorId) &&
+      isNamedEditRoomId(attachment.roomId) &&
+      Array.isArray(capabilities) &&
+      capabilities.length === NAMED_COMMENT_CAPABILITIES.length &&
+      NAMED_COMMENT_CAPABILITIES.every((capability, index) => capability === capabilities[index]) &&
+      attachment.scope === 'comment' &&
+      isNamedEditGrant(attachment.namedCommentGrant) &&
+      attachment.namedEditGrant === undefined &&
+      attachment.awareness === undefined &&
+      attachment.mode === undefined &&
+      attachment.policyVersion === undefined &&
+      attachment.cutoffGeneration === undefined &&
+      attachment.browserOrigin === undefined &&
+      Number.isSafeInteger(attachment.historyGeneration) &&
+      Number(attachment.historyGeneration) >= 0 &&
+      typeof attachment.connectedAt === 'number' &&
+      Number.isFinite(attachment.connectedAt)
+    );
+  }
   if (attachment.protocolVersion === PUBLIC_REALTIME_PROTOCOL_VERSION) {
     return (
       typeof attachment.hydrated === 'boolean' &&
@@ -520,6 +578,7 @@ export const isCurrentSocketAttachment = (value: unknown): value is SocketAttach
       attachment.scope === undefined &&
       attachment.awareness === undefined &&
       attachment.namedEditGrant === undefined &&
+      attachment.namedCommentGrant === undefined &&
       attachment.historyGeneration === undefined
     );
   }
@@ -539,6 +598,7 @@ export const isCurrentSocketAttachment = (value: unknown): value is SocketAttach
     Number.isFinite(attachment.connectedAt) &&
     (attachment.scope === undefined || isRealtimeScope(attachment.scope)) &&
     hasConsistentAttachmentCapabilities(capabilities, attachment.scope) &&
+    attachment.namedCommentGrant === undefined &&
     (attachment.historyGeneration === undefined ||
       (attachment.protocolVersion !== REALTIME_PROTOCOL_VERSION &&
         Number.isSafeInteger(attachment.historyGeneration) &&
@@ -591,7 +651,9 @@ const isOpenSocket = (ws: WebSocket) => ws.readyState === OPEN_SOCKET_READY_STAT
 export const buildRoomHydrationFrames = (input: {
   roomId: string;
   updates: string[];
-  protocolVersion?: StandardSocketAttachment['protocolVersion'];
+  protocolVersion?:
+    | StandardSocketAttachment['protocolVersion']
+    | typeof NAMED_COMMENT_PROTOCOL_VERSION;
   historyGeneration?: number;
 }): Array<Record<string, unknown>> => [
   {
@@ -1714,6 +1776,7 @@ class SqlPublicCommentStore implements PublicCommentStore, PublicCommentModerati
 export class LashRealtimeRoom extends DurableObject<Env> {
   private projectionCache: Y.Doc | null = null;
   private canonicalBodyCache: string | null = null;
+  private commentReviewFingerprint: string | null = null;
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
@@ -2029,7 +2092,8 @@ export class LashRealtimeRoom extends DurableObject<Env> {
       protocolVersion !== REALTIME_PROTOCOL_VERSION &&
       protocolVersion !== OWNER_REALTIME_PROTOCOL_VERSION &&
       protocolVersion !== PUBLIC_REALTIME_PROTOCOL_VERSION &&
-      protocolVersion !== NAMED_EDIT_PROTOCOL_VERSION
+      protocolVersion !== NAMED_EDIT_PROTOCOL_VERSION &&
+      protocolVersion !== NAMED_COMMENT_PROTOCOL_VERSION
     ) {
       return json({ ok: false, error: 'protocol-mismatch', retryable: false }, { status: 409 });
     }
@@ -2037,6 +2101,12 @@ export class LashRealtimeRoom extends DurableObject<Env> {
       return json({ ok: false, error: 'forbidden', reason: 'missing-actor' }, { status: 403 });
     }
     if (protocolVersion === REALTIME_PROTOCOL_VERSION && isNamedEditRoomId(roomId)) {
+      return json({ ok: false, error: 'forbidden' }, { status: 403 });
+    }
+    if (
+      protocolVersion === NAMED_COMMENT_PROTOCOL_VERSION &&
+      url.pathname !== '/__lash-room/socket'
+    ) {
       return json({ ok: false, error: 'forbidden' }, { status: 403 });
     }
 
@@ -2101,6 +2171,10 @@ export class LashRealtimeRoom extends DurableObject<Env> {
       );
       return;
     }
+    if (attachment.protocolVersion === NAMED_COMMENT_PROTOCOL_VERSION) {
+      this.handleNamedCommentMessage(ws, attachment, message);
+      return;
+    }
     if (!this.keepCurrentHistorySocket(ws, attachment)) return;
     const parsed = parseClientMessage(message);
     if (!parsed) {
@@ -2154,7 +2228,8 @@ export class LashRealtimeRoom extends DurableObject<Env> {
       });
       for (const peer of this.currentSockets().filter(
         ({ attachment: peerAttachment }) =>
-          peerAttachment.protocolVersion !== PUBLIC_REALTIME_PROTOCOL_VERSION,
+          peerAttachment.protocolVersion !== PUBLIC_REALTIME_PROTOCOL_VERSION &&
+          peerAttachment.protocolVersion !== NAMED_COMMENT_PROTOCOL_VERSION,
       )) {
         peer.ws.send(payload);
       }
@@ -2279,7 +2354,12 @@ export class LashRealtimeRoom extends DurableObject<Env> {
   ): Promise<void> {
     const attachment = readAttachment(ws);
     if (!attachment) return;
-    if (attachment.protocolVersion === PUBLIC_REALTIME_PROTOCOL_VERSION) return;
+    if (
+      attachment.protocolVersion === PUBLIC_REALTIME_PROTOCOL_VERSION ||
+      attachment.protocolVersion === NAMED_COMMENT_PROTOCOL_VERSION
+    ) {
+      return;
+    }
     this.broadcastAwareness(attachment.roomId, ws);
   }
 
@@ -2291,7 +2371,8 @@ export class LashRealtimeRoom extends DurableObject<Env> {
       | typeof REALTIME_PROTOCOL_VERSION
       | typeof OWNER_REALTIME_PROTOCOL_VERSION
       | typeof PUBLIC_REALTIME_PROTOCOL_VERSION
-      | typeof NAMED_EDIT_PROTOCOL_VERSION,
+      | typeof NAMED_EDIT_PROTOCOL_VERSION
+      | typeof NAMED_COMMENT_PROTOCOL_VERSION,
   ): Promise<Response> {
     if (request.headers.get('Upgrade')?.toLowerCase() !== 'websocket') {
       return json({ ok: false, error: 'expected_websocket' }, { status: 426 });
@@ -2303,6 +2384,8 @@ export class LashRealtimeRoom extends DurableObject<Env> {
     let capabilities: RealtimeCapability[];
     let scope: RealtimeInviteScope | undefined;
     let namedEditGrant: NamedEditGrant | undefined;
+    let namedCommentGrant: NamedCommentGrant | undefined;
+    let namedCommentUpdate: string | null = null;
     let historyGeneration: number | undefined;
     let publicGrant:
       | {
@@ -2351,12 +2434,19 @@ export class LashRealtimeRoom extends DurableObject<Env> {
         policyVersion: consumed.grant.policyVersion,
         cutoffGeneration: consumed.grant.cutoffGeneration,
       };
-    } else if (protocolVersion === NAMED_EDIT_PROTOCOL_VERSION) {
+    } else if (
+      protocolVersion === NAMED_EDIT_PROTOCOL_VERSION ||
+      protocolVersion === NAMED_COMMENT_PROTOCOL_VERSION
+    ) {
       const query = [...url.searchParams.entries()];
-      const token = parseNamedEditSocketProtocols(request.headers.get('sec-websocket-protocol'));
+      const comment = protocolVersion === NAMED_COMMENT_PROTOCOL_VERSION;
+      const protocols = request.headers.get('sec-websocket-protocol');
+      const token = comment
+        ? parseNamedCommentSocketProtocols(protocols)
+        : parseNamedEditSocketProtocols(protocols);
       const origin = request.headers.get('origin');
       if (
-        !this.namedEditIsEnabled() ||
+        !(comment ? this.namedCommentIsEnabled() : this.namedEditIsEnabled()) ||
         !isNamedEditRoomId(roomId) ||
         !isNamedEditActorId(actorId) ||
         query.length !== 3 ||
@@ -2371,7 +2461,8 @@ export class LashRealtimeRoom extends DurableObject<Env> {
       ) {
         return namedEditResponse(namedEditFailure('forbidden'));
       }
-      const grant = await consumeNamedEditTicket({
+      const consume = comment ? consumeNamedCommentTicket : consumeNamedEditTicket;
+      const grant = await consume({
         storage: this.ctx.storage,
         roomId,
         actorId,
@@ -2379,12 +2470,25 @@ export class LashRealtimeRoom extends DurableObject<Env> {
         token,
         nowMs: Date.now(),
       });
-      if (!grant || !this.namedEditGrantIsCurrent(roomId, grant, Date.now())) {
+      if (
+        !grant ||
+        !(comment
+          ? this.namedCommentGrantIsCurrent(roomId, grant, Date.now())
+          : this.namedEditGrantIsCurrent(roomId, grant, Date.now()))
+      ) {
         return namedEditResponse(namedEditFailure('forbidden'));
       }
-      capabilities = [...NAMED_EDIT_CAPABILITIES];
-      scope = 'edit';
-      namedEditGrant = grant;
+      capabilities = comment ? ['doc.read'] : [...NAMED_EDIT_CAPABILITIES];
+      scope = comment ? 'comment' : 'edit';
+      if (comment) {
+        namedCommentUpdate = this.commentHydrationUpdate();
+        if (!namedCommentUpdate) {
+          return namedEditResponse(namedEditFailure('comment-projection-unavailable'));
+        }
+        namedCommentGrant = grant;
+      } else {
+        namedEditGrant = grant;
+      }
       historyGeneration = sharedHistoryGeneration(this.ctx.storage);
     } else if (protocolVersion === OWNER_REALTIME_PROTOCOL_VERSION) {
       const query = [...url.searchParams.entries()];
@@ -2450,7 +2554,23 @@ export class LashRealtimeRoom extends DurableObject<Env> {
         ...publicGrant,
         connectedAt,
       };
-    } else {
+    } else if (
+      protocolVersion === NAMED_COMMENT_PROTOCOL_VERSION &&
+      namedCommentGrant &&
+      namedCommentUpdate
+    ) {
+      pendingAttachment = {
+        protocolVersion,
+        hydrated: false,
+        actorId,
+        roomId,
+        capabilities: [...NAMED_COMMENT_CAPABILITIES],
+        scope: 'comment',
+        namedCommentGrant,
+        historyGeneration: historyGeneration ?? 0,
+        connectedAt,
+      };
+    } else if (protocolVersion !== NAMED_COMMENT_PROTOCOL_VERSION) {
       pendingAttachment = {
         protocolVersion,
         hydrated: false,
@@ -2462,6 +2582,8 @@ export class LashRealtimeRoom extends DurableObject<Env> {
         ...(historyGeneration !== undefined ? { historyGeneration } : {}),
         connectedAt,
       };
+    } else {
+      return namedEditResponse(namedEditFailure('forbidden'));
     }
     server.serializeAttachment(pendingAttachment);
     let hydrated = false;
@@ -2473,12 +2595,18 @@ export class LashRealtimeRoom extends DurableObject<Env> {
               ...publicGrant,
               ...this.publicHydrationInventory(),
             })
-          : buildRoomHydrationFrames({
-              roomId,
-              updates: this.hydrationUpdates(),
-              protocolVersion: protocolVersion as StandardSocketAttachment['protocolVersion'],
-              historyGeneration,
-            });
+          : pendingAttachment.protocolVersion === NAMED_COMMENT_PROTOCOL_VERSION
+            ? buildRoomHydrationFrames({
+                roomId,
+                updates: namedCommentUpdate ? [namedCommentUpdate] : [],
+                protocolVersion: pendingAttachment.protocolVersion,
+              })
+            : buildRoomHydrationFrames({
+                roomId,
+                updates: this.hydrationUpdates(),
+                protocolVersion: protocolVersion as StandardSocketAttachment['protocolVersion'],
+                historyGeneration,
+              });
       for (const frame of frames) {
         if (!isOpenSocket(server)) throw new Error('socket-not-open');
         server.send(JSON.stringify(frame));
@@ -2491,6 +2619,8 @@ export class LashRealtimeRoom extends DurableObject<Env> {
             operations: readCollaboratorReviewSnapshot(this.ctx.storage),
           }),
         );
+      } else if (pendingAttachment.protocolVersion === NAMED_COMMENT_PROTOCOL_VERSION) {
+        server.send(this.commentReviewSnapshot(roomId, actorId, this.projectCommentReview(roomId)));
       }
       if (!isOpenSocket(server)) throw new Error('socket-not-open');
       server.serializeAttachment({
@@ -2503,7 +2633,11 @@ export class LashRealtimeRoom extends DurableObject<Env> {
         server.close(1011, 'hydration-failed');
       }
     }
-    if (hydrated && protocolVersion !== PUBLIC_REALTIME_PROTOCOL_VERSION) {
+    if (
+      hydrated &&
+      protocolVersion !== PUBLIC_REALTIME_PROTOCOL_VERSION &&
+      protocolVersion !== NAMED_COMMENT_PROTOCOL_VERSION
+    ) {
       this.broadcastAwareness(roomId);
     }
 
@@ -2517,13 +2651,17 @@ export class LashRealtimeRoom extends DurableObject<Env> {
             ? { 'sec-websocket-protocol': PUBLIC_SOCKET_PROTOCOL }
             : protocolVersion === NAMED_EDIT_PROTOCOL_VERSION
               ? { 'sec-websocket-protocol': NAMED_EDIT_SOCKET_PROTOCOL }
-              : undefined,
+              : protocolVersion === NAMED_COMMENT_PROTOCOL_VERSION
+                ? { 'sec-websocket-protocol': NAMED_COMMENT_SOCKET_PROTOCOL }
+                : undefined,
     });
   }
 
   private broadcastAwareness(roomId: string, exclude?: WebSocket) {
     const roomSockets = this.currentSockets({ exclude, roomId }).filter(
-      ({ attachment }) => attachment.protocolVersion !== PUBLIC_REALTIME_PROTOCOL_VERSION,
+      ({ attachment }) =>
+        attachment.protocolVersion !== PUBLIC_REALTIME_PROTOCOL_VERSION &&
+        attachment.protocolVersion !== NAMED_COMMENT_PROTOCOL_VERSION,
     );
     const peers = roomSockets
       .map((peer) => peer.attachment)
@@ -2559,7 +2697,13 @@ export class LashRealtimeRoom extends DurableObject<Env> {
     return namedEditEnabled(this.env as Env & Parameters<typeof namedEditEnabled>[0]);
   }
 
-  private isPrivateReviewSocket(attachment: SocketAttachment) {
+  private namedCommentIsEnabled() {
+    return namedCommentEnabled(this.env as Env & Parameters<typeof namedCommentEnabled>[0]);
+  }
+
+  private isPrivateReviewSocket(
+    attachment: SocketAttachment,
+  ): attachment is StandardSocketAttachment {
     return (
       this.namedEditIsEnabled() &&
       (attachment.protocolVersion === OWNER_REALTIME_PROTOCOL_VERSION ||
@@ -2588,14 +2732,19 @@ export class LashRealtimeRoom extends DurableObject<Env> {
     );
   }
 
-  private isCurrentHistorySocket(attachment: StandardSocketAttachment) {
+  private isCurrentHistorySocket(
+    attachment: StandardSocketAttachment | NamedCommentSocketAttachment,
+  ) {
     return (
       attachment.protocolVersion === REALTIME_PROTOCOL_VERSION ||
       (attachment.historyGeneration ?? 0) === sharedHistoryGeneration(this.ctx.storage)
     );
   }
 
-  private keepCurrentHistorySocket(ws: WebSocket, attachment: StandardSocketAttachment) {
+  private keepCurrentHistorySocket(
+    ws: WebSocket,
+    attachment: StandardSocketAttachment | NamedCommentSocketAttachment,
+  ) {
     if (this.isCurrentHistorySocket(attachment)) return true;
     try {
       ws.close(4410, 'document-restored');
@@ -2642,22 +2791,29 @@ export class LashRealtimeRoom extends DurableObject<Env> {
 
   private handleReviewOperation(
     ws: WebSocket,
-    attachment: StandardSocketAttachment,
+    attachment: StandardSocketAttachment | NamedCommentSocketAttachment,
     message: ClientMessage,
   ) {
     const { roomId, actorId } = attachment;
+    const comment = attachment.protocolVersion === NAMED_COMMENT_PROTOCOL_VERSION;
     const operationId = isNamedEditInviteId(message.operationId) ? message.operationId : null;
     const publicStateVector = this.readPublicStateVector();
     const appended: { update?: PersistedRealtimeUpdate } = {};
     let committed: ReturnType<typeof commitCollaboratorReviewOperation>;
     try {
+      const commentProjection = comment ? this.loadProjection() : null;
+      if (comment && !commentProjection) throw new Error('Comment projection is unavailable.');
       committed = commitCollaboratorReviewOperation({
         storage: this.ctx.storage,
         actorId,
         operationId,
         operation: message.operation,
+        ...(commentProjection
+          ? { commentAccess: this.commentReviewAccess(commentProjection) }
+          : {}),
         suggestions: {
           validateProposal: (proposal) => {
+            if (commentProjection) return isCurrentRoomSuggestion(commentProjection, proposal);
             const projection = loadRoomYjsProjection(this.hydrationUpdates());
             if (!projection) return false;
             try {
@@ -2667,6 +2823,7 @@ export class LashRealtimeRoom extends DurableObject<Env> {
             }
           },
           applyProposal: (proposal) => {
+            if (comment) return null;
             const projection = loadRoomYjsProjection(this.hydrationUpdates());
             if (!projection) return null;
             try {
@@ -2708,21 +2865,35 @@ export class LashRealtimeRoom extends DurableObject<Env> {
       ws.send(JSON.stringify({ type: 'review-error', roomId, operationId, code: committed.code }));
       return;
     }
-    const payload = JSON.stringify({
+    const privatePayload = JSON.stringify({
       type: 'review-operation',
       roomId,
       operation: committed.operation,
     });
     if (committed.duplicate) {
-      ws.send(payload);
+      ws.send(
+        comment
+          ? this.commentReviewSnapshot(roomId, actorId, this.projectCommentReview(roomId))
+          : privatePayload,
+      );
     } else {
       if (appended.update) {
         this.advanceProjection(appended.update.update);
         this.broadcastYjsUpdate(roomId, appended.update, { publicStateVector });
       }
+      let commentView: ReturnType<typeof projectNamedCommentReview> | undefined;
       for (const peer of this.currentSockets({ roomId })) {
-        if (this.isPrivateReviewSocket(peer.attachment)) peer.ws.send(payload);
+        if (this.isPrivateReviewSocket(peer.attachment)) {
+          peer.ws.send(privatePayload);
+        } else if (
+          peer.attachment.protocolVersion === NAMED_COMMENT_PROTOCOL_VERSION &&
+          !appended.update
+        ) {
+          commentView ??= this.projectCommentReview(roomId);
+          peer.ws.send(this.commentReviewSnapshot(roomId, peer.attachment.actorId, commentView));
+        }
       }
+      if (commentView) this.commentReviewFingerprint = commentView.fingerprint;
     }
     ws.send(
       JSON.stringify({
@@ -2732,6 +2903,37 @@ export class LashRealtimeRoom extends DurableObject<Env> {
         sequence: committed.operation.sequence,
       }),
     );
+  }
+
+  private handleNamedCommentMessage(
+    ws: WebSocket,
+    attachment: NamedCommentSocketAttachment,
+    message: string | ArrayBuffer,
+  ) {
+    if (
+      !this.keepNamedCommentSocket(ws, attachment) ||
+      !this.keepCurrentHistorySocket(ws, attachment)
+    ) {
+      return;
+    }
+    const parsed =
+      typeof message === 'string' && message.length <= 12_000 ? parseClientMessage(message) : null;
+    if (parsed?.type === 'review-operation') {
+      this.handleReviewOperation(ws, attachment, parsed);
+      return;
+    }
+    if (parsed?.type === 'ping') {
+      ws.send(
+        JSON.stringify({
+          type: 'pong',
+          requestId: parsed.requestId ?? null,
+          roomId: attachment.roomId,
+          protocolVersion: NAMED_COMMENT_PROTOCOL_VERSION,
+        }),
+      );
+      return;
+    }
+    ws.close(4403, 'named-comment-scope');
   }
 
   private readPublicStateVector() {
@@ -2752,7 +2954,32 @@ export class LashRealtimeRoom extends DurableObject<Env> {
       update: persisted.update,
     });
     let publicPayload: string | null | undefined;
+    let commentPayload: string | null | undefined;
+    let commentView: ReturnType<typeof projectNamedCommentReview> | undefined;
     for (const peer of this.currentSockets({ roomId, exclude: options.exclude })) {
+      if (peer.attachment.protocolVersion === NAMED_COMMENT_PROTOCOL_VERSION) {
+        if (commentPayload === undefined) {
+          const projection = this.loadProjection();
+          const update =
+            projection &&
+            encodeNamedCommentYjsProjection(
+              projection,
+              options.publicStateVector,
+              this.readCanonicalBody(),
+            );
+          commentPayload = update ? JSON.stringify({ type: 'yjs-update', roomId, update }) : null;
+        }
+        if (!commentPayload) {
+          peer.ws.close(4403, 'comment-projection-unavailable');
+          continue;
+        }
+        peer.ws.send(commentPayload);
+        commentView ??= this.projectCommentReview(roomId);
+        if (commentView.fingerprint !== this.commentReviewFingerprint) {
+          peer.ws.send(this.commentReviewSnapshot(roomId, peer.attachment.actorId, commentView));
+        }
+        continue;
+      }
       if (peer.attachment.protocolVersion !== PUBLIC_REALTIME_PROTOCOL_VERSION) {
         peer.ws.send(payload);
         continue;
@@ -2766,6 +2993,7 @@ export class LashRealtimeRoom extends DurableObject<Env> {
       if (publicPayload) peer.ws.send(publicPayload);
       else this.closePublicPolicyChangedSocket(peer.ws);
     }
+    if (commentView) this.commentReviewFingerprint = commentView.fingerprint;
   }
 
   private loadProjection(): Y.Doc | null {
@@ -2782,6 +3010,52 @@ export class LashRealtimeRoom extends DurableObject<Env> {
   private publicProjectionCanBeShared() {
     const projection = this.loadProjection();
     return projection !== null && isSafePublicYjsProjection(projection);
+  }
+
+  private commentProjectionCanBeShared() {
+    const projection = this.loadProjection();
+    return (
+      projection !== null && canShareNamedCommentProjection(projection, this.readCanonicalBody())
+    );
+  }
+
+  private commentHydrationUpdate() {
+    const projection = this.loadProjection();
+    return (
+      projection && encodeNamedCommentYjsProjection(projection, undefined, this.readCanonicalBody())
+    );
+  }
+
+  private commentReviewAccess(projection: Y.Doc) {
+    return {
+      readAnchor: createRoomCommentAnchorReader(projection),
+      validateProposal: (proposal: Parameters<typeof isCurrentRoomSuggestion>[1]) =>
+        isCurrentRoomSuggestion(projection, proposal),
+    };
+  }
+
+  private projectCommentReview(roomId: string) {
+    const operations = readCollaboratorReviewSnapshot(this.ctx.storage);
+    const projection = operations.length ? this.loadProjection() : null;
+    return projection
+      ? projectNamedCommentReview(
+          createDocumentId(roomId),
+          operations,
+          this.commentReviewAccess(projection),
+        )
+      : { fingerprint: '0:', threadsFor: () => [] };
+  }
+
+  private commentReviewSnapshot(
+    roomId: string,
+    actorId: string,
+    view: ReturnType<typeof projectNamedCommentReview>,
+  ) {
+    return JSON.stringify({
+      type: 'review-snapshot',
+      roomId,
+      threads: view.threadsFor(actorId),
+    });
   }
 
   private readCanonicalBody() {
@@ -2811,6 +3085,31 @@ export class LashRealtimeRoom extends DurableObject<Env> {
       this.namedEditIsEnabled() &&
       isCurrentNamedEditGrant({ storage: this.ctx.storage, roomId, grant, nowMs })
     );
+  }
+
+  private namedCommentGrantIsCurrent(roomId: string, grant: NamedCommentGrant, nowMs: number) {
+    return (
+      this.namedCommentIsEnabled() &&
+      isCurrentNamedCommentGrant({ storage: this.ctx.storage, roomId, grant, nowMs })
+    );
+  }
+
+  private keepNamedCommentSocket(ws: WebSocket, attachment: NamedCommentSocketAttachment) {
+    const { namedCommentGrant: grant, roomId } = attachment;
+    const now = Date.now();
+    try {
+      if (this.namedCommentGrantIsCurrent(roomId, grant, now)) {
+        if (this.commentProjectionCanBeShared()) return true;
+        ws.close(4403, 'comment-projection-unavailable');
+      } else if (grant.expiresAtMs <= now) {
+        ws.close(1012, 'named-session-expired');
+      } else {
+        ws.close(4403, 'named-access-revoked');
+      }
+    } catch {
+      // Treat a disconnected socket or unavailable projection as unreadable.
+    }
+    return false;
   }
 
   private keepNamedEditSocket(ws: WebSocket, attachment: StandardSocketAttachment) {
@@ -2862,6 +3161,8 @@ export class LashRealtimeRoom extends DurableObject<Env> {
       roomId,
       requestId,
       nowMs: Date.now(),
+      commentEnabled: this.namedCommentIsEnabled(),
+      commentProjectionAvailable: () => this.commentHydrationUpdate() !== null,
     });
     if (result.ok && command.action === 'revoke') this.broadcastAwareness(roomId);
     return namedEditResponse(result);
@@ -3741,6 +4042,12 @@ export class LashRealtimeRoom extends DurableObject<Env> {
       if (
         attachment.protocolVersion === NAMED_EDIT_PROTOCOL_VERSION &&
         !this.keepNamedEditSocket(ws, attachment)
+      ) {
+        continue;
+      }
+      if (
+        attachment.protocolVersion === NAMED_COMMENT_PROTOCOL_VERSION &&
+        !this.keepNamedCommentSocket(ws, attachment)
       ) {
         continue;
       }

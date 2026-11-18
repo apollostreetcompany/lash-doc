@@ -1,10 +1,14 @@
 import {
+  collectReviewThreads,
   isReviewId,
   parseCommittedReviewOperation,
   parseReviewMutation,
+  type ChatAnchor,
+  type CommentReviewThread,
   type CommittedReviewOperation,
   type ReviewProposal,
 } from '@lash/doc-chat';
+import type { DocumentId } from '@lash/types';
 
 const MAX_REVIEW_OPERATIONS_PER_ROOM = 256;
 
@@ -26,6 +30,8 @@ type CommitResult =
         | 'review_operation_conflict'
         | 'review_thread_missing'
         | 'review_thread_exists'
+        | 'review_scope_mismatch'
+        | 'review_anchor_stale'
         | 'review_suggestion_stale'
         | 'review_suggestion_decided'
         | 'review_capacity';
@@ -95,12 +101,72 @@ export const readCollaboratorReviewSnapshot = (storage: DurableObjectStorage) =>
     .toArray()
     .map(decodeReviewOperation);
 
+type ReadCommentAnchor = (anchor: ChatAnchor<null>) => ChatAnchor<null> | null;
+type CommentAccess = {
+  readAnchor: ReadCommentAnchor;
+  validateProposal(proposal: ReviewProposal): boolean;
+};
+
+const projectCommentSeed = (
+  operation: Extract<CommittedReviewOperation['operation'], { type: 'create' | 'propose' }>,
+  access: CommentAccess,
+) => {
+  const anchor = access.readAnchor(operation.anchor);
+  if (!anchor || (operation.type === 'propose' && !access.validateProposal(operation))) {
+    return null;
+  }
+  return { ...operation, anchor };
+};
+
+export const projectNamedCommentReview = (
+  docId: DocumentId,
+  operations: CommittedReviewOperation[],
+  access: CommentAccess,
+) => {
+  const visible = new Map<string, ChatAnchor<null>>();
+  const participants = new Map<string, Set<string>>();
+  for (const record of operations) {
+    const { operation } = record;
+    if (operation.type === 'create' || operation.type === 'propose' || operation.type === 'reply') {
+      const actors = participants.get(operation.threadId) ?? new Set<string>();
+      actors.add(record.actorId);
+      participants.set(operation.threadId, actors);
+    }
+    if (operation.type === 'create' || operation.type === 'propose') {
+      const projected = projectCommentSeed(operation, access);
+      if (projected) visible.set(operation.threadId, projected.anchor);
+    }
+  }
+  return {
+    fingerprint: `${operations.at(-1)?.sequence ?? 0}:${[...visible.keys()].join(',')}`,
+    threadsFor(actorId: string): CommentReviewThread[] {
+      return collectReviewThreads(operations, docId).flatMap((thread) => {
+        const anchor = visible.get(thread.id) ?? null;
+        if (!anchor && !participants.get(thread.id)?.has(actorId)) return [];
+        const { id, messages, status, resolvedAt, updatedAt, proposal } = thread;
+        return [
+          {
+            id,
+            anchor,
+            messages,
+            status,
+            resolvedAt,
+            updatedAt,
+            ...(proposal ? { proposal } : {}),
+          },
+        ];
+      });
+    },
+  };
+};
+
 export const commitCollaboratorReviewOperation = ({
   storage,
   actorId,
   operationId,
   operation: rawOperation,
   suggestions,
+  commentAccess,
 }: {
   storage: DurableObjectStorage;
   actorId: string;
@@ -110,10 +176,14 @@ export const commitCollaboratorReviewOperation = ({
     validateProposal(proposal: ReviewProposal): boolean;
     applyProposal(proposal: ReviewProposal): number | null;
   };
+  commentAccess?: CommentAccess;
 }): CommitResult => {
   const operation = parseReviewMutation(rawOperation);
   if (!isReviewId(operationId) || !operation || !actorId || actorId.length > 256) {
     return { ok: false, code: 'invalid_review_operation' };
+  }
+  if (commentAccess && (operation.type === 'status' || operation.type === 'decide')) {
+    return { ok: false, code: 'review_scope_mismatch' };
   }
   const operationJson = JSON.stringify(operation);
   const { sql } = storage;
@@ -129,7 +199,6 @@ export const commitCollaboratorReviewOperation = ({
         ? { ok: true, operation: decodeReviewOperation(previous), duplicate: true }
         : { ok: false, code: 'review_operation_conflict' };
     }
-
     const thread = sql
       .exec<ReviewOperationRow>(
         `SELECT * FROM collaborator_review_operation_v2
@@ -137,6 +206,21 @@ export const commitCollaboratorReviewOperation = ({
         operation.threadId,
       )
       .toArray()[0];
+    if (commentAccess) {
+      if (operation.type === 'create' || operation.type === 'propose') {
+        if (!commentAccess.readAnchor(operation.anchor)) {
+          return { ok: false, code: 'review_anchor_stale' };
+        }
+      } else if (operation.type === 'reply') {
+        const seed = thread && decodeReviewOperation(thread).operation;
+        if (
+          (seed?.type !== 'create' && seed?.type !== 'propose') ||
+          !projectCommentSeed(seed, commentAccess)
+        ) {
+          return { ok: false, code: 'review_thread_missing' };
+        }
+      }
+    }
     const createsThread = operation.type === 'create' || operation.type === 'propose';
     if (createsThread && thread) return { ok: false, code: 'review_thread_exists' };
     if (!createsThread && !thread) return { ok: false, code: 'review_thread_missing' };

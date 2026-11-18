@@ -58,6 +58,21 @@ browser profiles on a staging instance before enabling the route for users.
 Keep public read and comment rollout independent. The Worker refuses public
 delivery for documents containing recipient-sensitive references.
 
+### Named reviewers
+
+The local launcher enables named comments alongside named edits. For a hosted
+rollout, deploy the compatible Worker first, then the matching web application.
+Enable `LASH_NAMED_COMMENT_PHASE=enabled` in both services for the review trial.
+A reviewer receives the current title and body. Documents with private reference
+chips, unsupported metadata or projections exceeding the 1 MiB bounds cannot
+issue a usable reviewer session. The owner sees when a document is ineligible.
+The other named access settings above still apply. Check **Can edit** and **Can
+comment** from different verified accounts. Check that a reviewer can propose
+wording, an owner can accept it, and revoking the reviewer ends their access.
+
+To disable new reviewer access, close the web and Worker comment phases. Preserve
+stored reviewer grants and feedback when reverting the application version.
+
 ## Hosting
 
 For account-backed collaboration, deploy the dynamic web service defined in
@@ -93,7 +108,7 @@ for the supported writing and review journeys.
 ## Realtime Worker Health
 
 - Service health: `GET /api/realtime/health`.
-- Room session grant candidate: `POST /api/realtime/rooms/<doc-id>/session` with exact JSON keys `actorId` and `inviteToken`, `Content-Type: application/json`, and a 16 KiB request limit. Token-free `GET .../session?actorId=<actor-id>` exists only for exact-loopback fallback development. A successful local response and signed grant both declare `protocolVersion: 2`. Configured non-loopback invite requests fail terminally with `invite-authority-unavailable`; production Comment/Suggest/Edit issuance is not available.
+- Room session grant candidate: `POST /api/realtime/rooms/<doc-id>/session` with exact JSON keys `actorId` and `inviteToken`, `Content-Type: application/json`, and a 16 KiB request limit. Token-free `GET .../session?actorId=<actor-id>` exists only for exact-loopback fallback development. A successful local response and signed grant both declare `protocolVersion: 2`. Configured non-loopback invite requests fail terminally with `invite-authority-unavailable`; this legacy endpoint does not issue production role grants. Use named invitations for authenticated editors and reviewers.
 - Room health: `GET /api/realtime/rooms/<doc-id>/health?accessToken=<token>`; requires `doc.read`; includes `persistence.updates`, `persistence.snapshotSequence`, and `persistence.hydrationUpdates`.
 - Room socket: `GET /api/realtime/rooms/<doc-id>/socket?accessToken=<token>&protocolVersion=2` with `Upgrade: websocket`; requires `doc.read`. URL-free WebSocket session transport remains an explicit production hardening item.
 - Room restore: `POST /api/realtime/rooms/<doc-id>/restore?accessToken=<token>` with body `{ "update": "<base64-yjs-update>" }`; requires `doc.edit`; appends a new restore update and broadcasts it to connected peers.

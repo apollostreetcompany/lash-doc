@@ -1,10 +1,13 @@
 import {
   collectReviewThreads,
+  createAnchor,
   isReviewId,
   parseChatThread,
+  parseCommentReviewThread,
   parseCommittedReviewOperation,
   parseReviewMutation,
   type CommittedReviewOperation,
+  type CommentReviewThread,
   type ReviewMutation,
   type StoredChatThread,
 } from '@lash/doc-chat';
@@ -12,10 +15,11 @@ import type { DocumentId } from '@lash/types';
 import type * as Y from 'yjs';
 
 export type ReviewMutationResult = { ok: true } | { ok: false; message: string };
+export type RealtimeChatThread = StoredChatThread & { projected?: true; detached?: true };
 
 export interface ChatRealtimeStore {
   isReady(): boolean;
-  readThreads(docId: DocumentId): StoredChatThread[];
+  readThreads(docId: DocumentId): RealtimeChatThread[];
   subscribe(listener: () => void): () => void;
   submit(mutation: ReviewMutation): Promise<ReviewMutationResult>;
 }
@@ -56,7 +60,7 @@ export const withLegacyChatThreads = (store: ChatRealtimeStore, doc: Y.Doc): Cha
 };
 
 type ReviewFrame =
-  | { type: 'review-snapshot'; roomId?: string; operations?: unknown[] }
+  | { type: 'review-snapshot'; roomId?: string; operations?: unknown[]; threads?: unknown[] }
   | { type: 'review-operation'; roomId?: string; operation?: unknown }
   | { type: 'review-ack'; roomId?: string; operationId?: unknown; sequence?: unknown }
   | { type: 'review-error'; roomId?: string; operationId?: unknown; code?: unknown };
@@ -82,16 +86,16 @@ const errorMessage = (code: unknown) => {
       return 'This document has reached its discussion capacity.';
     case 'review_thread_missing':
       return 'This thread is no longer available.';
+    case 'review_anchor_stale':
+      return 'The selected text changed. Select the updated words and try again.';
+    case 'review_scope_mismatch':
+      return 'Your access cannot resolve threads or decide suggestions.';
     case 'review_suggestion_stale':
       return 'The selected text changed. Select it again to make a new suggestion.';
     case 'review_suggestion_decided':
       return 'A decision has already been recorded for this suggestion.';
     case 'review_thread_exists':
       return 'This comment has already been posted. Close the draft to view the thread.';
-    case 'review_suggestion_stale':
-      return 'The selected text changed. Check the document before proposing the edit again.';
-    case 'review_suggestion_decided':
-      return 'Someone has already accepted or rejected this suggestion.';
     default:
       return 'Lash could not save this discussion change. Try again.';
   }
@@ -100,6 +104,7 @@ const errorMessage = (code: unknown) => {
 export class RealtimeChatStore implements ChatRealtimeStore {
   private ready = false;
   private operations = new Map<string, CommittedReviewOperation>();
+  private projectedThreads: CommentReviewThread[] | null = null;
   private pending = new Map<string, PendingReview>();
   private listeners = new Set<() => void>();
 
@@ -107,7 +112,19 @@ export class RealtimeChatStore implements ChatRealtimeStore {
 
   isReady = () => this.ready;
 
-  readThreads = (docId: DocumentId) => collectReviewThreads(this.operations.values(), docId);
+  readThreads = (docId: DocumentId): RealtimeChatThread[] =>
+    this.projectedThreads?.map(({ anchor, ...thread }) => ({
+      ...thread,
+      docId,
+      historyText: '',
+      filters: {},
+      projected: true,
+      anchor: anchor ?? {
+        ...createAnchor({ baseVersion: null, docText: '', from: 0, to: 0 }),
+        orphaned: true,
+      },
+      ...(anchor === null ? { detached: true as const } : {}),
+    })) ?? collectReviewThreads(this.operations.values(), docId);
 
   subscribe = (listener: () => void) => {
     this.listeners.add(listener);
@@ -145,8 +162,32 @@ export class RealtimeChatStore implements ChatRealtimeStore {
     return result;
   };
 
-  receive = (frame: ReviewFrame) => {
+  receive = (frame: ReviewFrame, projected = false) => {
     if (frame.type === 'review-snapshot') {
+      if (projected) {
+        if (
+          frame.operations !== undefined ||
+          !Array.isArray(frame.threads) ||
+          frame.threads.length > MAX_REVIEW_OPERATIONS
+        ) {
+          this.disconnect();
+          return;
+        }
+        const threads = frame.threads.map(parseCommentReviewThread);
+        if (
+          threads.some((thread) => thread === null) ||
+          new Set(threads.map((thread) => thread?.id)).size !== threads.length
+        ) {
+          this.disconnect();
+          return;
+        }
+        this.projectedThreads = threads.filter(
+          (thread): thread is CommentReviewThread => thread !== null,
+        );
+        this.ready = true;
+        this.emit();
+        return;
+      }
       if (!Array.isArray(frame.operations) || frame.operations.length > MAX_REVIEW_OPERATIONS) {
         return;
       }
@@ -165,6 +206,7 @@ export class RealtimeChatStore implements ChatRealtimeStore {
     }
     if (!this.ready) return;
     if (frame.type === 'review-operation') {
+      if (projected) return;
       const operation = parseCommittedReviewOperation(frame.operation);
       if (operation) {
         this.record(operation);
@@ -182,13 +224,20 @@ export class RealtimeChatStore implements ChatRealtimeStore {
     if (frame.type === 'review-error') {
       this.pending.delete(key);
       this.finishPending(pending, { ok: false, message: errorMessage(frame.code) });
-    } else if (this.operations.get(frame.operationId)?.sequence === frame.sequence) {
+    } else if (
+      projected
+        ? typeof frame.sequence === 'number' &&
+          Number.isSafeInteger(frame.sequence) &&
+          frame.sequence > 0
+        : this.operations.get(frame.operationId)?.sequence === frame.sequence
+    ) {
       this.pending.delete(key);
       this.finishPending(pending, { ok: true });
     }
   };
 
   disconnect = () => {
+    this.projectedThreads = null;
     if (!this.ready) return;
     this.ready = false;
     this.emit();

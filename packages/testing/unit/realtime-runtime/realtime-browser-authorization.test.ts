@@ -140,6 +140,66 @@ const createHarness = (
 };
 
 describe('browser document access controller', () => {
+  it('removes the named Comment projection on disconnect and hydrates fresh read authority on retry', async () => {
+    const roomId = `doc-v1-${'a'.repeat(64)}`;
+    const actorId = `named-${'b'.repeat(32)}`;
+    const commentSession = {
+      actorId,
+      capabilities: ['doc.read', 'doc.comment', 'doc.suggest'],
+      expiresAt: new Date(Date.now() + 60_000).toISOString(),
+      protocolVersion: 6,
+      roomId,
+      role: 'comment',
+      socketProtocol: 'lash-realtime-v6',
+      socketUrl: `wss://realtime.example.test/api/realtime/rooms/${roomId}/socket?protocolVersion=6&actorId=${actorId}`,
+      source: 'named',
+      ticketProtocol: `lash-named-comment-ticket.${'c'.repeat(43)}`,
+    } as const;
+    const requestNamedSession = vi.fn(async () => ({ ok: true as const, session: commentSession }));
+    const harness = createHarness({ requestNamedSession }, configuredRuntime);
+    const providerSnapshot: RealtimeSnapshot = {
+      ...harness.provider.getSnapshot(), actorId, canWrite: false,
+    };
+    const renewed = createHarness({}, configuredRuntime);
+    vi.mocked(renewed.provider.getSnapshot).mockReturnValue(providerSnapshot);
+    vi.mocked(harness.provider.getSnapshot).mockReturnValue(providerSnapshot);
+    const observers = vi.mocked(harness.provider.subscribe);
+    harness.calls.resources.mockReturnValueOnce({ doc: harness.doc, provider: harness.provider })
+      .mockReturnValueOnce({ doc: renewed.doc, provider: renewed.provider });
+    const controller = createDocumentAccessController({ documentId: roomId }, harness.dependencies);
+    try {
+      await controller.start();
+      expect(controller.getSnapshot()).toMatchObject({
+        phase: 'remote-ready', scope: 'comment', authorized: true, hydrated: true,
+        canWrite: false, canIssueInvites: false, authoritativeOwner: false,
+      });
+      expect(controller.getMutationAuthority().getSnapshot()).toMatchObject({
+        phase: 'ready-read', bodyWrite: false, metadataWrite: 'none',
+      });
+      expect(controller.getResolution()).toMatchObject({ kind: 'remote', doc: harness.doc });
+
+      observers.mock.calls[0]?.[0]({
+        ...providerSnapshot, connectionState: 'reconnecting', syncState: 'reconnecting',
+      });
+      expect(controller.getSnapshot()).toMatchObject({
+        phase: 'unavailable', reason: 'comment-connection-lost', hydrated: false, retryable: true,
+      });
+      expect(controller.getResolution()).toBeNull();
+      expect(controller.getMutationAuthority().getSnapshot().phase).toBe('revoked');
+      expect(harness.provider.destroy).toHaveBeenCalledOnce();
+
+      await controller.retry();
+      expect(requestNamedSession).toHaveBeenCalledTimes(2);
+      expect(controller.getResolution()).toMatchObject({ kind: 'remote', doc: renewed.doc });
+      expect(controller.getMutationAuthority().getSnapshot()).toMatchObject({
+        phase: 'ready-read', bodyWrite: false, metadataWrite: 'none',
+      });
+      expect(controller.captureInviteIssuance()).toBeNull();
+    } finally {
+      controller.destroy();
+    }
+  });
+
   it('permits local writing without a recovery journal when realtime is disabled and no invitation exists', async () => {
     const runtime = vi.fn().mockReturnValueOnce(disabledRuntime).mockReturnValue(configuredRuntime);
     const harness = createHarness({ recoveryJournal: null, readRuntime: runtime });

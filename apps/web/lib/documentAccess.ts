@@ -75,6 +75,7 @@ export type DocumentAccessReason =
   | 'invite-authority-unavailable'
   | 'protocol-error'
   | 'transient-exhausted'
+  | 'comment-connection-lost'
   | 'sign-in-required'
   | 'fragment-scrub-failed'
   | 'recovery-storage-unavailable'
@@ -1262,15 +1263,19 @@ class BrowserDocumentAccessController implements DocumentAccessController {
     const result = await requestSession(this.documentId, signal);
     if (!this.isCurrent(epoch, signal)) return;
     if (!result.ok) {
-      if (result.retryable) this.failUnavailable('transient-exhausted', true);
+      if (result.protocolInvalid) this.publishDenied('protocol-error');
+      else if (result.retryable) this.failUnavailable('transient-exhausted', true);
       else this.publishDenied(result.signInRequired ? 'sign-in-required' : 'unavailable');
       return;
     }
-    const recovery = this.restoreVerifiedRecoveryReceipt(result.session.actorId);
-    if (recovery === 'restored') return;
-    if (recovery === 'unavailable') {
-      this.failUnavailable('recovery-storage-unavailable', true);
-      return;
+    const role = result.session.role;
+    if (role === 'edit') {
+      const recovery = this.restoreVerifiedRecoveryReceipt(result.session.actorId);
+      if (recovery === 'restored') return;
+      if (recovery === 'unavailable') {
+        this.failUnavailable('recovery-storage-unavailable', true);
+        return;
+      }
     }
     const toRealtimeSession = (session: typeof result.session) => ({
       ...session,
@@ -1279,11 +1284,11 @@ class BrowserDocumentAccessController implements DocumentAccessController {
     });
     await this.hydrateRemoteDocument({
       roomId: this.documentId,
-      scope: 'edit',
-      canWrite: true,
+      scope: role,
+      canWrite: role === 'edit',
       inviteIssuanceScope: null,
       runtime,
-      createResources: () => createAuthorizedRealtimeResources(toRealtimeSession(result.session), {
+      createResources: () => this.dependencies.createResources(toRealtimeSession(result.session), {
         authority: this.authority,
         refreshOwnerSession: async (roomId, refreshSignal) => {
           const refreshed = await requestSession(roomId, refreshSignal);
@@ -1326,6 +1331,7 @@ class BrowserDocumentAccessController implements DocumentAccessController {
     epoch: number;
     signal: AbortSignal;
   }) {
+    const namedComment = scope === 'comment' && NAMED_EDIT_ROOM_ID.test(roomId);
     this.publish({
       ...this.snapshot,
       phase: 'remote-authorized',
@@ -1376,6 +1382,14 @@ class BrowserDocumentAccessController implements DocumentAccessController {
         this.handleTerminalResources(resources, terminalReason);
         return;
       }
+      if (
+        namedComment &&
+        this.snapshot.phase === 'remote-ready' &&
+        (!providerSnapshot.hydrated || providerSnapshot.connectionState !== 'connected')
+      ) {
+        this.closeCommentConnection();
+        return;
+      }
       this.publish({
         ...this.snapshot,
         hydrated: providerSnapshot.hydrated,
@@ -1391,6 +1405,10 @@ class BrowserDocumentAccessController implements DocumentAccessController {
     await resources.provider.start();
     if (!this.isCurrent(epoch, signal)) return;
     const providerSnapshot = resources.provider.getSnapshot();
+    if (namedComment && (!providerSnapshot.hydrated || providerSnapshot.connectionState !== 'connected')) {
+      this.closeCommentConnection();
+      return;
+    }
     // The long-lived invite is no longer needed once the short-lived provider
     // session has hydrated. Keep only the room-scoped stored credential.
     this.credential = null;
@@ -1882,6 +1900,14 @@ class BrowserDocumentAccessController implements DocumentAccessController {
       reason,
       this.recoverySnapshot?.updates.length ?? 0,
     );
+  }
+
+  private closeCommentConnection() {
+    // Never leave a private projection mounted while opening a new connection.
+    this.authority.revoke();
+    if (this.teardownResources('lifecycle').ok) {
+      this.failUnavailable('comment-connection-lost', true);
+    }
   }
 
   private restoreVerifiedRecoveryReceipt(actorId?: string): 'none' | 'restored' | 'unavailable' {

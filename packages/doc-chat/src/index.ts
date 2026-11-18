@@ -59,6 +59,7 @@ export type StoredChatThread = ChatThread & {
   updatedAt: string;
 };
 
+export { parseCommentReviewThread, type CommentReviewThread } from './comment-projection';
 export { parseChatThread, parseChatThreads } from './thread-payload';
 export {
   hasSuggestionEdges,

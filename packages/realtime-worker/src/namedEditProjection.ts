@@ -110,6 +110,21 @@ export const readCanonicalRoomYjsBody = (doc: Y.Doc): string | null => {
   }
 };
 
+export const canShareNamedCommentProjection = (
+  doc: Y.Doc,
+  canonicalBody = readCanonicalRoomYjsBody(doc),
+) => canonicalBody !== null && doc.gc && !hasPendingYjsData(doc) && isSafePublicYjsProjection(doc);
+
+export const encodeNamedCommentYjsProjection = (
+  doc: Y.Doc,
+  previousStateVector?: Uint8Array,
+  canonicalBody = readCanonicalRoomYjsBody(doc),
+) => {
+  if (!canShareNamedCommentProjection(doc, canonicalBody)) return null;
+  const update = encodePublicYjsProjection(doc, previousStateVector);
+  return update && update.length <= REALTIME_UPDATE_BASE64_LIMIT ? update : null;
+};
+
 /**
  * Mutates the validation copy only. The caller discards that copy on failure
  * and never persists/broadcasts the candidate. Private review has its own

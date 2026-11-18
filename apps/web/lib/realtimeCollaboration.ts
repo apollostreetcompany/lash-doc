@@ -3,6 +3,7 @@ import * as Y from 'yjs';
 
 import type { DocumentMutationAuthority } from './documentMutationAuthority';
 import {
+  NAMED_COMMENT_PROTOCOL,
   NAMED_EDIT_PROTOCOL,
   NAMED_EDIT_ROOM_ID,
   validNamedEditGrant,
@@ -245,12 +246,12 @@ export type OwnerRealtimeSessionRefresh = (
   signal: AbortSignal,
 ) => Promise<OwnerRealtimeSessionV3>;
 
-export type NamedRealtimeSessionV5 = NamedEditSession & Readonly<{
+export type NamedRealtimeSession = NamedEditSession & Readonly<{
   routeDocumentId: string;
   remoteDocumentId: string;
 }>;
 
-type AccountRealtimeSession = OwnerRealtimeSessionV3 | NamedRealtimeSessionV5;
+type AccountRealtimeSession = OwnerRealtimeSessionV3 | NamedRealtimeSession;
 type AccountRealtimeSessionRefresh = (
   routeDocumentId: string,
   signal: AbortSignal,
@@ -615,7 +616,9 @@ const isOwnerRealtimeSession = (
 const isAccountRealtimeSession = (
   session: RealtimeProviderSession,
 ): session is AccountRealtimeSession =>
-  isOwnerRealtimeSession(session) || session.protocolVersion === NAMED_EDIT_PROTOCOL;
+  isOwnerRealtimeSession(session) ||
+  session.protocolVersion === NAMED_EDIT_PROTOCOL ||
+  session.protocolVersion === NAMED_COMMENT_PROTOCOL;
 
 const isValidAccountRealtimeSession = (
   session: AccountRealtimeSession,
@@ -629,10 +632,14 @@ const isValidAccountRealtimeSession = (
     session.routeDocumentId === session.roomId &&
     session.remoteDocumentId === session.roomId &&
     validNamedEditGrant(session, session.roomId) &&
-    validNamedEditSocketUrl(session.socketUrl, session.roomId, session.actorId) &&
+    validNamedEditSocketUrl(
+      session.socketUrl, session.roomId, session.actorId, session.protocolVersion,
+    ) &&
     (!expected || (
       expected.source === 'named' && expected.roomId === session.roomId &&
       expected.actorId === session.actorId &&
+      expected.role === session.role &&
+      expected.protocolVersion === session.protocolVersion &&
       new URL(expected.socketUrl).origin === new URL(session.socketUrl).origin
     ));
 };
@@ -643,8 +650,8 @@ const cloneAccountRealtimeSession = (session: AccountRealtimeSession): AccountRe
     if (!Array.isArray(session.capabilities)) return null;
     return Object.freeze({
       ...session,
-      capabilities: Object.freeze([...session.capabilities]) as readonly ['doc.read', 'doc.edit'],
-    });
+      capabilities: Object.freeze([...session.capabilities]),
+    }) as NamedRealtimeSession;
   } catch {
     return null;
   }
@@ -738,7 +745,9 @@ const providerRouteDocumentId = (session: RealtimeProviderSession) =>
   isAccountRealtimeSession(session) ? session.routeDocumentId : session.documentId;
 
 const providerScope = (session: RealtimeProviderSession): ShareScope | null =>
-  isAccountRealtimeSession(session) ? 'edit' : session.scope;
+  isAccountRealtimeSession(session)
+    ? session.source === 'named' ? session.role : 'edit'
+    : session.scope;
 
 const providerSocket = (
   session: RealtimeProviderSession,
@@ -987,6 +996,7 @@ export class LashRealtimeYjsProvider {
     if (
       !session ||
       !isAccountRealtimeSession(session) ||
+      this.projectionOnly ||
       !this.hydrated ||
       this.historyGeneration === null ||
       socket?.readyState !== SOCKET_OPEN ||
@@ -1012,9 +1022,22 @@ export class LashRealtimeYjsProvider {
       !session ||
       !isAccountRealtimeSession(session) ||
       !this.hydrated ||
-      !this.canWrite ||
       !socket ||
-      socket.readyState !== SOCKET_OPEN ||
+      socket.readyState !== SOCKET_OPEN
+    ) {
+      return false;
+    }
+    if (this.projectionOnly) {
+      // Review actions are typed operations. They never confer body or metadata authority.
+      if (
+        this.status !== 'connected' ||
+        (this.authority && this.authority.getSnapshot().phase !== 'ready-read') ||
+        (operation.type !== 'create' && operation.type !== 'reply' && operation.type !== 'propose')
+      ) {
+        return false;
+      }
+    } else if (
+      !this.canWrite ||
       (this.authority && this.authority.getSnapshot().metadataWrite !== 'document')
     ) {
       return false;
@@ -1032,6 +1055,7 @@ export class LashRealtimeYjsProvider {
 
   private readonly authority: DocumentMutationAuthority | null;
   private readonly doc: Y.Doc;
+  private readonly projectionOnly: boolean;
   private session: RealtimeProviderSession | null;
   private readonly createSocket: (url: string, protocols?: readonly string[]) => RealtimeSocket;
   private readonly refreshOwnerSession: AccountRealtimeSessionRefresh | null;
@@ -1105,6 +1129,7 @@ export class LashRealtimeYjsProvider {
       );
     }
     this.session = stableSession;
+    this.projectionOnly = stableSession.protocolVersion === NAMED_COMMENT_PROTOCOL;
     this.createSocket = createSocket;
     this.refreshOwnerSession = refreshOwnerSession ?? null;
     this.ownerSessionBinding = isAccountRealtimeSession(stableSession) ? stableSession : null;
@@ -1113,7 +1138,7 @@ export class LashRealtimeYjsProvider {
     this.setTimeoutFn = setTimeoutFn;
     this.clearTimeoutFn = clearTimeoutFn;
     this.hydrationTimeoutMs = hydrationTimeoutMs;
-    this.canWrite = stableSession.capabilities.includes('doc.edit');
+    this.canWrite = stableSession.capabilities.some((capability) => capability === 'doc.edit');
     this.lastAcknowledgedStateVector = Y.encodeStateVector(doc);
   }
 
@@ -1344,7 +1369,7 @@ export class LashRealtimeYjsProvider {
   }
 
   setLocalSelection(selection: RealtimeSelection | null) {
-    if (this.lifecycleState !== 'active') return;
+    if (this.lifecycleState !== 'active' || this.projectionOnly) return;
     const normalized = selection
       ? {
           from: Math.max(0, Math.floor(selection.from)),
@@ -1390,6 +1415,7 @@ export class LashRealtimeYjsProvider {
       this.destroyed ||
       this.lifecycleState !== 'active' ||
       !this.session ||
+      this.projectionOnly ||
       this.terminalReason ||
       this.socket ||
       this.ownerRefreshController
@@ -1417,6 +1443,7 @@ export class LashRealtimeYjsProvider {
       this.socket ||
       this.ownerRefreshController ||
       this.suppressAutoReconnect ||
+      (this.projectionOnly && this.usedOwnerTickets.size > 0) ||
       this.terminalReason
     ) {
       return;
@@ -1565,6 +1592,7 @@ export class LashRealtimeYjsProvider {
       },
       error: () => {
         if (!active()) return;
+        if (this.projectionOnly) this.reviewStore.disconnect();
         this.setConnectionState('reconnecting');
       },
     };
@@ -1588,11 +1616,16 @@ export class LashRealtimeYjsProvider {
       this.failProtocol(epoch, 'Malformed realtime frame.');
       return;
     }
+    if (!message || typeof message !== 'object' || typeof message.type !== 'string') {
+      this.failProtocol(epoch, 'Malformed realtime frame.');
+      return;
+    }
 
     if (message.type === 'shared-history-result') {
       if (
         this.hydrated &&
         isAccountRealtimeSession(session) &&
+        !this.projectionOnly &&
         message.roomId === remoteDocumentId
       ) this.sharedHistory.receive(message);
       return;
@@ -1607,9 +1640,10 @@ export class LashRealtimeYjsProvider {
       if (
         this.hydrated &&
         isAccountRealtimeSession(session) &&
+        (!this.projectionOnly || this.status === 'connected') &&
         message.roomId === remoteDocumentId
       ) {
-        this.reviewStore.receive(message);
+        this.reviewStore.receive(message, this.projectionOnly);
       }
       return;
     }
@@ -1625,6 +1659,10 @@ export class LashRealtimeYjsProvider {
       }
       if (isAccountRealtimeSession(session)) {
         const generation = message.historyGeneration;
+        if (this.projectionOnly && generation !== undefined) {
+          this.failProtocol(epoch, 'Unexpected history metadata for the document projection.');
+          return;
+        }
         if (generation !== undefined && (!Number.isSafeInteger(generation) || generation < 0)) {
           this.failProtocol(epoch, 'Invalid document restore generation.');
           return;
@@ -1723,6 +1761,7 @@ export class LashRealtimeYjsProvider {
     }
 
     if (message.type === 'awareness-state' && Array.isArray(message.peers)) {
+      if (this.projectionOnly) return;
       if (isAccountRealtimeSession(session) && message.roomId !== remoteDocumentId) {
         this.failProtocol(epoch, 'Invalid awareness frame.');
         return;
@@ -1746,10 +1785,15 @@ export class LashRealtimeYjsProvider {
     this.hydrated = true;
     this.hasHydratedOnce = true;
     this.connectionAttempt = 0;
-    if (firstHydration && this.canRetryOpenAccountSession() && typeof window !== 'undefined') {
+    if (
+      firstHydration && this.session && isAccountRealtimeSession(this.session) &&
+      typeof window !== 'undefined'
+    ) {
       this.networkEventTarget = window;
       window.addEventListener('offline', this.handleBrowserOffline);
-      window.addEventListener('online', this.wakeAfterNetworkRestored);
+      if (this.canRetryOpenAccountSession()) {
+        window.addEventListener('online', this.wakeAfterNetworkRestored);
+      }
     }
     if (this.pendingUpdates.size === 0 && this.queuedUpdates.length === 0) {
       this.lastAcknowledgedStateVector = Y.encodeStateVector(this.doc);
@@ -1825,7 +1869,7 @@ export class LashRealtimeYjsProvider {
   }
 
   private sendAwareness() {
-    if (this.lifecycleState !== 'active') return;
+    if (this.lifecycleState !== 'active' || this.projectionOnly) return;
     const socket = this.socket;
     if (!this.hydrated || !socket || socket.readyState !== SOCKET_OPEN) return;
     socket.send(
@@ -1862,6 +1906,11 @@ export class LashRealtimeYjsProvider {
 
   private handleTransientSocketFailure(epoch: number) {
     if (this.destroyed || this.lifecycleState !== 'active' || epoch !== this.socketEpoch) return;
+    if (this.projectionOnly) {
+      // A Comment retry needs a newly authorized provider with a fresh projection.
+      this.expireTransportAttempt(epoch, 'The shared document connection ended.');
+      return;
+    }
     if (this.canRetryOpenAccountSession()) {
       if (this.networkEventTarget?.navigator?.onLine === false) {
         this.setConnectionState('offline');
@@ -1892,11 +1941,16 @@ export class LashRealtimeYjsProvider {
   }
 
   private canRetryOpenAccountSession() {
-    return this.hasHydratedOnce && this.session !== null && isAccountRealtimeSession(this.session);
+    return !this.projectionOnly && this.hasHydratedOnce &&
+      this.session !== null && isAccountRealtimeSession(this.session);
   }
 
   private handleBrowserOffline = () => {
     if (this.suppressAutoReconnect) return;
+    if (this.projectionOnly) {
+      this.handleTransientSocketFailure(this.socketEpoch);
+      return;
+    }
     this.detachTransientTransport('Browser went offline');
     this.handleTransientSocketFailure(this.socketEpoch);
   };
@@ -1937,7 +1991,10 @@ export class LashRealtimeYjsProvider {
     }, this.hydrationTimeoutMs);
   }
 
-  private expireTransportAttempt(epoch: number) {
+  private expireTransportAttempt(
+    epoch: number,
+    message = 'Realtime transport did not open before its deadline.',
+  ) {
     if (this.destroyed || this.lifecycleState !== 'active' || epoch !== this.socketEpoch) return;
     this.detachTransientTransport('Realtime attempt timed out');
     if (this.canRetryOpenAccountSession()) {
@@ -1949,10 +2006,7 @@ export class LashRealtimeYjsProvider {
     this.resolveStart = null;
     this.rejectStart = null;
     reject?.(
-      new RealtimeProviderStartError(
-        'transient-exhausted',
-        'Realtime transport did not open before its deadline.',
-      ),
+      new RealtimeProviderStartError('transient-exhausted', message),
     );
     this.emit();
   }
@@ -2161,7 +2215,7 @@ const recoveryRecordMatches = (
 export const createRealtimeDocument = () => new Y.Doc();
 
 export const createAuthorizedRealtimeResources = (
-  session: AuthorizedRealtimeSession | NamedRealtimeSessionV5,
+  session: AuthorizedRealtimeSession | NamedRealtimeSession,
   options: Omit<RealtimeProviderOptions, 'doc' | 'session'> = {},
 ): AuthorizedRealtimeResources => {
   const doc = createRealtimeDocument();

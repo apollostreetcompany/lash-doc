@@ -6,6 +6,7 @@ import {
   type NamedEditOperation,
 } from '../../../../apps/web/lib/namedEdit/contract';
 import { handleNamedEdit } from '../../../../apps/web/lib/namedEdit/routeHandler';
+import { encryptNamedEditValue } from '../../../../apps/web/lib/namedEdit/serverCrypto';
 import { NextRequest } from '../../../../apps/web/node_modules/next/server.js';
 import {
   namedEditFailure,
@@ -37,6 +38,7 @@ const testKey = Buffer.alloc(32, 44).toString('base64url');
 
 const configure = () => {
   vi.stubEnv('LASH_NAMED_EDIT_PHASE', 'enabled');
+  vi.stubEnv('LASH_NAMED_COMMENT_PHASE', 'enabled');
   vi.stubEnv('LASH_NAMED_EDIT_KEY', testKey);
   vi.stubEnv('LASH_REALTIME_WORKER_HTTP_URL', workerOrigin);
   vi.stubEnv('LASH_WORKER_CONTROL_SECRET_CURRENT', controlSecret);
@@ -80,7 +82,7 @@ describe('named edit browser and Worker contract', () => {
     expect((await post('list', {})).status).toBe(404);
     vi.stubEnv('LASH_NAMED_EDIT_PHASE', 'enabled');
     expect(
-      (await post('issue', { email: 'editor@example.test', inviteId, role: 'edit' })).status,
+      (await post('issue', { email: 'editor@example.test', inviteId, role: 'owner' })).status,
     ).toBe(400);
     expect((await post('session', { token: null, email: 'editor@example.test' })).status).toBe(400);
     expect(auth.principal).not.toHaveBeenCalled();
@@ -255,5 +257,227 @@ describe('named edit browser and Worker contract', () => {
         socketUrl: `wss://worker.test/api/realtime/rooms/${roomId}/socket?protocolVersion=5&actorId=${actorId}`,
       },
     });
+  });
+
+  it('acknowledges Comment acceptance with the legacy receipt and reopens with a v6 session', async () => {
+    configure();
+    const email = 'reviewer@example.test';
+    auth.principal.mockResolvedValue({ id: owner, email: 'owner@example.test' });
+    const worker = vi.fn(async (url: string, request: RequestInit) => {
+      const requestBody = String(request.body);
+      const input = JSON.parse(requestBody);
+      expect(requestBody).not.toContain(email);
+      expect(new Headers(request.headers).get('x-lash-control-body-sha256')).toBe(
+        createHash('sha256').update(requestBody).digest('base64url'),
+      );
+      if (url.endsWith('/issue')) {
+        expect(input.role).toBe('comment');
+        return Response.json({
+          ok: true,
+          version: 1,
+          invite: {
+            inviteId,
+            emailCiphertext: input.emailCiphertext,
+            role: 'comment',
+            status: 'pending',
+            expiresAt: new Date(Date.now() + 60_000).toISOString(),
+          },
+        });
+      }
+      return Response.json({
+        ok: true,
+        version: 1,
+        session: {
+          roomId,
+          actorId,
+          source: 'named',
+          role: 'comment',
+          protocolVersion: 6,
+          capabilities: ['doc.read', 'doc.comment', 'doc.suggest'],
+          socketProtocol: 'lash-realtime-v6',
+          ticketProtocol: `lash-named-comment-ticket.${'t'.repeat(43)}`,
+          expiresAt: new Date(Date.now() + 60_000).toISOString(),
+        },
+      });
+    });
+    vi.stubGlobal('fetch', worker);
+    const issued = await post('issue', { email, inviteId, role: 'comment' });
+    expect(issued.status).toBe(200);
+    const issueBody = await issued.json();
+    expect(issueBody).toMatchObject({ invite: { role: 'comment', email, inviteId } });
+
+    auth.principal.mockResolvedValue({ id: member, email });
+    const accepted = await post('session', { accept: true, token: issueBody.token });
+    expect(accepted.status).toBe(200);
+    expect(await accepted.json()).toEqual({ ok: true, version: 1 });
+    expect(accepted.headers.get('set-cookie')).toContain('Max-Age=0');
+    const reopened = await post('session', { token: null });
+    expect(await reopened.json()).toMatchObject({
+      session: {
+        role: 'comment',
+        protocolVersion: 6,
+        capabilities: ['doc.read', 'doc.comment', 'doc.suggest'],
+        socketUrl: `wss://worker.test/api/realtime/rooms/${roomId}/socket?protocolVersion=6&actorId=${actorId}`,
+      },
+    });
+  });
+
+  it('discloses an unavailable Comment projection only for owner-directed issuance', async () => {
+    configure();
+    const worker = vi.fn(async () =>
+      Response.json(
+        {
+          ok: false,
+          version: 1,
+          error: 'comment-projection-unavailable',
+          retryable: false,
+        },
+        { status: 409 },
+      ),
+    );
+    vi.stubGlobal('fetch', worker);
+    auth.principal.mockResolvedValue({ id: owner, email: 'owner@example.test' });
+    const issue = await post('issue', {
+      email: 'reviewer@example.test',
+      inviteId,
+      role: 'comment',
+    });
+    expect(issue.status).toBe(409);
+    expect(await issue.json()).toEqual({
+      ok: false,
+      version: 1,
+      error: 'comment-projection-unavailable',
+    });
+
+    auth.principal.mockResolvedValue({ id: member, email: 'reviewer@example.test' });
+    const session = await post('session', { token: null });
+    expect(session.status).toBe(403);
+    expect(await session.json()).toEqual({ ok: false, version: 1, error: 'unavailable' });
+  });
+
+  it('does not offer Comment when the web phase is closed and preserves the legacy Edit request', async () => {
+    configure();
+    vi.stubEnv('LASH_NAMED_COMMENT_PHASE', 'disabled');
+    auth.principal.mockResolvedValue({ id: owner, email: 'owner@example.test' });
+    const worker = vi.fn(async (url: string, request: RequestInit) => {
+      const body = JSON.parse(String(request.body));
+      if (url.endsWith('/list')) {
+        expect(body).toEqual({ version: 1, includeComment: true });
+        return Response.json({ ok: true, version: 1, invites: [] });
+      }
+      expect(body).not.toHaveProperty('role');
+      return Response.json({
+        ok: true,
+        version: 1,
+        invite: {
+          inviteId,
+          emailCiphertext: body.emailCiphertext,
+          role: 'edit',
+          status: 'pending',
+          expiresAt: new Date(Date.now() + 60_000).toISOString(),
+        },
+      });
+    });
+    vi.stubGlobal('fetch', worker);
+    expect(await (await post('list', { includeComment: true })).json()).toEqual({
+      ok: true,
+      version: 1,
+      invites: [],
+    });
+    const rejected = await post('issue', {
+      email: 'reviewer@example.test',
+      inviteId,
+      role: 'comment',
+    });
+    expect(rejected.status).toBe(503);
+    expect(await rejected.json()).toEqual({
+      ok: false,
+      version: 1,
+      error: 'named-comment-disabled',
+    });
+    expect(worker).toHaveBeenCalledTimes(1);
+    expect(
+      (await post('issue', { email: 'editor@example.test', inviteId, role: 'edit' })).status,
+    ).toBe(200);
+  });
+
+  it('fails closed as unavailable when a legacy Worker rejects a Comment issue', async () => {
+    configure();
+    auth.principal.mockResolvedValue({ id: owner, email: 'owner@example.test' });
+    const worker = vi.fn(async (url: string, request: RequestInit) => {
+      if (url.endsWith('/list') && String(request.body) === '{"version":1}') {
+        return Response.json({ ok: true, version: 1, invites: [] });
+      }
+      return Response.json(
+        { ok: false, version: 1, error: 'invalid-request', retryable: false },
+        { status: 400 },
+      );
+    });
+    vi.stubGlobal('fetch', worker);
+    expect(await (await post('list', { includeComment: true })).json()).toEqual({
+      ok: true,
+      version: 1,
+      invites: [],
+    });
+    expect(
+      worker.mock.calls.slice(0, 2).map(([, request]) => JSON.parse(String(request.body))),
+    ).toEqual([{ version: 1, includeComment: true }, { version: 1 }]);
+    const rejected = await post('issue', {
+      email: 'reviewer@example.test',
+      inviteId,
+      role: 'comment',
+    });
+    expect(rejected.status).toBe(503);
+    expect(await rejected.json()).toEqual({
+      ok: false,
+      version: 1,
+      error: 'named-comment-disabled',
+    });
+  });
+
+  it('lists and revokes existing Comment invites with new issuance disabled', async () => {
+    configure();
+    vi.stubEnv('LASH_NAMED_COMMENT_PHASE', 'disabled');
+    auth.principal.mockResolvedValue({ id: owner, email: 'owner@example.test' });
+    const email = 'reviewer@example.test';
+    const emailCiphertext =
+      'email-v1.' +
+      encryptNamedEditValue(Buffer.from(testKey, 'base64url'), 'email', email, roomId, inviteId);
+    const invite = {
+      inviteId,
+      emailCiphertext,
+      role: 'comment',
+      status: 'accepted',
+      expiresAt: new Date(Date.now() + 60_000).toISOString(),
+    };
+    const worker = vi.fn(async (url: string, request: RequestInit) => {
+      const body = JSON.parse(String(request.body));
+      if (url.endsWith('/list')) {
+        expect(body).toEqual({ version: 1, includeComment: true });
+        return Response.json({ ok: true, version: 1, invites: [invite] });
+      }
+      expect(body).toEqual({ version: 1, inviteId, role: 'comment' });
+      return Response.json({ ok: true, version: 1, invite: { ...invite, status: 'revoked' } });
+    });
+    vi.stubGlobal('fetch', worker);
+    const list = await (await post('list', { includeComment: true })).json();
+    expect(list).not.toHaveProperty('commentInvitesEnabled');
+    expect(list).toMatchObject({ ok: true, invites: [{ role: 'comment', email, inviteId }] });
+    const revoked = await post('revoke', { inviteId, role: 'comment' });
+    expect(revoked.status).toBe(200);
+    expect(await revoked.json()).toMatchObject({ invite: { role: 'comment', status: 'revoked' } });
+    expect(worker).toHaveBeenCalledTimes(2);
+  });
+
+  it('keeps the legacy browser list contract Edit-only with Comment enabled', async () => {
+    configure();
+    auth.principal.mockResolvedValue({ id: owner, email: 'owner@example.test' });
+    const worker = vi.fn(async (_url: string, request: RequestInit) => {
+      expect(String(request.body)).toBe('{"version":1}');
+      return Response.json({ ok: true, version: 1, invites: [] });
+    });
+    vi.stubGlobal('fetch', worker);
+    expect(await (await post('list', {})).json()).toEqual({ ok: true, version: 1, invites: [] });
+    expect(worker).toHaveBeenCalledTimes(1);
   });
 });

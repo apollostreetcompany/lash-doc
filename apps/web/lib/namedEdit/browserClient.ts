@@ -5,10 +5,13 @@ import {
   hasKeys,
   isIsoDate,
   isNamedEditStatus,
+  isNamedInviteRole,
   isObject,
+  namedEditGrantFields,
   namedEditPath,
   validNamedEditGrant,
   validNamedEditSocketUrl,
+  type NamedCommentInviteError,
   type NamedEditInvite,
   type NamedEditOperation,
   type NamedEditSession,
@@ -35,13 +38,16 @@ const requestNamedEdit = async (
       signal,
     });
     const { status } = response;
-    const body: unknown =
-      status === 200 || (operation === 'session' && status === 502)
-        ? await response.json().catch((error: unknown) => {
-            if (error instanceof SyntaxError) return null;
-            throw error;
-          })
-        : null;
+    const readBody =
+      status === 200 ||
+      (operation === 'session' && status === 502) ||
+      (operation === 'issue' && (status === 409 || status === 503));
+    const body: unknown = readBody
+      ? await response.json().catch((error: unknown) => {
+          if (error instanceof SyntaxError) return null;
+          throw error;
+        })
+      : null;
     return { status, body };
   } catch {
     return { status: 503, body: null };
@@ -85,13 +91,19 @@ export async function requestNamedEditSession(
     body.ok !== true ||
     body.version !== 1 ||
     !isObject(body.session) ||
+    !hasKeys(body.session, [...namedEditGrantFields, 'socketUrl']) ||
     !validNamedEditGrant(body.session, roomId) ||
     typeof body.session.socketUrl !== 'string' ||
-    !validNamedEditSocketUrl(body.session.socketUrl, roomId, String(body.session.actorId))
+    !validNamedEditSocketUrl(
+      body.session.socketUrl,
+      roomId,
+      body.session.actorId,
+      body.session.protocolVersion,
+    )
   )
     return invalidSessionResponse;
 
-  return { ok: true, session: body.session as NamedEditSession };
+  return { ok: true, session: { ...body.session, socketUrl: body.session.socketUrl } };
 }
 
 const inviteFrom = (value: unknown): NamedEditInvite | null =>
@@ -101,16 +113,19 @@ const inviteFrom = (value: unknown): NamedEditInvite | null =>
   NAMED_EDIT_INVITE_ID.test(value.inviteId) &&
   typeof value.email === 'string' &&
   value.email.length <= 254 &&
-  value.role === 'edit' &&
+  isNamedInviteRole(value.role) &&
   isNamedEditStatus(value.status) &&
   isIsoDate(value.expiresAt)
     ? (value as NamedEditInvite)
     : null;
 
 export type NamedEditOwnerResult =
-  | { ok: true; invites: NamedEditInvite[] }
+  | { ok: true; invites: NamedEditInvite[]; commentInvitesEnabled?: true }
   | { ok: true; invite: NamedEditInvite; token?: string }
-  | { ok: false; reason: 'invalid' | 'conflict' | 'unavailable' | 'retry' };
+  | {
+      ok: false;
+      reason: 'invalid' | 'conflict' | 'unavailable' | 'retry' | NamedCommentInviteError;
+    };
 
 export async function requestNamedEditOwner(
   roomId: string,
@@ -118,7 +133,25 @@ export async function requestNamedEditOwner(
   fields: Record<string, unknown>,
   signal: AbortSignal,
 ): Promise<NamedEditOwnerResult> {
-  const { status, body } = await requestNamedEdit(roomId, operation, fields, signal);
+  const role = Object.hasOwn(fields, 'role') ? fields.role : 'edit';
+  if (operation !== 'list' && !isNamedInviteRole(role)) return { ok: false, reason: 'invalid' };
+  const { status, body } = await requestNamedEdit(
+    roomId,
+    operation,
+    operation === 'list' ? { includeComment: true } : fields,
+    signal,
+  );
+  if (
+    operation === 'issue' &&
+    role === 'comment' &&
+    isObject(body) &&
+    hasKeys(body, ['ok', 'version', 'error']) &&
+    body.ok === false &&
+    body.version === 1 &&
+    ((status === 409 && body.error === 'comment-projection-unavailable') ||
+      (status === 503 && body.error === 'named-comment-disabled'))
+  )
+    return { ok: false, reason: body.error };
   if (status === 400) return { ok: false, reason: 'invalid' };
   if (status === 409) return { ok: false, reason: 'conflict' };
   if (status === 401 || status === 403 || status === 404)
@@ -127,17 +160,36 @@ export async function requestNamedEditOwner(
     return { ok: false, reason: 'retry' };
   }
   if (operation === 'list' && Array.isArray(body.invites)) {
+    const commentInvitesEnabled = body.commentInvitesEnabled === true;
+    if (
+      !hasKeys(
+        body,
+        commentInvitesEnabled
+          ? ['ok', 'version', 'invites', 'commentInvitesEnabled']
+          : ['ok', 'version', 'invites'],
+      )
+    )
+      return { ok: false, reason: 'retry' };
     const invites = body.invites.map(inviteFrom);
     if (invites.every((invite): invite is NamedEditInvite => invite !== null)) {
-      return { ok: true, invites };
+      return commentInvitesEnabled
+        ? { ok: true, invites, commentInvitesEnabled }
+        : { ok: true, invites };
     }
   }
   if (operation !== 'list') {
     const invite = inviteFrom(body.invite);
-    if (invite && invite.inviteId === fields.inviteId) {
-      if (operation === 'revoke' && invite.status === 'revoked') return { ok: true, invite };
+    if (invite && invite.inviteId === fields.inviteId && invite.role === role) {
+      if (
+        operation === 'revoke' &&
+        invite.status === 'revoked' &&
+        hasKeys(body, ['ok', 'version', 'invite'])
+      ) {
+        return { ok: true, invite };
+      }
       if (
         operation === 'issue' &&
+        hasKeys(body, ['ok', 'version', 'invite', 'token']) &&
         invite.status === 'pending' &&
         typeof body.token === 'string' &&
         NAMED_EDIT_TOKEN.test(body.token)

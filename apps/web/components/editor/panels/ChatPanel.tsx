@@ -24,7 +24,7 @@ import {
   resolveChatAnchorRange,
   type ChatDocumentText,
 } from './chatAnchorPositions';
-import type { ChatRealtimeStore } from '../../../lib/realtimeChatStore';
+import type { ChatRealtimeStore, RealtimeChatThread } from '../../../lib/realtimeChatStore';
 import { Icon } from '../../shell/Icon';
 
 export type { ChatRealtimeStore } from '../../../lib/realtimeChatStore';
@@ -39,6 +39,7 @@ export interface ChatPanelProps {
   currentText: string;
   mutationEnabled: boolean;
   mutationUnavailableReason?: string;
+  statusChangesEnabled?: boolean;
   realtimeStore?: ChatRealtimeStore | null;
   actorId?: string;
   runDocumentMutation(mutate: () => void): boolean;
@@ -50,7 +51,7 @@ export interface ChatPanelProps {
 }
 
 type ChatFilter = 'all' | 'author' | 'ai';
-type LocalThread = StoredChatThread;
+type LocalThread = RealtimeChatThread;
 type ThreadView = {
   thread: LocalThread;
   mappedAnchor: ChatAnchor;
@@ -104,11 +105,17 @@ const mapThreadAnchor = (
   baseVersion: string | null,
 ): ChatAnchor => {
   const { anchor, historyText } = thread;
-  if (thread.proposal?.status === 'accepted') return { ...anchor, orphaned: true };
+  if (thread.detached || thread.proposal?.status === 'accepted')
+    return { ...anchor, orphaned: true };
   if (anchor.relativeRange) {
     const range = editor && resolveChatAnchorRange(editor, anchor.relativeRange);
     const mapped = range && projection?.toTextRange(range);
-    return mapped ? { ...anchor, ...mapped, orphaned: false } : { ...anchor, orphaned: true };
+    const matchesProjection =
+      !thread.projected ||
+      (mapped && projection?.text.slice(mapped.from, mapped.to) === anchor.token.text);
+    return mapped && matchesProjection
+      ? { ...anchor, ...mapped, orphaned: false }
+      : { ...anchor, orphaned: true };
   }
   if (
     historyText === currentText &&
@@ -165,6 +172,7 @@ export function ChatPanel({
   currentText,
   mutationEnabled,
   mutationUnavailableReason = 'This shared access is read-only. Existing threads remain available to read and navigate.',
+  statusChangesEnabled = true,
   realtimeStore,
   actorId = LOCAL_USER.id,
   runDocumentMutation,
@@ -496,7 +504,12 @@ export function ChatPanel({
   };
 
   const addUserReply = async (threadId: string, body: string) => {
-    if (chatActionsDisabled || !body.trim()) return;
+    if (
+      chatActionsDisabled ||
+      !body.trim() ||
+      threadsRef.current.find(({ id }) => id === threadId)?.detached
+    )
+      return;
     const added = realtimeStore
       ? await submitReview({ type: 'reply', threadId, body })
       : addLocalReply(threadId, LOCAL_USER, body);
@@ -508,7 +521,7 @@ export function ChatPanel({
   };
 
   const setThreadStatus = async (threadId: string, status: ChatThreadStatus) => {
-    if (chatActionsDisabled) return;
+    if (chatActionsDisabled || !statusChangesEnabled) return;
     if (realtimeStore) {
       await submitReview({ type: 'status', threadId, status });
       return;
@@ -646,15 +659,17 @@ export function ChatPanel({
             >
               {realtimeStore ? 'My threads' : LOCAL_USER.id}
             </button>
-            <button
-              type="button"
-              className="chat-filter-button"
-              data-testid="chat-filter-ai"
-              data-active={filter === 'ai' ? 'true' : 'false'}
-              onClick={() => setFilter('ai')}
-            >
-              AI
-            </button>
+            {threads.some((thread) => !thread.projected) ? (
+              <button
+                type="button"
+                className="chat-filter-button"
+                data-testid="chat-filter-ai"
+                data-active={filter === 'ai' ? 'true' : 'false'}
+                onClick={() => setFilter('ai')}
+              >
+                AI
+              </button>
+            ) : null}
             <button
               type="button"
               className="chat-filter-button"
@@ -743,6 +758,7 @@ export function ChatPanel({
         >
           {threadViews.map(({ thread, mappedAnchor }) => {
             const accepted = thread.proposal?.status === 'accepted';
+            const detached = thread.detached || (thread.projected && mappedAnchor.orphaned);
             const currentContext = accepted
               ? thread.proposal?.replacement || 'Original text removed'
               : mappedAnchor.orphaned
@@ -750,7 +766,9 @@ export function ChatPanel({
                 : (projection?.text ?? currentText).slice(mappedAnchor.from, mappedAnchor.to);
             const threadDomId = `chat-thread-${domId(thread.id)}`;
             const threadTitleId = `chat-thread-title-${domId(thread.id)}`;
-            const threadTitle = `Thread on ${thread.anchor.token.text}`;
+            const threadTitle = detached
+              ? 'Discussion thread'
+              : `Thread on ${thread.anchor.token.text}`;
             const replyDraft = replyDrafts[thread.id] ?? '';
             const threadActionsDisabled =
               chatActionsDisabled || Boolean(realtimeStore && !isReviewId(thread.id));
@@ -770,11 +788,13 @@ export function ChatPanel({
                     {threadTitle}
                   </h3>
                   <div className="chat-thread-meta">
-                    <span data-testid="chat-anchor-text">{thread.anchor.token.text}</span>
+                    <span data-testid="chat-anchor-text">
+                      {detached ? 'Selected text changed' : thread.anchor.token.text}
+                    </span>
                     <span className="chat-thread-status" data-testid="chat-thread-status">
                       {thread.status === 'resolved' ? 'Resolved' : 'Open'}
                     </span>
-                    {accepted ? null : mappedAnchor.orphaned ? (
+                    {accepted || detached ? null : mappedAnchor.orphaned ? (
                       <span className="chat-orphan" data-testid="chat-orphaned">
                         Orphaned
                       </span>
@@ -784,41 +804,43 @@ export function ChatPanel({
                       </span>
                     )}
                   </div>
-                  <div className="chat-anchor-row" data-testid="chat-anchor-row">
-                    <span className="chat-anchor-glyph" aria-hidden="true">
-                      <Icon name="message" />
-                    </span>
-                    <div className="chat-anchor-copy">
-                      <span className="chat-context-label">
-                        {accepted
-                          ? 'Accepted wording'
-                          : mappedAnchor.orphaned
-                            ? 'Detached target'
-                            : 'Current target'}
+                  {!detached && (
+                    <div className="chat-anchor-row" data-testid="chat-anchor-row">
+                      <span className="chat-anchor-glyph" aria-hidden="true">
+                        <Icon name="message" />
                       </span>
-                      <p className="chat-anchor-quote" data-testid="chat-current-target">
-                        {currentContext}
-                      </p>
+                      <div className="chat-anchor-copy">
+                        <span className="chat-context-label">
+                          {accepted
+                            ? 'Accepted wording'
+                            : mappedAnchor.orphaned
+                              ? 'Detached target'
+                              : 'Current target'}
+                        </span>
+                        <p className="chat-anchor-quote" data-testid="chat-current-target">
+                          {currentContext}
+                        </p>
+                      </div>
+                      {!accepted ? (
+                        <button
+                          type="button"
+                          className="chat-anchor-jump"
+                          data-testid="chat-jump-anchor"
+                          disabled={mappedAnchor.orphaned}
+                          aria-label={`Show document target for thread on ${thread.anchor.token.text}`}
+                          onClick={() => jumpToMappedAnchor(mappedAnchor, thread)}
+                        >
+                          <Icon name="eye" />
+                          <span>Show</span>
+                        </button>
+                      ) : null}
                     </div>
-                    {!accepted ? (
-                      <button
-                        type="button"
-                        className="chat-anchor-jump"
-                        data-testid="chat-jump-anchor"
-                        disabled={mappedAnchor.orphaned}
-                        aria-label={`Show document target for thread on ${thread.anchor.token.text}`}
-                        onClick={() => jumpToMappedAnchor(mappedAnchor, thread)}
-                      >
-                        <Icon name="eye" />
-                        <span>Show</span>
-                      </button>
-                    ) : null}
-                  </div>
+                  )}
                   {renderSuggestion?.(
                     thread,
                     Boolean(mappedAnchor.orphaned) || currentContext !== thread.anchor.token.text,
                   )}
-                  {!accepted ? (
+                  {!accepted && !detached ? (
                     <div className="chat-context-grid" data-testid="chat-context-grid">
                       <div>
                         <span className="chat-context-label">
@@ -834,7 +856,9 @@ export function ChatPanel({
                   ) : null}
                   <ul
                     className="chat-message-list"
-                    aria-label={`Messages for ${thread.anchor.token.text}`}
+                    aria-label={
+                      detached ? 'Discussion messages' : `Messages for ${thread.anchor.token.text}`
+                    }
                   >
                     {thread.messages.map((message) => (
                       <li
@@ -847,52 +871,55 @@ export function ChatPanel({
                       </li>
                     ))}
                   </ul>
-                  <div className="chat-reply-row">
-                    <input
-                      className="chat-reply-input"
-                      data-testid="chat-reply-input"
-                      aria-label={`Reply to thread on ${thread.anchor.token.text}`}
-                      disabled={threadActionsDisabled}
-                      value={replyDraft}
-                      onChange={(event) =>
-                        setReplyDrafts((drafts) => ({
-                          ...drafts,
-                          [thread.id]: event.target.value,
-                        }))
-                      }
-                    />
-                    <button
-                      type="button"
-                      className="chat-action-button"
-                      data-testid="chat-add-reply"
-                      disabled={threadActionsDisabled || !replyDraft.trim()}
-                      onClick={() => void addUserReply(thread.id, replyDraft)}
-                    >
-                      Reply
-                    </button>
-                  </div>
+                  {!detached && (
+                    <div className="chat-reply-row">
+                      <input
+                        className="chat-reply-input"
+                        data-testid="chat-reply-input"
+                        aria-label={`Reply to thread on ${thread.anchor.token.text}`}
+                        disabled={threadActionsDisabled}
+                        value={replyDraft}
+                        onChange={(event) =>
+                          setReplyDrafts((drafts) => ({
+                            ...drafts,
+                            [thread.id]: event.target.value,
+                          }))
+                        }
+                      />
+                      <button
+                        type="button"
+                        className="chat-action-button"
+                        data-testid="chat-add-reply"
+                        disabled={threadActionsDisabled || !replyDraft.trim()}
+                        onClick={() => void addUserReply(thread.id, replyDraft)}
+                      >
+                        Reply
+                      </button>
+                    </div>
+                  )}
                   <div className="chat-thread-actions">
-                    {thread.status === 'resolved' ? (
-                      <button
-                        type="button"
-                        className="chat-action-button"
-                        data-testid="chat-reopen-thread"
-                        disabled={threadActionsDisabled}
-                        onClick={() => void setThreadStatus(thread.id, 'open')}
-                      >
-                        Reopen
-                      </button>
-                    ) : (
-                      <button
-                        type="button"
-                        className="chat-action-button"
-                        data-testid="chat-resolve-thread"
-                        disabled={threadActionsDisabled}
-                        onClick={() => void setThreadStatus(thread.id, 'resolved')}
-                      >
-                        Resolve
-                      </button>
-                    )}
+                    {statusChangesEnabled &&
+                      (thread.status === 'resolved' ? (
+                        <button
+                          type="button"
+                          className="chat-action-button"
+                          data-testid="chat-reopen-thread"
+                          disabled={threadActionsDisabled}
+                          onClick={() => void setThreadStatus(thread.id, 'open')}
+                        >
+                          Reopen
+                        </button>
+                      ) : (
+                        <button
+                          type="button"
+                          className="chat-action-button"
+                          data-testid="chat-resolve-thread"
+                          disabled={threadActionsDisabled}
+                          onClick={() => void setThreadStatus(thread.id, 'resolved')}
+                        >
+                          Resolve
+                        </button>
+                      ))}
                     {showTestAiReply && !realtimeStore ? (
                       <button
                         type="button"

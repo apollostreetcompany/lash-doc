@@ -20,15 +20,19 @@ import { parsePublicAccessMode } from './documentAuthority';
 import { parseDocumentClaimPromotionRequest } from './documentClaim';
 import { verifyManagementAssertion, type ManagementAuthEnvironment } from './managementAuth';
 import {
+  NAMED_COMMENT_PROTOCOL_VERSION,
+  NAMED_COMMENT_SOCKET_PROTOCOL,
   NAMED_EDIT_PROTOCOL_VERSION,
   NAMED_EDIT_REQUEST_LIMIT,
   NAMED_EDIT_SOCKET_PROTOCOL,
   isNamedEditActorId,
   isNamedEditOrigin,
   isNamedEditRoomId,
+  namedCommentEnabled,
   namedEditEnabled,
   namedEditFailure,
   namedEditResponse,
+  parseNamedCommentSocketProtocols,
   parseNamedEditCommand,
   parseNamedEditSocketProtocols,
 } from './namedEdit';
@@ -67,7 +71,12 @@ import {
   parsePublicSocketProtocols,
 } from './publicSession';
 import { LashRealtimeRoom } from './room';
-import { REALTIME_RUNTIME, isLocalRealtimeFallbackHost, parseRealtimeRoute } from './routing';
+import {
+  REALTIME_RUNTIME,
+  isLocalRealtimeFallbackHost,
+  namedSocketVersion,
+  parseRealtimeRoute,
+} from './routing';
 
 export { LashDocumentClaim, LashRealtimeRoom };
 export { REALTIME_RUNTIME, normalizeRoomName, parseRealtimeRoute } from './routing';
@@ -300,11 +309,16 @@ const publicSocketRequest = (request: Request, roomId: string, actorId: string) 
   return new Request(url, request);
 };
 
-const namedEditSocketRequest = (request: Request, roomId: string, actorId: string) => {
+const namedSocketRequest = (
+  request: Request,
+  roomId: string,
+  actorId: string,
+  protocolVersion: typeof NAMED_EDIT_PROTOCOL_VERSION | typeof NAMED_COMMENT_PROTOCOL_VERSION,
+) => {
   const url = new URL(request.url);
   url.pathname = '/__lash-room/socket';
   url.search = new URLSearchParams([
-    ['protocolVersion', String(NAMED_EDIT_PROTOCOL_VERSION)],
+    ['protocolVersion', String(protocolVersion)],
     ['actorId', actorId],
     ['roomId', roomId],
   ]).toString();
@@ -1776,18 +1790,27 @@ export default {
       if (request.method !== 'GET') {
         return rejectSession('method-not-allowed', 405);
       }
-      if (url.searchParams.get('protocolVersion') === String(NAMED_EDIT_PROTOCOL_VERSION)) {
+      const namedVersion = namedSocketVersion(url);
+      if (namedVersion !== null) {
+        const comment = namedVersion === NAMED_COMMENT_PROTOCOL_VERSION;
+        const enabled = comment
+          ? namedCommentEnabled(namedEditEnv)
+          : namedEditEnabled(namedEditEnv);
+        const socketProtocol = comment ? NAMED_COMMENT_SOCKET_PROTOCOL : NAMED_EDIT_SOCKET_PROTOCOL;
+        const parseProtocols = comment
+          ? parseNamedCommentSocketProtocols
+          : parseNamedEditSocketProtocols;
         const entries = [...url.searchParams.entries()];
         const actorId = url.searchParams.get('actorId');
         if (
-          !namedEditEnabled(namedEditEnv) ||
+          !enabled ||
           !isNamedEditRoomId(route.roomId) ||
           url.pathname !== `/api/realtime/rooms/${route.roomId}/socket` ||
           entries.length !== 2 ||
           entries[0]?.[0] !== 'protocolVersion' ||
           entries[1]?.[0] !== 'actorId' ||
           !isNamedEditActorId(actorId) ||
-          !parseNamedEditSocketProtocols(request.headers.get('sec-websocket-protocol')) ||
+          !parseProtocols(request.headers.get('sec-websocket-protocol')) ||
           !isNamedEditOrigin(request.headers.get('origin')) ||
           request.headers.get('upgrade')?.toLowerCase() !== 'websocket' ||
           request.headers.has('authorization')
@@ -1795,11 +1818,11 @@ export default {
           return namedEditResponse(namedEditFailure('forbidden'));
         }
         const response = await env.LASH_REALTIME_ROOM.getByName(route.roomId).fetch(
-          namedEditSocketRequest(request, route.roomId, actorId),
+          namedSocketRequest(request, route.roomId, actorId, namedVersion),
         );
         if (
           response.status === 101 &&
-          response.headers.get('sec-websocket-protocol') !== NAMED_EDIT_SOCKET_PROTOCOL
+          response.headers.get('sec-websocket-protocol') !== socketProtocol
         ) {
           return namedEditResponse(namedEditFailure('forbidden'));
         }

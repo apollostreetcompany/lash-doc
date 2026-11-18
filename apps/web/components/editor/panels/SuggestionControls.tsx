@@ -143,16 +143,18 @@ export function SuggestionCard({
             : 'Suggestion pending'}
       </p>
       <p className="chat-new-thread-quote">
-        <del
-          className="history-diff-delete"
-          data-intent="suggest"
-          title={`Removed text by ${author} · ${createdAt}`}
-        >
-          {quote}
-        </del>
+        {quote ? (
+          <del
+            className="history-diff-delete"
+            data-intent="suggest"
+            title={`Removed text by ${author} · ${createdAt}`}
+          >
+            {quote}
+          </del>
+        ) : null}
         {replacement ? (
           <>
-            {' '}
+            {quote ? ' ' : null}
             <ins
               className="history-diff-insert"
               data-intent="suggest"

@@ -1,4 +1,8 @@
-import type { NamedEditAction } from './namedEdit';
+import {
+  NAMED_COMMENT_PROTOCOL_VERSION,
+  NAMED_EDIT_PROTOCOL_VERSION,
+  type NamedEditAction,
+} from './namedEdit';
 
 export const REALTIME_RUNTIME = {
   provider: 'cloudflare',
@@ -50,6 +54,13 @@ export const normalizeRoomName = (raw: string | undefined | null): string | null
 
 export const isLocalRealtimeFallbackHost = (url: URL) =>
   url.hostname === 'localhost' || url.hostname === '127.0.0.1' || url.hostname === '[::1]';
+
+export const namedSocketVersion = (url: URL) => {
+  const version = url.searchParams.get('protocolVersion');
+  if (version === String(NAMED_EDIT_PROTOCOL_VERSION)) return NAMED_EDIT_PROTOCOL_VERSION;
+  if (version === String(NAMED_COMMENT_PROTOCOL_VERSION)) return NAMED_COMMENT_PROTOCOL_VERSION;
+  return null;
+};
 
 export const parseRealtimeRoute = (url: URL): RealtimeRoute => {
   const pathname = url.pathname.replace(/\/+$/u, '') || '/';

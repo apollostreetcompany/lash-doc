@@ -1,3 +1,5 @@
+import { createAnchor, parseReviewMutation, type CommentReviewThread, type ReviewMutation } from '@lash/doc-chat';
+import { createDocumentId } from '@lash/types';
 import { describe, expect, it, vi } from 'vitest';
 
 import { createDocumentMutationAuthority } from '../../../../apps/web/lib/documentMutationAuthority';
@@ -8,7 +10,7 @@ import {
   LashRealtimeYjsProvider,
   RealtimeProviderStartError,
   type AuthorizedRealtimeSession,
-  type NamedRealtimeSessionV5,
+  type NamedRealtimeSession,
   type OwnerRealtimeSessionV3,
   type RealtimeSocket,
 } from '../../../../apps/web/lib/realtimeCollaboration';
@@ -108,7 +110,7 @@ const ownerHydrationComplete = JSON.stringify({
 
 const namedRoomId = `doc-v1-${'a'.repeat(64)}`;
 const namedActorId = `named-${'b'.repeat(32)}`;
-const namedSession = (ticket: string): NamedRealtimeSessionV5 => ({
+const namedSession = (ticket: string): Extract<NamedRealtimeSession, { role: 'edit' }> => ({
   actorId: namedActorId,
   capabilities: ['doc.read', 'doc.edit'],
   expiresAt: new Date(Date.now() + 60_000).toISOString(),
@@ -121,6 +123,21 @@ const namedSession = (ticket: string): NamedRealtimeSessionV5 => ({
   socketUrl: `wss://realtime.example.test/api/realtime/rooms/${namedRoomId}/socket?protocolVersion=5&actorId=${namedActorId}`,
   source: 'named',
   ticketProtocol: `lash-named-ticket.${ticket.padEnd(43, 't')}`,
+});
+
+const namedCommentSession = (ticket: string): Extract<NamedRealtimeSession, { role: 'comment' }> => ({
+  actorId: namedActorId,
+  capabilities: ['doc.read', 'doc.comment', 'doc.suggest'],
+  expiresAt: new Date(Date.now() + 60_000).toISOString(),
+  protocolVersion: 6,
+  remoteDocumentId: namedRoomId,
+  role: 'comment',
+  roomId: namedRoomId,
+  routeDocumentId: namedRoomId,
+  socketProtocol: 'lash-realtime-v6',
+  socketUrl: `wss://realtime.example.test/api/realtime/rooms/${namedRoomId}/socket?protocolVersion=6&actorId=${namedActorId}`,
+  source: 'named',
+  ticketProtocol: `lash-named-comment-ticket.${ticket.padEnd(43, 'c')}`,
 });
 
 function hydrateSocket(socket: FakeSocket, roomId: string, protocolVersion: number) {
@@ -155,6 +172,112 @@ const commitAuthorityOwnership = (provider: LashRealtimeYjsProvider) =>
   ).commitAuthorityOwnership();
 
 describe('authorized realtime provider lifecycle', () => {
+  it('allows named Comment review operations without sending presence, body changes, or decisions', async () => {
+    const commentSession = namedCommentSession('initial-review');
+    const { roomId, actorId, ticketProtocol, socketUrl } = commentSession;
+    const doc = createRealtimeDocument();
+    const socket = new FakeSocket();
+    const createSocket = vi.fn(() => socket);
+    const provider = new LashRealtimeYjsProvider({
+      doc,
+      session: commentSession,
+      createSocket,
+      refreshOwnerSession: vi.fn(),
+    });
+    const deliver = (type: string, fields: Record<string, unknown> = {}) =>
+      socket.emit('message', { data: JSON.stringify({ type, roomId, ...fields }) });
+    const currentText = 'Current safe text';
+    try {
+      const starting = provider.start();
+      void starting.catch(() => undefined);
+      expect(createSocket).toHaveBeenCalledWith(socketUrl, ['lash-realtime-v6', ticketProtocol]);
+      socket.readyState = 1;
+      deliver('room-ready', { protocolVersion: 6 });
+      deliver('yjs-update', { update: encodedRemoteUpdate(currentText) });
+      deliver('room-hydration-complete', { protocolVersion: 6 });
+      deliver('review-snapshot', { operations: [] });
+      await starting;
+      expect(provider.reviewStore.isReady()).toBe(false);
+      deliver('review-snapshot', { threads: [] });
+      expect(provider.reviewStore.isReady()).toBe(true);
+
+      expect(provider.getSnapshot()).toMatchObject({ canWrite: false, hydrated: true, peers: [] });
+      expect(doc.getText('body').toString()).toBe(currentText);
+      expect(provider.hasSharedHistory()).toBe(false);
+      provider.setLocalSelection({ from: 1, to: 3 });
+      doc.getText('body').insert(0, 'local write');
+      deliver('awareness-state', {
+        peers: [{ actorId: 'owner', label: 'Owner', color: '#e97563', connection: 'online', selection: null, updatedAt: 1 }],
+      });
+      expect(provider.getSnapshot().peers).toEqual([]);
+      expect(socket.sent).toEqual([]);
+
+      const threadId = 'd71465e1-0536-4b82-b42b-39fe8d535e3e';
+      for (const operation of [
+        { type: 'decide', threadId, decision: 'rejected' },
+        { type: 'status', threadId, status: 'resolved' },
+      ] as const) {
+        await expect(provider.reviewStore.submit(operation)).resolves.toMatchObject({ ok: false });
+      }
+      expect(socket.sent).toEqual([]);
+      const anchor = {
+        ...createAnchor({ baseVersion: null, docText: currentText, from: 0, to: 7 }),
+        relativeRange: {
+          start: { type: { client: 1, clock: 2 }, item: { client: 1, clock: 3 }, assoc: 0 },
+          end: { type: { client: 1, clock: 2 }, item: { client: 1, clock: 9 }, assoc: -1 },
+        },
+      };
+      const operations: ReviewMutation[] = [
+        { type: 'create', threadId, anchor, body: 'Review note' },
+        { type: 'reply', threadId, body: 'Review reply' },
+        {
+          type: 'propose', threadId: crypto.randomUUID(), anchor, before: 'Current',
+          replacement: 'Latest', body: 'Review suggestion',
+        },
+      ];
+      const now = new Date().toISOString();
+      const visibleThread: CommentReviewThread = {
+        id: threadId,
+        anchor: { ...anchor, token: { ...anchor.token, before: '', after: '' } },
+        status: 'open',
+        resolvedAt: null,
+        updatedAt: now,
+        messages: [{ id: crypto.randomUUID(), threadId, body: 'Review note', author: { id: actorId, type: 'user' }, ts: now }],
+      };
+      for (const [index, operation] of operations.entries()) {
+        const pending = provider.reviewStore.submit(operation);
+        expect(socket.sent).toHaveLength(index + 1);
+        const frame = JSON.parse(socket.sent.at(-1)!);
+        expect(frame).toEqual({
+          type: 'review-operation', operationId: expect.any(String), operation: parseReviewMutation(operation),
+        });
+        const sequence = index + 1;
+        deliver('review-snapshot', { threads: [visibleThread] });
+        expect(socket.sent).toHaveLength(sequence);
+        deliver('review-ack', { operationId: frame.operationId, sequence });
+        await expect(pending).resolves.toEqual({ ok: true });
+      }
+      const docId = createDocumentId(roomId);
+      expect(provider.reviewStore.readThreads(docId)).toMatchObject([
+        { id: threadId, docId, anchor: { token: { text: 'Current', after: '' } } },
+      ]);
+      deliver('review-snapshot', { threads: [{ ...visibleThread, anchor: null }] });
+      expect(provider.reviewStore.readThreads(docId)).toMatchObject([
+        { id: threadId, detached: true, anchor: { orphaned: true, token: { text: '' } }, messages: visibleThread.messages },
+      ]);
+      socket.emit('error');
+      expect(provider.reviewStore.readThreads(docId)).toEqual([]);
+      await expect(provider.reviewStore.submit({ type: 'reply', threadId, body: 'While offline' })).resolves.toMatchObject({ ok: false });
+      expect(socket.sent).toHaveLength(operations.length);
+      socket.emit('close', { code: 4403 });
+      expect(provider.getTerminalReason()).toBe('scope-mismatch');
+      expect(provider.getSnapshot()).toMatchObject({ hydrated: false, canWrite: false });
+    } finally {
+      provider.destroy();
+      doc.destroy();
+    }
+  });
+
   it.each([
     ['42-character token', `lash-ticket.${'t'.repeat(42)}`],
     ['44-character token', `lash-ticket.${'t'.repeat(44)}`],
@@ -1182,6 +1305,88 @@ describe('authorized realtime provider lifecycle', () => {
 
     expect(boundedError).toMatchObject({ kind: 'transient-exhausted' });
   });
+
+  it.each(['browser offline', 'socket close'] as const)(
+    'requires a fresh Comment provider after %s',
+    async (loss) => {
+      vi.useFakeTimers();
+      const browserEvents = new EventTarget();
+      vi.stubGlobal('window', browserEvents);
+      const socket = new FakeSocket();
+      const doc = createRealtimeDocument();
+      const createSocket = vi.fn(() => socket);
+      const refreshOwnerSession = vi.fn(async () => namedCommentSession('later-review'));
+      const provider = new LashRealtimeYjsProvider({
+        createSocket,
+        doc,
+        refreshOwnerSession,
+        session: namedCommentSession('first-review'),
+      });
+      try {
+        const starting = provider.start();
+        hydrateSocket(socket, namedRoomId, 6);
+        await starting;
+        socket.emit('message', {
+          data: JSON.stringify({ type: 'review-snapshot', roomId: namedRoomId, threads: [] }),
+        });
+        expect(provider.reviewStore.isReady()).toBe(true);
+
+        if (loss === 'browser offline') {
+          browserEvents.dispatchEvent(new Event('offline'));
+          expect(socket.readyState).toBe(3);
+        } else {
+          socket.emit('close', { code: 1006 });
+        }
+        expect(provider.getSnapshot()).toMatchObject({
+          hydrated: false,
+          canWrite: false,
+          syncState: 'offline',
+        });
+        expect(provider.reviewStore.isReady()).toBe(false);
+        expect(provider.getTerminalReason()).toBeNull();
+
+        browserEvents.dispatchEvent(new Event('online'));
+        provider.reconnectNow();
+        await vi.advanceTimersByTimeAsync(30_000);
+        expect(createSocket).toHaveBeenCalledOnce();
+        expect(refreshOwnerSession).not.toHaveBeenCalled();
+      } finally {
+        provider.destroy();
+        doc.destroy();
+        vi.unstubAllGlobals();
+        vi.useRealTimers();
+      }
+    },
+  );
+
+  it.each([ownerSession, namedSession, namedCommentSession])(
+    'closes on a malformed account room frame without retrying',
+    async (makeSession) => {
+      vi.useFakeTimers();
+      const socket = new FakeSocket();
+      const doc = createRealtimeDocument();
+      const createSocket = vi.fn(() => socket);
+      const refreshOwnerSession = vi.fn(async () => makeSession('renewed'));
+      const session = makeSession('initial');
+      const provider = new LashRealtimeYjsProvider({ createSocket, doc, refreshOwnerSession, session });
+      try {
+        const starting = provider.start();
+        hydrateSocket(socket, session.remoteDocumentId, session.protocolVersion);
+        await starting;
+        socket.emit('message', { data: 'null' });
+        expect(provider.getTerminalReason()).toBe('protocol-error');
+        expect(provider.getSnapshot()).toMatchObject({ hydrated: false, canWrite: false });
+        provider.reconnectNow();
+        await vi.advanceTimersByTimeAsync(30_000);
+        expect(createSocket).toHaveBeenCalledOnce();
+        expect(refreshOwnerSession).not.toHaveBeenCalled();
+      } finally {
+        provider.destroy();
+        doc.destroy();
+        vi.useRealTimers();
+      }
+    },
+  );
 
   it('keeps retrying a hydrated named editor after 15 seconds of transport failures', async () => {
     vi.useFakeTimers();

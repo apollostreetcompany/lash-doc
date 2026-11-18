@@ -1,15 +1,49 @@
-import type { ReviewProposal } from '@lash/doc-chat';
+import type { ChatAnchor, ReviewProposal } from '@lash/doc-chat';
 import {
   createLashEditorExtensions,
   prepareSuggestionReplacement,
   readSuggestionRange,
 } from '@lash/editor-core';
 import { canonicalize } from '@lash/types';
-import { getSchema } from '@tiptap/core';
+import { getSchema, getTextBetween, getTextSerializersFromSchema } from '@tiptap/core';
 import { initProseMirrorDoc, relativePositionToAbsolutePosition } from 'y-prosemirror';
 import * as Y from 'yjs';
 
 const schema = getSchema(createLashEditorExtensions());
+const textOptions = {
+  blockSeparator: '\n',
+  textSerializers: getTextSerializersFromSchema(schema),
+};
+
+export function createRoomCommentAnchorReader(room: Y.Doc) {
+  const root = room.getXmlFragment('content');
+  const { doc, mapping } = initProseMirrorDoc(root, schema);
+  doc.check();
+  return (anchor: ChatAnchor<null>): ChatAnchor<null> | null => {
+    const range = anchor.relativeRange;
+    if (!range) return null;
+    try {
+      const resolve = (point: typeof range.start) =>
+        relativePositionToAbsolutePosition(
+          room,
+          root,
+          Y.createRelativePositionFromJSON(point),
+          mapping,
+        );
+      const from = resolve(range.start);
+      const to = resolve(range.end);
+      if (from === null || to === null || from >= to || from < 0 || to > doc.content.size) {
+        return null;
+      }
+      const text = getTextBetween(doc, { from, to }, textOptions);
+      if (text !== anchor.token.text) return null;
+      // Older anchor context can include text since removed from the current document.
+      return { ...anchor, token: { ...anchor.token, before: '', after: '' } };
+    } catch {
+      return null;
+    }
+  };
+}
 
 function resolveTarget(room: Y.Doc, proposal: ReviewProposal) {
   const range = proposal.anchor.relativeRange;

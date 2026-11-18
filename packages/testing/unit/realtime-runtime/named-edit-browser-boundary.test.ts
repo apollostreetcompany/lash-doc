@@ -1,9 +1,26 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import { requestNamedEditSession } from '../../../../apps/web/lib/namedEdit/browserClient';
+import {
+  requestNamedEditOwner,
+  requestNamedEditSession,
+} from '../../../../apps/web/lib/namedEdit/browserClient';
 
 const roomId = `doc-v1-${'a'.repeat(64)}`;
 const actorId = `named-${'a'.repeat(32)}`;
+const inviteId = 'b0a763bd-aced-4ea4-8f28-a1a15548baf8';
+
+const commentSession = () => ({
+  roomId,
+  actorId,
+  source: 'named',
+  role: 'comment',
+  protocolVersion: 6,
+  capabilities: ['doc.read', 'doc.comment', 'doc.suggest'],
+  socketProtocol: 'lash-realtime-v6',
+  ticketProtocol: `lash-named-comment-ticket.${'f'.repeat(43)}`,
+  expiresAt: new Date(Date.now() + 20_000).toISOString(),
+  socketUrl: `wss://worker.test/api/realtime/rooms/${roomId}/socket?protocolVersion=6&actorId=${actorId}`,
+});
 
 describe('named editor account session', () => {
   it('uses cookies and no incoming bearer when reopening the canonical document', async () => {
@@ -100,6 +117,68 @@ describe('named editor account session', () => {
       async () => { throw new TypeError('Network unavailable'); },
     ]) {
       await expect(request(fetcher)).resolves.toEqual({ ok: false, retryable: true });
+    }
+  });
+
+  it('accepts only the exact signed Comment capability and socket combination', async () => {
+    const session = commentSession();
+    const open = (value: unknown) =>
+      requestNamedEditSession(roomId, new AbortController().signal, async () =>
+        Response.json({ ok: true, version: 1, session: value }),
+      );
+    await expect(open(session)).resolves.toEqual({ ok: true, session });
+    for (const mixed of [
+      { ...session, role: 'edit' },
+      { ...session, capabilities: ['doc.read', 'doc.edit'] },
+      { ...session, capabilities: [...session.capabilities, 'doc.edit'] },
+      { ...session, socketProtocol: 'lash-realtime-v5' },
+      { ...session, ticketProtocol: `lash-named-ticket.${'f'.repeat(43)}` },
+      {
+        ...session,
+        socketUrl: session.socketUrl.replace('protocolVersion=6', 'protocolVersion=5'),
+      },
+      { ...session, socketUrl: `${session.socketUrl}&token=unexpected` },
+      { ...session, email: 'address@example.test' },
+    ]) {
+      await expect(open(mixed)).resolves.toEqual({
+        ok: false,
+        retryable: false,
+        protocolInvalid: true,
+      });
+    }
+  });
+
+  it('does not return an Edit invite after a Comment issue request', async () => {
+    const fetcher = vi.fn(async () =>
+      Response.json({
+        ok: true,
+        version: 1,
+        invite: {
+          inviteId,
+          email: 'recipient@example.test',
+          role: 'edit',
+          status: 'pending',
+          expiresAt: new Date(Date.now() + 20_000).toISOString(),
+        },
+        token: 'f'.repeat(43),
+      }),
+    );
+    vi.stubGlobal('fetch', fetcher);
+    try {
+      await expect(
+        requestNamedEditOwner(
+          roomId,
+          'issue',
+          {
+            inviteId,
+            email: 'recipient@example.test',
+            role: 'comment',
+          },
+          new AbortController().signal,
+        ),
+      ).resolves.toEqual({ ok: false, reason: 'retry' });
+    } finally {
+      vi.unstubAllGlobals();
     }
   });
 });

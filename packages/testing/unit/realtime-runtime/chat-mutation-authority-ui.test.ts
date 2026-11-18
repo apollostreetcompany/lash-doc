@@ -10,6 +10,7 @@ import {
   ChatPanel,
   type ChatRealtimeStore,
 } from '../../../../apps/web/components/editor/panels/ChatPanel';
+import { RealtimeChatStore } from '../../../../apps/web/lib/realtimeChatStore';
 import * as React from '../../../../apps/web/node_modules/react';
 import { createRoot } from '../../../../apps/web/node_modules/react-dom/client';
 
@@ -88,6 +89,44 @@ describe('chat mutation authority UI', () => {
       configurable: true,
       value: createMemoryStorage(),
     });
+  });
+
+  it('shows the permitted discussion after the projected selection changes', async () => {
+    const threadId = 'd71465e1-0536-4b82-b42b-39fe8d535e3e';
+    const updatedAt = '2026-11-18T15:00:00.000Z';
+    const store = new RealtimeChatStore(vi.fn(() => false));
+    store.receive({
+      type: 'review-snapshot',
+      threads: [{
+        id: threadId, anchor: null, updatedAt, status: 'open', resolvedAt: null,
+        messages: [{ id: 'message-1', threadId, ts: updatedAt, author: { type: 'user', id: 'owner' }, body: 'This reply is still available.' }],
+      }],
+    }, true);
+    const container = document.createElement('div');
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    try {
+      await React.act(async () => {
+        root.render(React.createElement(ChatPanel, {
+          baseVersion: null,
+          currentText: 'Updated writing',
+          docId,
+          editor: null,
+          mutationEnabled: true,
+          statusChangesEnabled: false,
+          realtimeStore: store,
+          runDocumentMutation: vi.fn(() => false),
+        }));
+      });
+      const thread = container.querySelector('article[data-testid="chat-thread"]');
+      expect(thread?.textContent).toContain('Discussion thread');
+      expect(thread?.textContent).toContain('Selected text changed');
+      expect(thread?.textContent).toContain('This reply is still available.');
+      expect(thread?.querySelector('button, input, [data-testid="chat-context-grid"]')).toBeNull();
+    } finally {
+      await React.act(async () => root.unmount());
+      store.dispose();
+    }
   });
 
   afterEach(() => {

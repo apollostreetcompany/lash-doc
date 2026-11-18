@@ -326,6 +326,7 @@ async function main() {
     LASH_REALTIME_INVITE_SECRET: keys.invite,
     LASH_SHARE_PHASE: 'enabled',
     LASH_NAMED_EDIT_PHASE: 'enabled',
+    LASH_NAMED_COMMENT_PHASE: 'enabled',
   };
   writeFileSync(
     workerFile,
@@ -349,6 +350,7 @@ async function main() {
     LASH_DOCUMENT_ID_DERIVATION_KEYS: `v1:${Buffer.from(keys.document, 'hex').toString('base64url')}`,
     LASH_WORKER_CONTROL_SECRET_CURRENT: keys.control,
     LASH_NAMED_EDIT_PHASE: 'enabled',
+    LASH_NAMED_COMMENT_PHASE: 'enabled',
     LASH_NAMED_EDIT_KEY: Buffer.from(keys.namedEdit, 'hex').toString('base64url'),
     LASH_PUBLIC_DOCUMENT_ACCESS_ENABLED: 'false',
     LASH_PUBLIC_COMMENT_ACCESS_ENABLED: 'false',

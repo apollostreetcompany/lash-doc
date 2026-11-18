@@ -1,6 +1,9 @@
 export const NAMED_EDIT_PROTOCOL_VERSION = 5 as const;
 export const NAMED_EDIT_SOCKET_PROTOCOL = 'lash-realtime-v5' as const;
 export const NAMED_EDIT_CAPABILITIES = ['doc.read', 'doc.edit'] as const;
+export const NAMED_COMMENT_PROTOCOL_VERSION = 6 as const;
+export const NAMED_COMMENT_SOCKET_PROTOCOL = 'lash-realtime-v6' as const;
+export const NAMED_COMMENT_CAPABILITIES = ['doc.read', 'doc.comment', 'doc.suggest'] as const;
 export const NAMED_EDIT_REQUEST_LIMIT = 2_048;
 
 const ROOM_ID = /^doc-v(?:0|[1-9][0-9]{0,7})-[0-9a-f]{64}$/u;
@@ -11,18 +14,21 @@ const EMAIL_CIPHERTEXT = /^email-v1\.[A-Za-z0-9_-]+$/u;
 const DIGEST = /^[A-Za-z0-9_-]{43}$/u;
 const ACTOR_ID = /^named-[0-9a-f]{32}$/u;
 
+export type NamedInviteRole = 'edit' | 'comment';
+
 export type NamedEditAction = 'issue' | 'list' | 'revoke' | 'session';
 
 export type NamedEditCommand =
   | {
       action: 'issue';
+      role?: NamedInviteRole;
       inviteId: string;
       emailDigest: string;
       emailCiphertext: string;
       tokenHash: string;
     }
-  | { action: 'list' }
-  | { action: 'revoke'; inviteId: string }
+  | { action: 'list'; includeComment?: true }
+  | { action: 'revoke'; inviteId: string; role?: NamedInviteRole }
   | {
       action: 'session';
       browserOrigin: string;
@@ -33,21 +39,31 @@ export type NamedEditCommand =
 export type NamedEditInvite = {
   inviteId: string;
   emailCiphertext: string;
-  role: 'edit';
+  role: NamedInviteRole;
   status: 'pending' | 'accepted' | 'revoked' | 'expired';
   expiresAt: string;
 };
 
-export type NamedEditSession = {
+type NamedSessionSubject = {
   source: 'named';
-  role: 'edit';
-  protocolVersion: typeof NAMED_EDIT_PROTOCOL_VERSION;
   roomId: string;
   actorId: string;
-  capabilities: typeof NAMED_EDIT_CAPABILITIES;
-  socketProtocol: typeof NAMED_EDIT_SOCKET_PROTOCOL;
   ticketProtocol: string;
   expiresAt: string;
+};
+
+export type NamedEditSession = NamedSessionSubject & {
+  role: 'edit';
+  protocolVersion: typeof NAMED_EDIT_PROTOCOL_VERSION;
+  capabilities: typeof NAMED_EDIT_CAPABILITIES;
+  socketProtocol: typeof NAMED_EDIT_SOCKET_PROTOCOL;
+};
+
+export type NamedCommentSession = NamedSessionSubject & {
+  role: 'comment';
+  protocolVersion: typeof NAMED_COMMENT_PROTOCOL_VERSION;
+  capabilities: typeof NAMED_COMMENT_CAPABILITIES;
+  socketProtocol: typeof NAMED_COMMENT_SOCKET_PROTOCOL;
 };
 
 const errorStatus = {
@@ -57,6 +73,8 @@ const errorStatus = {
   conflict: 409,
   'rate-limited': 429,
   'named-edit-disabled': 503,
+  'named-comment-disabled': 503,
+  'comment-projection-unavailable': 409,
   'internal-error': 503,
 } as const;
 
@@ -65,7 +83,7 @@ export type NamedEditError = keyof typeof errorStatus;
 export type NamedEditResult =
   | { ok: true; version: 1; invite: NamedEditInvite }
   | { ok: true; version: 1; invites: NamedEditInvite[] }
-  | { ok: true; version: 1; session: NamedEditSession }
+  | { ok: true; version: 1; session: NamedEditSession | NamedCommentSession }
   | { ok: false; version: 1; error: NamedEditError; retryable: boolean };
 
 export const namedEditFailure = (error: NamedEditError): NamedEditResult => ({
@@ -85,10 +103,17 @@ export const namedEditResponse = (result: NamedEditResult): Response =>
     },
   });
 
-export const namedEditEnabled = (env: {
+type NamedCollaborationEnvironment = {
+  LASH_NAMED_COMMENT_PHASE?: string;
   LASH_NAMED_EDIT_PHASE?: string;
   LASH_SHARE_PHASE?: string;
-}) => env.LASH_NAMED_EDIT_PHASE === 'enabled' && env.LASH_SHARE_PHASE === 'enabled';
+};
+
+export const namedEditEnabled = (env: NamedCollaborationEnvironment) =>
+  env.LASH_NAMED_EDIT_PHASE === 'enabled' && env.LASH_SHARE_PHASE === 'enabled';
+
+export const namedCommentEnabled = (env: NamedCollaborationEnvironment) =>
+  namedEditEnabled(env) && env.LASH_NAMED_COMMENT_PHASE === 'enabled';
 
 export const isNamedEditRoomId = (value: unknown): value is string =>
   typeof value === 'string' && ROOM_ID.test(value);
@@ -123,6 +148,15 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
 const hasKeys = (value: Record<string, unknown>, keys: string[]) =>
   Object.keys(value).length === keys.length && keys.every((key) => Object.hasOwn(value, key));
 
+const parseOptionalRole = (
+  value: Record<string, unknown>,
+  keys: string[],
+): NamedInviteRole | null | undefined => {
+  if (hasKeys(value, keys)) return undefined;
+  const role = value.role;
+  return hasKeys(value, [...keys, 'role']) && (role === 'edit' || role === 'comment') ? role : null;
+};
+
 export const parseNamedEditCommand = (
   action: NamedEditAction,
   value: unknown,
@@ -130,14 +164,26 @@ export const parseNamedEditCommand = (
   if (!isRecord(value) || value.version !== 1) return null;
   switch (action) {
     case 'list':
-      return hasKeys(value, ['version']) ? { action } : null;
-    case 'revoke':
-      return hasKeys(value, ['version', 'inviteId']) && isNamedEditInviteId(value.inviteId)
-        ? { action, inviteId: value.inviteId }
+      if (hasKeys(value, ['version'])) return { action };
+      return hasKeys(value, ['version', 'includeComment']) && value.includeComment === true
+        ? { action, includeComment: true }
         : null;
-    case 'issue':
+    case 'revoke': {
+      const role = parseOptionalRole(value, ['version', 'inviteId']);
+      return role !== null && isNamedEditInviteId(value.inviteId)
+        ? { action, inviteId: value.inviteId, ...(role ? { role } : {}) }
+        : null;
+    }
+    case 'issue': {
+      const role = parseOptionalRole(value, [
+        'version',
+        'inviteId',
+        'emailDigest',
+        'emailCiphertext',
+        'tokenHash',
+      ]);
       if (
-        !hasKeys(value, ['version', 'inviteId', 'emailDigest', 'emailCiphertext', 'tokenHash']) ||
+        role === null ||
         !isNamedEditInviteId(value.inviteId) ||
         !isEmailDigest(value.emailDigest) ||
         typeof value.emailCiphertext !== 'string' ||
@@ -149,11 +195,13 @@ export const parseNamedEditCommand = (
       }
       return {
         action,
+        ...(role ? { role } : {}),
         inviteId: value.inviteId,
         emailDigest: value.emailDigest,
         emailCiphertext: value.emailCiphertext,
         tokenHash: value.tokenHash,
       };
+    }
     case 'session':
       if (
         !hasKeys(value, ['version', 'browserOrigin', 'tokenHash', 'emailDigest']) ||
@@ -175,8 +223,26 @@ export const parseNamedEditCommand = (
   }
 };
 
-export const parseNamedEditSocketProtocols = (value: string | null): string | null => {
+const parseNamedSocketProtocols = (
+  value: string | null,
+  protocol: string,
+  bearer: RegExp,
+): string | null => {
   const pairs = value?.split(',').map((token) => token.trim());
-  if (!pairs || pairs.length !== 2 || pairs[0] !== NAMED_EDIT_SOCKET_PROTOCOL) return null;
-  return /^lash-named-ticket\.([A-Za-z0-9_-]{43})$/u.exec(pairs[1] ?? '')?.[1] ?? null;
+  if (!pairs || pairs.length !== 2 || pairs[0] !== protocol) return null;
+  return bearer.exec(pairs[1] ?? '')?.[1] ?? null;
 };
+
+export const parseNamedEditSocketProtocols = (value: string | null) =>
+  parseNamedSocketProtocols(
+    value,
+    NAMED_EDIT_SOCKET_PROTOCOL,
+    /^lash-named-ticket\.([A-Za-z0-9_-]{43})$/u,
+  );
+
+export const parseNamedCommentSocketProtocols = (value: string | null) =>
+  parseNamedSocketProtocols(
+    value,
+    NAMED_COMMENT_SOCKET_PROTOCOL,
+    /^lash-named-comment-ticket\.([A-Za-z0-9_-]{43})$/u,
+  );

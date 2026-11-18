@@ -8,11 +8,14 @@ import {
   hasKeys,
   isIsoDate,
   isNamedEditStatus,
+  isNamedInviteRole,
   isObject,
+  namedEditGrantFields,
   validNamedEditGrant,
+  type NamedCommentInviteError,
+  type NamedEditGrant,
   type NamedEditOperation,
   type NamedEditInvite,
-  type NamedEditSession,
 } from './contract';
 
 type WorkerNamedInvite = Omit<NamedEditInvite, 'email'> & { emailCiphertext: string };
@@ -20,8 +23,12 @@ type WorkerNamedInvite = Omit<NamedEditInvite, 'email'> & { emailCiphertext: str
 type WorkerResult =
   | { ok: true; kind: 'issue' | 'revoke'; invite: WorkerNamedInvite }
   | { ok: true; kind: 'list'; invites: WorkerNamedInvite[] }
-  | { ok: true; kind: 'session'; session: Omit<NamedEditSession, 'socketUrl'> }
-  | { ok: false; status: 400 | 403 | 404 | 409 | 429 | 502 | 503 };
+  | { ok: true; kind: 'session'; session: NamedEditGrant }
+  | {
+      ok: false;
+      status: 400 | 403 | 404 | 409 | 429 | 502 | 503;
+      commentError?: NamedCommentInviteError;
+    };
 
 type WorkerRequest = {
   workerOrigin: string;
@@ -39,7 +46,7 @@ const workerInvite = (value: unknown): value is WorkerNamedInvite =>
   NAMED_EDIT_INVITE_ID.test(value.inviteId) &&
   typeof value.emailCiphertext === 'string' &&
   /^email-v1\.[A-Za-z0-9_-]{39,1015}$/u.test(value.emailCiphertext) &&
-  value.role === 'edit' &&
+  isNamedInviteRole(value.role) &&
   isNamedEditStatus(value.status) &&
   isIsoDate(value.expiresAt);
 
@@ -113,6 +120,28 @@ const parseResult = (data: unknown, status: number, request: WorkerRequest): Wor
     }
     if (status === 403 && data.error === 'forbidden') return { ok: false, status: 403 };
     if (status === 409 && data.error === 'conflict') return { ok: false, status: 409 };
+    if (
+      status === 400 &&
+      data.error === 'invalid-request' &&
+      request.operation === 'list' &&
+      request.body.includeComment === true
+    ) {
+      return { ok: false, status: 400 };
+    }
+    if (status === 409 && data.error === 'comment-projection-unavailable') {
+      return { ok: false, status: 409, commentError: data.error };
+    }
+    if (status === 503 && data.error === 'named-comment-disabled') {
+      return { ok: false, status: 503, commentError: data.error };
+    }
+    if (
+      status === 400 &&
+      data.error === 'invalid-request' &&
+      request.operation === 'issue' &&
+      request.body.role === 'comment'
+    ) {
+      return { ok: false, status: 503, commentError: 'named-comment-disabled' };
+    }
     if (status === 429 && data.error === 'rate-limited') return { ok: false, status: 429 };
     return invalidResponse;
   }
@@ -121,23 +150,13 @@ const parseResult = (data: unknown, status: number, request: WorkerRequest): Wor
     operation === 'session' &&
     hasKeys(data, ['ok', 'version', 'session']) &&
     isObject(data.session) &&
-    hasKeys(data.session, [
-      'roomId',
-      'actorId',
-      'source',
-      'role',
-      'protocolVersion',
-      'capabilities',
-      'socketProtocol',
-      'ticketProtocol',
-      'expiresAt',
-    ]) &&
+    hasKeys(data.session, namedEditGrantFields) &&
     validNamedEditGrant(data.session, request.roomId)
   ) {
     return {
       ok: true,
       kind: 'session',
-      session: data.session as Omit<NamedEditSession, 'socketUrl'>,
+      session: data.session,
     };
   }
   if (
@@ -145,7 +164,8 @@ const parseResult = (data: unknown, status: number, request: WorkerRequest): Wor
     hasKeys(data, ['ok', 'version', 'invites']) &&
     Array.isArray(data.invites) &&
     data.invites.length <= 500 &&
-    data.invites.every(workerInvite)
+    data.invites.every(workerInvite) &&
+    (request.body.includeComment === true || data.invites.every((invite) => invite.role === 'edit'))
   ) {
     return { ok: true, kind: 'list', invites: data.invites };
   }
@@ -154,6 +174,7 @@ const parseResult = (data: unknown, status: number, request: WorkerRequest): Wor
     hasKeys(data, ['ok', 'version', 'invite']) &&
     workerInvite(data.invite) &&
     request.body.inviteId === data.invite.inviteId &&
+    data.invite.role === (request.body.role ?? 'edit') &&
     (operation !== 'revoke' || data.invite.status === 'revoked')
   ) {
     return { ok: true, kind: operation, invite: data.invite };
