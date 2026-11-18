@@ -11,14 +11,28 @@ on:
 
 jobs:
   build-and-test:
-    # The pinned browser binaries support the Ubuntu 24.04 LTS image.
     runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    container:
+      # Playwright v1.55.1 on Ubuntu Noble. Match the version in pnpm-lock.yaml.
+      image: mcr.microsoft.com/playwright@sha256:2f29369043d81d6d69a815ceb80760f55e85f5020371ad06a4d996f18503ad1c
+      options: --user 1001
+    defaults:
+      run:
+        shell: bash
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
           # The PR merge commit carries both parents. Keep their ancestry for the diff.
           fetch-depth: 0
+          persist-credentials: false
+
+      - name: Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
 
       - name: Check tracked build outputs
         run: python3 tools/check_generated_files.py --source index
@@ -56,9 +70,6 @@ jobs:
 
       - name: Unit tests
         run: pnpm run test:unit
-
-      - name: Install Playwright browsers
-        run: pnpm exec playwright install --with-deps
 
       - name: E2E tests
         run: pnpm run test:e2e:ci

@@ -99,7 +99,7 @@
         "--distDir",
         "-resultBundlePath"
       ],
-      "source_sha256": "9db8c43be2c5057c7c6885441ebf80f635dcde4d80152d8b774b171cac090df9"
+      "source_sha256": "e2ae3e81dc73290666cde9fab3e5ef14a49b886e87be9080d8e9e51afdbc3147"
     },
     {
       "path": "playwright.config.ts",
