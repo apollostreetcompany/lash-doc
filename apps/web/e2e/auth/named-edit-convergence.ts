@@ -1,5 +1,8 @@
 import { expect, type Locator, type Page, type TestInfo, type WebSocket } from '@playwright/test';
 import { writeFile } from 'node:fs/promises';
+import { setTimeout as delay } from 'node:timers/promises';
+
+import { selectDiscussionTab } from '../discussion-tabs';
 
 const editor = (page: Page) =>
   page.getByRole('region', { name: 'Writing canvas' }).locator('.tiptap');
@@ -12,7 +15,13 @@ type Frame = {
   updateId?: string;
 };
 
+type Wire = { frames: Frame[]; sockets: WebSocket[] };
+const roomWires = new WeakMap<Page, Wire>();
+
 export function observeRoomWire(page: Page) {
+  const existing = roomWires.get(page);
+  if (existing) return existing;
+
   const frames: Frame[] = [];
   const sockets: WebSocket[] = [];
   page.on('websocket', (socket) => {
@@ -35,9 +44,10 @@ export function observeRoomWire(page: Page) {
     socket.on('framesent', ({ payload }) => observe('sent', payload));
     socket.on('framereceived', ({ payload }) => observe('received', payload));
   });
-  return { frames, sockets };
+  const wire = { frames, sockets };
+  roomWires.set(page, wire);
+  return wire;
 }
-type Wire = ReturnType<typeof observeRoomWire>;
 
 const containsUpdate = (frame: Frame, text: string, direction: Frame['direction']) =>
   frame.direction === direction &&
@@ -267,19 +277,35 @@ export async function exerciseBrowserNetworkRecovery(input: {
   testInfo: TestInfo;
 }) {
   const { owner, member, memberWire, testInfo } = input;
+  const outageMs = 15_000;
   const before = await richBody(member);
   const context = member.context();
-  const live = memberWire.sockets.filter((socket) => !socket.isClosed()).at(-1);
-  expect(
-    live,
-    'the browser should own an authenticated room socket before the outage',
-  ).toBeDefined();
-  await context.setOffline(true);
-  const started = performance.now();
-  let socketClosed = false;
+  const ownerWire = observeRoomWire(owner);
+  const ownerSocket = ownerWire.sockets.filter((socket) => !socket.isClosed()).at(-1);
+  const memberSocket = memberWire.sockets.filter((socket) => !socket.isClosed()).at(-1);
+  if (!ownerSocket || !memberSocket) throw new Error('Expected two authenticated room sockets.');
+  const memberSocketClosed = new Promise<number>((resolve) => {
+    memberSocket.once('close', () => resolve(performance.now()));
+  });
+  const updateAcknowledged = (frames: Frame[], text: string) => {
+    const submitted = frames.find((frame) => containsUpdate(frame, text, 'sent'));
+    return (
+      !!submitted?.updateId &&
+      frames.some(
+        (frame) =>
+          frame.direction === 'received' &&
+          frame.type === 'sync-ack' &&
+          frame.updateId === submitted.updateId,
+      )
+    );
+  };
+  let memberSocketClosedAt: number | null = null;
+  let ownerAcknowledgedAt: number;
   let peerFrameDeliveredWhileOffline = false;
-  let wroteOffline = false;
-  const framesBefore = memberWire.frames.length;
+  let memberQueuedEditAt: number | null = null;
+  let heldOfflineMs: number;
+  const ownerFramesBefore = ownerWire.frames.length;
+  const memberFramesBefore = memberWire.frames.length;
   const httpFails = () =>
     member.evaluate(async () => {
       try {
@@ -289,50 +315,31 @@ export async function exerciseBrowserNetworkRecovery(input: {
         return true;
       }
     });
+  await context.setOffline(true);
+  const started = performance.now();
+  const minimumHold = delay(outageMs, null);
   try {
     await expect.poll(() => member.evaluate(() => navigator.onLine)).toBe(false);
     expect(
       await httpFails(),
       'actual same-origin HTTP should fail while the browser is offline',
     ).toBe(true);
-    try {
-      await expect.poll(() => live?.isClosed(), { timeout: 4_000 }).toBe(true);
-    } catch {
-      // Check whether the established socket still transports real peer edits
-      // during the network control, rather than relying on its close signal alone.
-      await appendBrowserParagraph(owner, ONLINE_PEER_PROBE);
-      try {
-        await expect
-          .poll(
-            () =>
-              memberWire.frames
-                .slice(framesBefore)
-                .some((frame) => containsUpdate(frame, ONLINE_PEER_PROBE, 'received')),
-            { timeout: 4_000 },
-          )
-          .toBe(true);
-        await expect(paragraphWith(member, ONLINE_PEER_PROBE)).toHaveText(ONLINE_PEER_PROBE, {
-          timeout: 2_000,
-        });
-        peerFrameDeliveredWhileOffline = true;
-      } catch {
-        // The original close check is repeated before claiming anything about recovery.
-      }
-    }
+    await appendBrowserParagraph(owner, ONLINE_PEER_PROBE);
+    await expect
+      .poll(() => updateAcknowledged(ownerWire.frames.slice(ownerFramesBefore), ONLINE_PEER_PROBE))
+      .toBe(true);
+    ownerAcknowledgedAt = performance.now();
+    expect(ownerAcknowledgedAt - started).toBeLessThan(outageMs);
+    expect(ownerSocket.isClosed()).toBe(false);
+    await expect(sync(owner)).toHaveAttribute('data-state', 'saved');
+    await owner.screenshot({ path: testInfo.outputPath('owner-saved-during-browser-offline.png') });
 
-    socketClosed = live?.isClosed() === true;
-    if (socketClosed) {
+    memberSocketClosedAt = await Promise.race([memberSocketClosed, minimumHold]);
+    if (memberSocketClosedAt !== null) {
       await expect(sync(member)).toHaveAttribute('data-state', /^(reconnecting|offline)$/u);
-      await expect(sync(owner)).toHaveAttribute('data-state', 'saved');
       if (await editor(member).isEditable()) {
         await appendBrowserParagraph(member, OFFLINE_NOTE);
-        await expect(paragraphWith(owner, OFFLINE_NOTE)).toHaveCount(0);
-        expect(
-          memberWire.frames
-            .slice(framesBefore)
-            .some((frame) => containsUpdate(frame, OFFLINE_NOTE, 'sent')),
-        ).toBe(false);
-        wroteOffline = true;
+        memberQueuedEditAt = performance.now();
       } else {
         expect(await richBody(member)).toBe(before);
         testInfo.annotations.push({
@@ -342,22 +349,43 @@ export async function exerciseBrowserNetworkRecovery(input: {
       }
       await member.screenshot({ path: testInfo.outputPath('actual-browser-offline.png') });
     }
-    const remaining = 15_000 - (performance.now() - started);
-    if (remaining > 0) await new Promise((resolve) => setTimeout(resolve, remaining));
+    await minimumHold;
     expect(await httpFails()).toBe(true);
+    expect(ownerSocket.isClosed()).toBe(false);
+    peerFrameDeliveredWhileOffline = memberWire.frames
+      .slice(memberFramesBefore)
+      .some((frame) => containsUpdate(frame, ONLINE_PEER_PROBE, 'received'));
+    if (memberQueuedEditAt !== null) {
+      await expect(paragraphWith(owner, OFFLINE_NOTE)).toHaveCount(0);
+      expect(
+        memberWire.frames
+          .slice(memberFramesBefore)
+          .some((frame) => frame.direction === 'sent' && frame.type === 'yjs-update'),
+      ).toBe(false);
+    }
+    heldOfflineMs = performance.now() - started;
+    expect(heldOfflineMs).toBeGreaterThanOrEqual(outageMs);
   } finally {
     await context.setOffline(false);
   }
 
+  const healedAt = performance.now();
   await expect.poll(() => member.evaluate(() => navigator.onLine)).toBe(true);
-  const retry = member.getByTestId('sync-retry-button');
-  if (await retry.isVisible()) await retry.click();
-  await expect(sync(member)).toHaveAttribute('data-state', 'saved', { timeout: 10_000 });
-  if (socketClosed) {
-    expect(memberWire.sockets.some((socket) => socket !== live && !socket.isClosed())).toBe(true);
+  let usedRetry = false;
+  try {
+    await expect(sync(member)).toHaveAttribute('data-state', 'saved', { timeout: 10_000 });
+  } catch {
+    await member.getByTestId('sync-retry-button').click();
+    usedRetry = true;
+    await expect(sync(member)).toHaveAttribute('data-state', 'saved', { timeout: 10_000 });
+  }
+  if (memberSocketClosedAt !== null) {
+    expect(memberWire.sockets.some((socket) => socket !== memberSocket && !socket.isClosed())).toBe(
+      true,
+    );
     expect(
       memberWire.frames
-        .slice(framesBefore)
+        .slice(memberFramesBefore)
         .some(
           (frame) => frame.type === 'room-hydration-complete' && frame.direction === 'received',
         ),
@@ -366,50 +394,57 @@ export async function exerciseBrowserNetworkRecovery(input: {
     testInfo.annotations.push({
       type: 'J06 offline unverified',
       description:
-        'Browser offline mode blocked HTTP but the test could not establish a room WebSocket outage.',
+        'Browser offline mode blocked HTTP, but the room socket did not close within 15 seconds.',
     });
   }
+  const wroteOffline = memberQueuedEditAt !== null;
+  let memberAcknowledgedAfterOnlineMs: number | null = null;
   if (wroteOffline) {
-    await expect(paragraphWith(owner, OFFLINE_NOTE)).toHaveCount(1);
     await expect
-      .poll(() => {
-        const frames = memberWire.frames.slice(framesBefore);
-        const submitted = frames.find((frame) => containsUpdate(frame, OFFLINE_NOTE, 'sent'));
-        return (
-          !!submitted?.updateId &&
-          frames.some(
-            (frame) =>
-              frame.direction === 'received' &&
-              frame.type === 'sync-ack' &&
-              frame.updateId === submitted.updateId,
-          )
-        );
-      })
+      .poll(() => updateAcknowledged(memberWire.frames.slice(memberFramesBefore), OFFLINE_NOTE))
       .toBe(true);
+    memberAcknowledgedAfterOnlineMs = performance.now() - healedAt;
+    await expect(paragraphWith(owner, OFFLINE_NOTE)).toHaveText(OFFLINE_NOTE);
   }
+  await expect(paragraphWith(member, ONLINE_PEER_PROBE)).toHaveText(ONLINE_PEER_PROBE);
   const expected = await richBody(owner);
   await expectConvergedRichBody(member, expected);
+  const richBodyConvergedAfterOnlineMs = performance.now() - healedAt;
   await Promise.all([owner.reload(), member.reload()]);
   for (const page of [owner, member]) {
     await expectConvergedRichBody(page, expected);
+    await expect(paragraphWith(page, ONLINE_PEER_PROBE)).toHaveText(ONLINE_PEER_PROBE);
     await expect(paragraphWith(page, OFFLINE_NOTE)).toHaveCount(wroteOffline ? 1 : 0);
+    await selectDiscussionTab(page, 'history');
+    const version = page
+      .getByRole('region', { name: 'Shared version history' })
+      .getByRole('combobox', { name: 'Version', exact: true });
+    await expect(version.getByRole('option', { name: /^History started/u })).toHaveCount(1);
+    await expect(version.getByRole('option', { name: /^Restored version/u })).toHaveCount(2);
   }
   await member.screenshot({ path: testInfo.outputPath('browser-network-check-after-reload.png') });
-  const verdict = wroteOffline
-    ? 'queued-edit-acknowledged'
-    : socketClosed
-      ? 'offline-editing-unavailable'
-      : 'inconclusive';
+  let verdict = 'inconclusive';
+  if (memberSocketClosedAt !== null) {
+    verdict = wroteOffline ? 'queued-edit-acknowledged' : 'offline-editing-unavailable';
+  }
   await writeFile(
     testInfo.outputPath('network-outage-observation.json'),
     JSON.stringify(
       {
         verdict,
         browserHttpBlocked: true,
-        heldOfflineForAtLeast15Seconds: true,
-        roomSocketClosedDuringEditCheck: socketClosed,
+        heldOfflineMs,
+        ownerAcknowledgedDuringCutMs: ownerAcknowledgedAt - started,
+        roomSocketClosedDuringCutMs:
+          memberSocketClosedAt === null ? null : memberSocketClosedAt - started,
         peerFrameDeliveredWhileOffline,
+        memberEditQueuedDuringCutMs:
+          memberQueuedEditAt === null ? null : memberQueuedEditAt - started,
+        memberAcknowledgedAfterOnlineMs,
+        richBodyConvergedAfterOnlineMs,
+        recovery: memberSocketClosedAt === null ? null : usedRetry ? 'manual-retry' : 'automatic',
         bothReloadedWithSameRichBody: true,
+        bothReloadedWithPriorHistory: true,
       },
       null,
       2,
