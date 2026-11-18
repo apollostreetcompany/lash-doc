@@ -12,15 +12,35 @@ test('sr-thread-nav', async ({ page }) => {
   await editor.click();
   const prefix = 'Anchor ';
   const target = 'target';
-  await page.keyboard.insertText(`${prefix}${target} remains`);
+  const body = `${prefix}${target} remains`;
+  await page.keyboard.insertText(body);
+  await expect(editor).toHaveText(body);
+  await expect(page.getByTestId('autosave-indicator')).toHaveAttribute('data-status', 'saved');
   await selectDiscussionTab(page, 'history');
   await expect(page.getByTestId('history-version').first()).toBeVisible();
 
+  const nativeSelection = () =>
+    editor.evaluate((element) => {
+      const selection = window.getSelection();
+      if (!selection?.rangeCount) return null;
+      const range = selection.getRangeAt(0);
+      if (!element.contains(range.commonAncestorContainer)) return null;
+      const preceding = document.createRange();
+      preceding.selectNodeContents(element);
+      preceding.setEnd(range.startContainer, range.startOffset);
+      return { prefix: preceding.toString(), text: selection.toString() };
+    });
+
+  const wordModifier = process.platform === 'darwin' ? 'Alt' : 'Control';
   await editor.click();
-  await page.keyboard.press('Home');
-  for (let index = 0; index < prefix.length; index += 1) await page.keyboard.press('ArrowRight');
-  for (let index = 0; index < target.length; index += 1)
-    await page.keyboard.press('Shift+ArrowRight');
+  await editor.press('End');
+  await editor.press(`${wordModifier}+ArrowLeft`);
+  await editor.press('ArrowLeft');
+  await expect.poll(nativeSelection).toEqual({ prefix: `${prefix}${target}`, text: '' });
+  // Select the whole word in one native keyboard action.
+  await editor.press(`${wordModifier}+Shift+ArrowLeft`);
+  await expect.poll(nativeSelection).toEqual({ prefix, text: target });
+
   await selectDiscussionTab(page, 'chat');
   await expect(page.getByTestId('chat-create-thread')).toBeEnabled();
   await page.getByTestId('chat-create-thread').click();
@@ -49,6 +69,7 @@ test('sr-thread-nav', async ({ page }) => {
   await expect(page.getByTestId('chat-anchor-jump-status')).toContainText(
     'Selected target in the document.',
   );
+  await expect.poll(nativeSelection).toEqual({ prefix, text: target });
   await expect(
     page.getByRole('button', { name: 'Add AI reply to thread on target' }),
   ).toBeEnabled();
