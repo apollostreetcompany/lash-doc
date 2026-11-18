@@ -23,7 +23,6 @@
  */
 
 import { Extension, type Editor, type Extensions } from '@tiptap/core';
-import CollaborationExtension from '@tiptap/extension-collaboration';
 import LinkExtension from '@tiptap/extension-link';
 import TaskItemExtension from '@tiptap/extension-task-item';
 import TaskListExtension from '@tiptap/extension-task-list';
@@ -40,6 +39,7 @@ import {
   type LashTableOptions,
   createLashTableInteractionPlugin,
 } from '../extensions/table';
+import { LashCollaboration } from '../plugins/collaboration-text-identity';
 import { OutlineManager, type OutlinePersistenceAdapter } from '../plugins/outline';
 
 export interface LashSchemaOptions {
@@ -160,7 +160,7 @@ export const buildBaseExtensions = (options?: LashSchemaOptions): Extensions => 
     }),
     ...(options?.collaboration
       ? [
-          CollaborationExtension.configure({
+          LashCollaboration.configure({
             document: options.collaboration.document,
             field: options.collaboration.field,
           }),

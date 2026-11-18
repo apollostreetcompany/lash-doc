@@ -10,8 +10,12 @@ import {
 
 const repeatedPhrase = 'publish the beta';
 const original = `${repeatedPhrase} first, then ${repeatedPhrase}`;
+const originalTargetStart = original.lastIndexOf(repeatedPhrase);
+const pastedCopy = `${repeatedPhrase} / `;
+const duplicatePrefix = original.slice(0, originalTargetStart) + pastedCopy;
+const afterPaste = duplicatePrefix + repeatedPhrase;
 const replacement = 'share the beta';
-const accepted = `${repeatedPhrase} first, then ${replacement}`;
+const accepted = duplicatePrefix + replacement;
 const reviewComment = 'Does the second launch need a separate announcement?';
 const suggestionNote = 'Use gentler wording for the second launch.';
 const ownerReply = 'Yes, let’s distinguish the two announcements.';
@@ -37,7 +41,7 @@ async function expectDetachedFeedback(page: Page, note: string) {
   await expect(feedback.getByRole('button', { name: /Show document target/u })).toHaveCount(0);
 }
 
-async function expectSecondSelection(target: Locator) {
+async function expectSelectionAt(target: Locator, start: number, text: string) {
   await expect
     .poll(() =>
       target.evaluate((element) => {
@@ -56,7 +60,7 @@ async function expectSecondSelection(target: Locator) {
         return { start: prefix.toString().length, text: selected.toString() };
       }),
     )
-    .toEqual({ start: original.lastIndexOf(repeatedPhrase), text: repeatedPhrase });
+    .toEqual({ start, text });
 }
 
 async function selectSecondPhrase(page: Page) {
@@ -86,7 +90,26 @@ async function selectSecondPhrase(page: Page) {
   await page.mouse.down();
   await page.mouse.move(points.end.x, points.end.y, { steps: 8 });
   await page.mouse.up();
-  await expectSecondSelection(target);
+  await expectSelectionAt(target, originalTargetStart, repeatedPhrase);
+}
+
+async function showFeedbackTarget(page: Page, note: string) {
+  const feedback = thread(page, note);
+  await expect(feedback.getByTestId('chat-current-target')).toHaveText(repeatedPhrase);
+  await feedback
+    .getByRole('button', { name: `Show document target for thread on ${repeatedPhrase}` })
+    .click();
+}
+
+async function expectOriginalTargetAfterPaste(page: Page) {
+  await expect(paragraph(page)).toHaveText(afterPaste);
+  await expect(thread(page, suggestionNote).getByTestId('suggestion-status')).toHaveText(
+    'Suggestion pending',
+  );
+  for (const note of [reviewComment, suggestionNote]) {
+    await showFeedbackTarget(page, note);
+    await expectSelectionAt(paragraph(page), duplicatePrefix.length, repeatedPhrase);
+  }
 }
 
 async function expectNoDocument(page: Page, documentTitle: string) {
@@ -246,15 +269,42 @@ test('a named Comment reviewer proposes an exact edit without edit or History ac
       await reviewer.screenshot({ path: testInfo.outputPath('reviewer-posted-feedback.png') });
     });
 
-    await test.step('The owner receives both threads and accepts only the selected occurrence', async () => {
+    await test.step('A clipboard copy before the quote leaves both reviews attached to the original', async () => {
       await owner.bringToFront();
       await selectDiscussionTab(owner, 'chat');
+      await owner.evaluate((text) => navigator.clipboard.writeText(text), pastedCopy);
+      await showFeedbackTarget(owner, reviewComment);
+      await expectSelectionAt(paragraph(owner), originalTargetStart, repeatedPhrase);
+      await owner.keyboard.press('ArrowLeft');
+      await expectSelectionAt(paragraph(owner), originalTargetStart, '');
+      await owner.keyboard.press('ControlOrMeta+v');
+      await expect(paragraph(owner)).toHaveText(afterPaste);
+      await expect(paragraph(reviewer)).toHaveText(afterPaste);
+      await expect(owner.getByTestId('realtime-sync-state')).toHaveAttribute('data-state', 'saved');
+      await paragraph(owner).evaluate((target) => target.scrollIntoView({ block: 'center' }));
+      await owner.screenshot({ path: testInfo.outputPath('owner-pasted-identical-copy.png') });
+
+      for (const page of [owner, reviewer]) {
+        await page.bringToFront();
+        await expectOriginalTargetAfterPaste(page);
+      }
+      await Promise.all([owner.reload(), reviewer.reload()]);
+      await expectReviewerAccess(reviewer, documentTitle, privatePrior);
+      for (const page of [owner, reviewer]) {
+        await page.bringToFront();
+        await selectDiscussionTab(page, 'chat');
+        await expectOriginalTargetAfterPaste(page);
+      }
+      await paragraph(reviewer).evaluate((target) => target.scrollIntoView({ block: 'center' }));
+      await reviewer.screenshot({
+        path: testInfo.outputPath('reviewer-shows-original-after-reload.png'),
+      });
+    });
+
+    await test.step('The owner accepts only the original occurrence', async () => {
+      await owner.bringToFront();
       const comment = thread(owner, reviewComment);
       await expect(comment.getByTestId('chat-current-target')).toHaveText(repeatedPhrase);
-      await comment
-        .getByRole('button', { name: `Show document target for thread on ${repeatedPhrase}` })
-        .click();
-      await expectSecondSelection(paragraph(owner));
       await comment
         .getByRole('textbox', { name: `Reply to thread on ${repeatedPhrase}` })
         .fill(ownerReply);
@@ -266,7 +316,7 @@ test('a named Comment reviewer proposes an exact edit without edit or History ac
       const proposal = thread(owner, suggestionNote);
       await expect(proposal.getByTestId('suggestion-status')).toHaveText('Suggestion pending');
       await expect(proposal.getByTestId('chat-current-target')).toHaveText(repeatedPhrase);
-      await expect(editor(owner)).toHaveText(original);
+      await expect(editor(owner)).toHaveText(afterPaste);
       await owner.screenshot({ path: testInfo.outputPath('owner-pending-suggestion.png') });
       await proposal.getByRole('button', { name: 'Accept suggestion', exact: true }).click();
       for (const page of [owner, reviewer]) {
@@ -296,6 +346,10 @@ test('a named Comment reviewer proposes an exact edit without edit or History ac
       await expectDetachedFeedback(reviewer, reviewComment);
       await expectDetachedFeedback(reviewer, suggestionNote);
 
+      await paragraph(reviewer).evaluate((target) => target.scrollIntoView({ block: 'center' }));
+      await reviewer.screenshot({
+        path: testInfo.outputPath('reviewer-accepted-body-after-reload.png'),
+      });
       await share(owner).click();
       const reviewerRow = grantList(owner).getByRole('listitem').filter({ hasText: reviewerEmail });
       await expect(reviewerRow).toContainText('Can comment');

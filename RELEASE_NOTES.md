@@ -16,6 +16,10 @@ restore an earlier version, and revoke the invitation.
 - **Review a change.** Replies and suggestion decisions survive reopening the
   document. Shared History lets both editors compare versions. Owners can
   restore an earlier body as a new version.
+- **Keep feedback on the original words.** When an editor pastes an identical
+  phrase beside a quoted passage in the same paragraph, the comment and suggestion
+  follow the original passage. For a review affected by a duplicate paste in
+  an older build, use **Show** to check the target before accepting.
 - **Revise a selection.** On browsers with a ready on-device language model,
   writers can review the proposed wording in context, edit it, and apply it
   to the selected passage. The interface reports when the model is unavailable.
@@ -25,7 +29,6 @@ restore an earlier version, and revoke the invitation.
 The candidate has been exercised on a compiled local web server with two
 independently authenticated browsers. Public rollout and the human 4.5/5
 qualification are separate release milestones.
-
 
 ## 2026-05-16 v1
 
