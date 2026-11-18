@@ -1,5 +1,6 @@
 'use client';
 
+import { DEFAULT_SELECT_CELL_OPTIONS, DEFAULT_STATUS_CELL_OPTIONS } from '@lash/editor-core';
 import type {
   PublicCommentAuthorizationV1,
   PublicCommentDtoV1,
@@ -143,6 +144,23 @@ const nodeContent = (node: PublicNode): PublicNode[] =>
       )
     : [];
 
+const typedCellLabel = (attrs: unknown): string | null => {
+  if (!attrs || typeof attrs !== 'object' || Array.isArray(attrs)) return null;
+  const { cellType, options, value } = attrs as {
+    cellType?: unknown;
+    options?: unknown;
+    value?: unknown;
+  };
+  if (cellType !== 'status' && cellType !== 'select') return null;
+  const provided = Array.isArray(options)
+    ? options.filter((option): option is string => typeof option === 'string')
+    : [];
+  const defaults =
+    cellType === 'status' ? DEFAULT_STATUS_CELL_OPTIONS : DEFAULT_SELECT_CELL_OPTIONS;
+  const choices = provided.length ? provided : defaults;
+  return typeof value === 'string' && choices.includes(value) ? value : (choices[0] ?? '');
+};
+
 const markText = (text: React.ReactNode, marks: unknown, key: string): React.ReactNode => {
   if (!Array.isArray(marks)) return text;
   return marks.reduce<React.ReactNode>((child, mark, index) => {
@@ -209,7 +227,7 @@ const renderNode = (node: PublicNode, key: string): React.ReactNode => {
     );
   if (node.type === 'tableRow') return <tr key={key}>{children}</tr>;
   if (node.type === 'tableHeader') return <th key={key}>{children}</th>;
-  if (node.type === 'tableCell') return <td key={key}>{children}</td>;
+  if (node.type === 'tableCell') return <td key={key}>{typedCellLabel(node.attrs) ?? children}</td>;
   if (node.type === 'image' && node.attrs && typeof node.attrs === 'object') {
     const alt = (node.attrs as { alt?: unknown }).alt;
     return (

@@ -1,18 +1,24 @@
 /** @vitest-environment jsdom */
 
+import { createLashEditorExtensions } from '@lash/editor-core';
 import type { PublicCommentDtoV1 } from '@lash/types';
+import { getSchema } from '@tiptap/core';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { prosemirrorJSONToYDoc } from 'y-prosemirror';
 
 import {
   PublicDocumentClient,
   type PublicDocumentClientDependencies,
 } from '../../../../apps/web/app/public/[roomId]/PublicDocumentClient';
-import type {
-  PublicDocumentProvider,
-  PublicDocumentProviderSnapshot,
+import {
+  createPublicDocumentProvider,
+  type PublicDocumentProvider,
+  type PublicDocumentProviderSnapshot,
 } from '../../../../apps/web/lib/publicDocumentAccess/provider';
+import { writeRealtimeDocumentTitle } from '../../../../apps/web/lib/realtimeCollaboration';
 import * as React from '../../../../apps/web/node_modules/react';
 import { createRoot, type Root } from '../../../../apps/web/node_modules/react-dom/client';
+import { encodePublicYjsProjection } from '../../../realtime-worker/src/namedEditProjection';
 
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT =
   true;
@@ -94,6 +100,136 @@ const providerHarness = () => {
 };
 
 describe('public document client shell', () => {
+  it.each(['read', 'comment'] as const)(
+    'renders author-visible table values in public %s mode',
+    async (mode) => {
+      const paragraph = (text: string) => ({
+        type: 'paragraph',
+        ...(text && { content: [{ type: 'text', text }] }),
+      });
+      const typedCell = (
+        cellType: string,
+        value: string,
+        options: string[],
+        retainedText = '',
+      ) => ({
+        type: 'tableCell',
+        attrs: { cellType, value, options },
+        content: [paragraph(retainedText)],
+      });
+      const selectedLabel = 'Beta <b>launch</b>';
+      const headers = ['Stage', 'Priority', 'Notes', 'Next step', 'Group', 'Default', 'Empty'];
+      const room = prosemirrorJSONToYDoc(
+        getSchema(createLashEditorExtensions()),
+        {
+          type: 'doc',
+          content: [
+            {
+              type: 'table',
+              content: [
+                {
+                  type: 'tableRow',
+                  content: headers.map((header) => ({
+                    type: 'tableHeader',
+                    content: [paragraph(header)],
+                  })),
+                },
+                {
+                  type: 'tableRow',
+                  content: [
+                    typedCell('status', 'Done', []),
+                    typedCell(
+                      'select',
+                      selectedLabel,
+                      ['Unselected option', selectedLabel],
+                      'Retained cell note',
+                    ),
+                    {
+                      type: 'tableCell',
+                      attrs: { cellType: 'text', value: 'Unused text attribute' },
+                      content: [
+                        {
+                          type: 'paragraph',
+                          content: [
+                            { type: 'text', text: 'Formatted note', marks: [{ type: 'bold' }] },
+                          ],
+                        },
+                      ],
+                    },
+                    typedCell('status', '', []),
+                    typedCell('select', 'No longer configured', ['Custom fallback']),
+                    typedCell('select', '', []),
+                    typedCell('select', '', ['']),
+                  ],
+                },
+              ],
+            },
+          ],
+        },
+        'content',
+      );
+      writeRealtimeDocumentTitle(room, 'Launch readiness');
+      const update = encodePublicYjsProjection(room);
+      room.destroy();
+      expect(update).toEqual(expect.any(String));
+
+      const socket = Object.assign(new EventTarget(), { close: vi.fn() });
+      const authorization = { ...session.authorization, mode };
+      const projectionSession = { ...session, authorization };
+      const dependencies: PublicDocumentClientDependencies = {
+        getActorId: () => session.actorId,
+        requestSession: vi.fn().mockResolvedValue({ ok: true, session: projectionSession }),
+        createProvider: (authorizedSession) =>
+          createPublicDocumentProvider(authorizedSession, { createSocket: () => socket }),
+        listComments: vi.fn().mockResolvedValue({
+          ok: true,
+          version: 1,
+          authorization,
+          comments: [],
+          nextBeforeSequence: null,
+        }),
+        requestAuthoringSession: vi
+          .fn()
+          .mockResolvedValue({ ok: true, version: 1, authenticated: false }),
+      };
+      const host = await render(
+        React.createElement(PublicDocumentClient, { roomId: ROOM_ID, dependencies }),
+      );
+      const frame = (value: unknown) =>
+        socket.dispatchEvent(new MessageEvent('message', { data: JSON.stringify(value) }));
+      const envelope = { ...authorization, protocolVersion: 4, highWaterSequence: 0 };
+      await React.act(async () => {
+        frame({ type: 'room-ready', ...envelope });
+        frame({ type: 'yjs-update', roomId: ROOM_ID, update });
+      });
+      expect(host.querySelector('table')).toBeNull();
+      await React.act(async () => {
+        frame({ type: 'room-hydration-complete', ...envelope, persistedUpdates: 1 });
+      });
+
+      expect(host.textContent).toContain(mode === 'read' ? 'Can read' : 'Can comment');
+      expect([...host.querySelectorAll('th')].map((cell) => cell.textContent)).toEqual(headers);
+      expect(host.querySelector('td strong')?.textContent).toBe('Formatted note');
+      expect([...host.querySelectorAll('td')].map((cell) => cell.textContent)).toEqual([
+        'Done',
+        selectedLabel,
+        'Formatted note',
+        'Todo',
+        'Custom fallback',
+        'Option A',
+        '',
+      ]);
+      expect(host.querySelector('table b')).toBeNull();
+      expect(host.querySelector('table')?.outerHTML).not.toMatch(
+        /Unselected option|Retained cell note|Unused text attribute/u,
+      );
+      expect(
+        host.querySelector('table button, table [role="listbox"], [contenteditable]'),
+      ).toBeNull();
+      expect(dependencies.listComments).toHaveBeenCalledTimes(mode === 'comment' ? 1 : 0);
+    },
+  );
+
   it('keeps title and body absent through session authorization and hydration', async () => {
     let resolveSession!: (value: { ok: true; session: typeof session }) => void;
     const harness = providerHarness();
