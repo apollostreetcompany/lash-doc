@@ -264,7 +264,7 @@ test.describe('PROD-J10 one-step selected-text comment', () => {
         textareaWidth: textarea?.getBoundingClientRect().width ?? 0,
         actions: actions.map((action) => {
           const rect = action.getBoundingClientRect();
-          return { width: rect.width, height: rect.height };
+          return { label: action.textContent?.trim(), width: rect.width, height: rect.height };
         }),
       };
     });
@@ -273,7 +273,11 @@ test.describe('PROD-J10 one-step selected-text comment', () => {
     expect(metrics.composerLeft).toBeGreaterThanOrEqual(0);
     expect(metrics.composerRight).toBeLessThanOrEqual(metrics.viewportWidth);
     expect(metrics.textareaWidth).toBeGreaterThan(0);
-    expect(metrics.actions).toHaveLength(2);
+    expect(metrics.actions.map((action) => action.label)).toEqual([
+      'Cancel',
+      'Open email draft',
+      'Post comment',
+    ]);
     for (const action of metrics.actions) {
       expect(action.width).toBeGreaterThanOrEqual(44);
       expect(action.height).toBeGreaterThanOrEqual(44);
