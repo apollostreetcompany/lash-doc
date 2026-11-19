@@ -1,6 +1,6 @@
 /** @vitest-environment jsdom */
 
-import { createLashEditorExtensions } from '@lash/editor-core';
+import { createLashEditorExtensions, selectTableCells } from '@lash/editor-core';
 import { Editor } from '@tiptap/core';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -56,11 +56,14 @@ afterEach(async () => {
   vi.unstubAllGlobals();
 });
 
-async function mountActions(editable = false) {
+async function mountActions(
+  editable = false,
+  content = '<p>First line</p><p><strong>Second line</strong></p>',
+) {
   editor = new Editor({
     element: editorHost,
     extensions: createLashEditorExtensions(),
-    content: '<p>First line</p><p><strong>Second line</strong></p>',
+    content,
     editable,
   });
   const onComment = vi.fn();
@@ -87,6 +90,37 @@ function commentButton() {
 }
 
 describe('native selection actions', () => {
+  it('does not read the browser selection while dispatching an editable cell selection', async () => {
+    await mountActions(
+      true,
+      '<table><tbody><tr><td><p>Name</p></td><td><p>Status</p></td></tr></tbody></table>',
+    );
+    const readNativeCollapse = vi.spyOn(Selection.prototype, 'isCollapsed', 'get');
+
+    await React.act(async () => {
+      expect(selectTableCells(editor, 0, 1, 0, 1, { scrollIntoView: false })).toBe(true);
+      expect(readNativeCollapse).not.toHaveBeenCalled();
+    });
+    expect(commentButton()).toBeUndefined();
+  });
+
+  it('avoids reading browser selection during plain typing and still offers native ranges ahead of the model', async () => {
+    await mountActions(true);
+    const readNativeCollapse = vi.spyOn(Selection.prototype, 'isCollapsed', 'get');
+
+    await React.act(async () => {
+      editor.view.dispatch(editor.state.tr.insertText('New '));
+      expect(readNativeCollapse).not.toHaveBeenCalled();
+    });
+    expect(editor.state.selection.empty).toBe(true);
+    expect(commentButton()).toBeUndefined();
+
+    const text = editor.view.dom.querySelector('p')!.firstChild!;
+    await select(text, 0, text, 3);
+    expect(editor.state.selection.empty).toBe(true);
+    expect(commentButton()).toBeDefined();
+  });
+
   it('offers a bounded touch Comment action to a read-only reviewer across text blocks', async () => {
     const { onComment, onRevise } = await mountActions();
     const [first, second] = editor.view.dom.querySelectorAll('p');

@@ -93,6 +93,9 @@ function readCurrentSelection(
   previous: SelectionContext | null,
 ) {
   if (editor.isDestroyed) return null;
+  // A cell or node selection cannot supply an editable text anchor. Checking the
+  // browser Selection here would also flush pending layout during dispatch.
+  if (editor.isEditable && !(editor.state.selection instanceof TextSelection)) return null;
   const observed = readSelection(editor);
   if (observed) return observed;
 
@@ -213,8 +216,13 @@ export function SelectionActions({ editor, onComment, onRevise }: SelectionActio
       currentContext.current = next;
       setContext(next);
     };
+    const syncModelSelection = () => {
+      // Native selectionchange still handles a highlight before the model catches up.
+      if (editor.isEditable && editor.state.selection.empty && !currentContext.current) return;
+      syncSelection();
+    };
     const syncEdit = ({ transaction }: EditorEvents['transaction']) => {
-      if (transaction.docChanged) syncSelection();
+      if (transaction.docChanged) syncModelSelection();
     };
     const dismiss = () => {
       if (!currentContext.current) return;
@@ -243,14 +251,14 @@ export function SelectionActions({ editor, onComment, onRevise }: SelectionActio
     ownerDocument.addEventListener('selectionchange', syncSelection);
     ownerDocument.addEventListener('pointerdown', releaseOnOutsidePress, true);
     ownerDocument.addEventListener('focusin', releaseOnOutsideFocus);
-    editor.on('selectionUpdate', syncSelection);
+    editor.on('selectionUpdate', syncModelSelection);
     editor.on('transaction', syncEdit);
     syncSelection();
     return () => {
       ownerDocument.removeEventListener('selectionchange', syncSelection);
       ownerDocument.removeEventListener('pointerdown', releaseOnOutsidePress, true);
       ownerDocument.removeEventListener('focusin', releaseOnOutsideFocus);
-      editor.off('selectionUpdate', syncSelection);
+      editor.off('selectionUpdate', syncModelSelection);
       editor.off('transaction', syncEdit);
     };
   }, [editor]);
