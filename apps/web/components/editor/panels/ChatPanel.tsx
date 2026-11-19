@@ -81,10 +81,10 @@ type NewThreadDraft = {
   quote: string;
   historyText: string;
 };
-type EmailDraftCopy = {
-  draft: NewThreadDraft;
-  mode: 'offered' | 'copied' | 'manual';
-};
+type EmailDraftCopy = { draft: NewThreadDraft } & (
+  | { mode: 'offered' | 'manual' }
+  | { mode: 'copied'; body: string }
+);
 
 const emailDraftBody = (quote: string, comment: string) => {
   const quoted = quote
@@ -376,6 +376,7 @@ export function ChatPanel({
   useEffect(() => {
     setNewThreadDraft(null);
     setNewThreadBody('');
+    setEmailDraftCopy(null);
     setPostStatus('');
     setPostError('');
     setReplyDrafts({});
@@ -613,16 +614,17 @@ export function ChatPanel({
   const copyEmailDraft = async () => {
     const draft = getDeliverableDraft();
     if (!draft) return;
-    let mode: EmailDraftCopy['mode'] = 'manual';
+    const body = emailDraftBody(draft.quote, newThreadBody);
+    let result: EmailDraftCopy = { draft, mode: 'manual' };
     try {
       if (navigator.clipboard?.writeText) {
-        await navigator.clipboard.writeText(emailDraftBody(draft.quote, newThreadBody));
-        mode = 'copied';
+        await navigator.clipboard.writeText(body);
+        result = { draft, mode: 'copied', body };
       }
     } catch {
       // A selectable copy is still available when clipboard permission is denied.
     }
-    setEmailDraftCopy((current) => (current?.draft === draft ? { draft, mode } : current));
+    setEmailDraftCopy((current) => (current?.draft === draft ? result : current));
   };
 
   const createThread = async () => {
@@ -961,7 +963,8 @@ export function ChatPanel({
               >
                 Copy quote and comment
               </button>
-              {emailDraftCopy.mode === 'copied' ? (
+              {emailDraftCopy.mode === 'copied' &&
+              emailDraftCopy.body === emailDraftBody(newThreadDraft.quote, newThreadBody) ? (
                 <p role="status" className="chat-new-thread-quote">
                   Quote and comment copied.
                 </p>

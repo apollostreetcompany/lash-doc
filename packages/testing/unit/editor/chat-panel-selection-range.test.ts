@@ -228,6 +228,41 @@ describe('ChatPanel exact selection anchors', () => {
     },
   );
 
+  it.each(['before', 'after'])(
+    'shows clipboard success only for the current draft after an edit %s the copy finishes',
+    async (editTiming) => {
+      const editor = openEditor('<p>Selected quote</p>');
+      const { container, button } = await mountChat(editor, { from: 1, to: 15 });
+      let finishCopy: () => void = () => undefined;
+      const clipboardWrite = new Promise<void>((resolve) => {
+        finishCopy = resolve;
+      });
+      const writeText = vi.fn((_text: string) => clipboardWrite);
+      Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } });
+      observeEmailDrafts();
+
+      await React.act(async () => button('chat-create-thread').click());
+      await fillComment(container, 'First comment.');
+      await React.act(async () => button('chat-open-email-draft').click());
+      const copy = button('chat-copy-email-draft');
+      await React.act(async () => copy.click());
+      expect(writeText).toHaveBeenCalledWith('> Selected quote\r\n\r\nFirst comment.');
+      expect(container.textContent).not.toContain('Quote and comment copied.');
+
+      if (editTiming === 'before') await fillComment(container, 'Edited comment.');
+      await React.act(async () => finishCopy());
+      if (editTiming === 'after') {
+        expect(container.textContent).toContain('Quote and comment copied.');
+        await fillComment(container, 'Edited comment.');
+      }
+      expect(container.textContent).not.toContain('Quote and comment copied.');
+
+      await React.act(async () => copy.click());
+      expect(writeText).toHaveBeenLastCalledWith('> Selected quote\r\n\r\nEdited comment.');
+      expect(container.textContent).toContain('Quote and comment copied.');
+    },
+  );
+
   it('preserves an oversized shared draft and surfaces the existing client validation', async () => {
     const editor = openEditor(undefined, openRoom());
     editor.commands.insertContent('alpha');

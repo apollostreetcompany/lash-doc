@@ -87,7 +87,7 @@ async function captureEmailDrafts(page: Page) {
 
 test('keyboard highlight opens an exact comment, prepares email, and saves the thread', async ({
   page,
-}) => {
+}, testInfo) => {
   const editor = await highlightSecondOccurrence(page);
   await page.keyboard.press('Tab');
   await expect(contextualComment(page)).toBeFocused();
@@ -117,6 +117,12 @@ test('keyboard highlight opens an exact comment, prepares email, and saves the t
       page.evaluate(async () => (await navigator.clipboard.readText()).replace(/\r\n/g, '\n')),
     )
     .toBe(`> ${quote}\n\n${note}`);
+  const copied = draft(page).getByText('Quote and comment copied.', { exact: true });
+  await expect(copied).toBeVisible();
+  await page.screenshot({ path: testInfo.outputPath('contextual-comment-email.png') });
+  await comment(page).fill(`${note} Let’s confirm.`);
+  await expect(copied).toHaveCount(0);
+  await comment(page).fill(note);
   await expect(comment(page)).toHaveValue(note);
   await expect(page.getByRole('article', { name: `Thread on ${quote}` })).toHaveCount(0);
 
@@ -135,21 +141,22 @@ test('keyboard highlight opens an exact comment, prepares email, and saves the t
 test.describe('contextual Comment on a narrow touch screen', () => {
   test.use({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
 
-  test('taps the highlighted text action and focuses the quoted draft', async ({ page }) => {
+  test('taps the highlighted text action and focuses the quoted draft', async ({
+    page,
+  }, testInfo) => {
     await highlightSecondOccurrence(page);
     const action = contextualComment(page);
     await expect(action).toBeInViewport({ ratio: 1 });
     const size = await action.evaluate((button) => {
-      const { width, height } = button.getBoundingClientRect();
-      return { width, height };
+      if (!(button instanceof HTMLButtonElement)) throw new Error('Expected a native button.');
+      return { width: button.offsetWidth, height: button.offsetHeight };
     });
-    // DOMRect can round a 44px touch target down by a fraction of a pixel.
-    const roundingTolerance = 0.001;
-    expect(size.width).toBeGreaterThanOrEqual(44 - roundingTolerance);
-    expect(size.height).toBeGreaterThanOrEqual(44 - roundingTolerance);
+    expect(size.width).toBeGreaterThanOrEqual(44);
+    expect(size.height).toBeGreaterThanOrEqual(44);
 
     await action.tap();
     await expectComposer(page);
+    await page.screenshot({ path: testInfo.outputPath('contextual-comment-touch.png') });
     await comment(page).fill(note);
     await draft(page).getByRole('button', { name: 'Post comment', exact: true }).tap();
     await expect(
