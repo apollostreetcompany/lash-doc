@@ -28,6 +28,7 @@ import TaskItemExtension from '@tiptap/extension-task-item';
 import TaskListExtension from '@tiptap/extension-task-list';
 import UnderlineExtension from '@tiptap/extension-underline';
 import { Plugin, PluginKey, TextSelection } from '@tiptap/pm/state';
+import { isInTable } from '@tiptap/pm/tables';
 import StarterKitExtension from '@tiptap/starter-kit';
 import type * as Y from 'yjs';
 
@@ -95,8 +96,8 @@ const LashTableNavigation = Extension.create({
       new Plugin({
         key: new PluginKey('lashTableNavigation'),
         props: {
-          handleKeyDown: (_view, event) => {
-            if (event.key !== 'Tab') {
+          handleKeyDown: (view, event) => {
+            if (event.key !== 'Tab' || !isInTable(view.state)) {
               return false;
             }
 

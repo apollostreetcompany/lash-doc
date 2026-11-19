@@ -36,9 +36,11 @@ Open it in the second profile and sign in there using its own message from the
 local inbox. Both writers can now edit the same document. Reload both tabs to
 check the saved result.
 
-For a review, invite a different account with **Can comment**. That person can
-select a passage, start a discussion and suggest new wording. The owner can
-apply the suggestion, and both people can reopen the result.
+For a review, invite a different account with **Can comment**. Highlight a
+passage, choose **Comment** beside it, write a note, and select **Post comment**.
+The other person can read and reply in **Discussion**. To send just the passage
+and note to an individual, choose **Open email draft** and address it in your
+mail app. Reviewers can also suggest new wording for an editor to accept.
 
 Ctrl-C stops the app and Worker. Local account and room data survive a restart.
 
