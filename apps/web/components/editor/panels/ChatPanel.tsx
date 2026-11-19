@@ -31,6 +31,14 @@ export type { ChatRealtimeStore } from '../../../lib/realtimeChatStore';
 
 export type RequestDocumentNavigation = (navigateToTarget: () => void) => void;
 
+export type AnchoredCommentRequest = Readonly<{
+  editor: Editor;
+  docId: DocumentId;
+  document: Editor['state']['doc'];
+  from: number;
+  to: number;
+}>;
+
 export interface ChatPanelProps {
   showTestAiReply?: boolean;
   editor: Editor | null;
@@ -42,6 +50,8 @@ export interface ChatPanelProps {
   statusChangesEnabled?: boolean;
   realtimeStore?: ChatRealtimeStore | null;
   actorId?: string;
+  anchoredCommentRequest?: AnchoredCommentRequest | null;
+  onAnchoredCommentRequestHandled?: (request: AnchoredCommentRequest) => void;
   runDocumentMutation(mutate: () => void): boolean;
   requestDocumentNavigation?: RequestDocumentNavigation;
   onThreadCountChange?: (count: number) => void;
@@ -63,9 +73,25 @@ type AnchorMarker = {
   label: string;
 };
 type NewThreadDraft = {
+  editor: Editor;
+  docId: DocumentId;
+  document: Editor['state']['doc'];
+  store: ChatRealtimeStore | null;
   anchor: ChatAnchor;
   quote: string;
   historyText: string;
+};
+type EmailDraftCopy = { draft: NewThreadDraft } & (
+  | { mode: 'offered' | 'manual' }
+  | { mode: 'copied'; body: string }
+);
+
+const emailDraftBody = (quote: string, comment: string) => {
+  const quoted = quote
+    .split(/\r\n|\r|\n/gu)
+    .map((line) => `> ${line}`)
+    .join('\r\n');
+  return `${quoted}\r\n\r\n${comment.replace(/\r\n|\r|\n/gu, '\r\n')}`;
 };
 
 const LOCAL_USER = { type: 'user', id: 'local-user' } as const;
@@ -215,8 +241,10 @@ export function ChatPanel({
   mutationEnabled,
   mutationUnavailableReason = 'This shared access is read-only. Existing threads remain available to read and navigate.',
   statusChangesEnabled = true,
-  realtimeStore,
+  realtimeStore = null,
   actorId = LOCAL_USER.id,
+  anchoredCommentRequest,
+  onAnchoredCommentRequestHandled,
   runDocumentMutation,
   requestDocumentNavigation,
   onThreadCountChange,
@@ -236,9 +264,12 @@ export function ChatPanel({
   const [sendingReview, setSendingReview] = useState(false);
   const [newThreadDraft, setNewThreadDraft] = useState<NewThreadDraft | null>(null);
   const [newThreadBody, setNewThreadBody] = useState('');
+  const [emailDraftCopy, setEmailDraftCopy] = useState<EmailDraftCopy | null>(null);
   const threadsRef = useRef<LocalThread[]>([]);
   const createThreadButtonRef = useRef<HTMLButtonElement>(null);
   const newThreadTextareaRef = useRef<HTMLTextAreaElement>(null);
+  const manualEmailCopyRef = useRef<HTMLTextAreaElement>(null);
+  const handledCommentRequestRef = useRef<AnchoredCommentRequest | null>(null);
   const pendingThreadFocusRef = useRef<string | null>(null);
   const pendingThreadIdRef = useRef<string | null>(null);
   const reviewInFlightRef = useRef(false);
@@ -336,8 +367,16 @@ export function ChatPanel({
   }, [newThreadDraft]);
 
   useEffect(() => {
+    if (emailDraftCopy?.draft === newThreadDraft && emailDraftCopy.mode === 'manual') {
+      manualEmailCopyRef.current?.focus();
+      manualEmailCopyRef.current?.select();
+    }
+  }, [emailDraftCopy, newThreadDraft]);
+
+  useEffect(() => {
     setNewThreadDraft(null);
     setNewThreadBody('');
+    setEmailDraftCopy(null);
     setPostStatus('');
     setPostError('');
     setReplyDrafts({});
@@ -386,8 +425,7 @@ export function ChatPanel({
       }
       frame = window.requestAnimationFrame(updateMarkers);
     };
-    const resize =
-      typeof ResizeObserver === 'function' ? new ResizeObserver(scheduleUpdate) : null;
+    const resize = typeof ResizeObserver === 'function' ? new ResizeObserver(scheduleUpdate) : null;
     resize?.observe(editor.view.dom);
     scheduleUpdate();
     window.addEventListener('scroll', scheduleUpdate, true);
@@ -419,41 +457,92 @@ export function ChatPanel({
     thread.focus();
   }, [activeThreadId, threadViews]);
 
-  if (!open) return null;
+  const openThreadDraft = useCallback(
+    (range: { from: number; to: number }, exact = false) => {
+      if (
+        !editor ||
+        editor.isDestroyed ||
+        !mutationEnabled ||
+        reviewInFlightRef.current ||
+        (realtimeStore ? !realtimeStore.isReady() : !baseVersion)
+      ) {
+        setPostError('Commenting is unavailable right now.');
+        return;
+      }
+      const documentText = projectChatDocumentText(editor);
+      const textRange = documentText.toTextRange(range);
+      const editorRange = textRange && documentText.toEditorRange(textRange);
+      const relativeRange =
+        realtimeStore && editorRange ? captureChatAnchorRange(editor, editorRange) : null;
+      if (
+        !textRange ||
+        !editorRange ||
+        (exact && (editorRange.from !== range.from || editorRange.to !== range.to)) ||
+        (realtimeStore && !relativeRange)
+      ) {
+        setPostError('This selection is unavailable. Select the text again.');
+        return;
+      }
+      setNewThreadDraft({
+        editor,
+        docId,
+        document: editor.state.doc,
+        store: realtimeStore,
+        anchor: {
+          ...createAnchor({
+            baseVersion: realtimeStore ? null : baseVersion,
+            docText: documentText.text,
+            ...textRange,
+          }),
+          ...(relativeRange ? { relativeRange } : {}),
+        },
+        quote: documentText.text.slice(textRange.from, textRange.to),
+        historyText: realtimeStore ? '' : documentText.text,
+      });
+      setNewThreadBody('');
+      setEmailDraftCopy(null);
+      setPostError('');
+      setPostStatus('');
+    },
+    [baseVersion, docId, editor, mutationEnabled, realtimeStore],
+  );
 
-  const openThreadDraft = () => {
-    if (chatActionsDisabled || !editor || editor.isDestroyed || (!baseVersion && !realtimeStore)) {
-      return;
-    }
-    const documentText = projectChatDocumentText(editor);
-    const textRange = documentText.toTextRange(editor.state.selection);
-    const editorRange = textRange && documentText.toEditorRange(textRange);
-    const relativeRange =
-      realtimeStore && editorRange ? captureChatAnchorRange(editor, editorRange) : null;
-    if (!textRange || !editorRange || (realtimeStore && !relativeRange)) {
+  useEffect(() => {
+    const request = anchoredCommentRequest;
+    if (!open || !request || handledCommentRequestRef.current === request) return;
+    handledCommentRequestRef.current = request;
+
+    if (newThreadDraft) {
+      setPostError('Finish or cancel this comment before starting another.');
+      newThreadTextareaRef.current?.focus();
+    } else if (
+      !editor ||
+      editor.isDestroyed ||
+      request.editor !== editor ||
+      request.docId !== docId ||
+      request.document !== editor.state.doc
+    ) {
       setPostError('This selection is unavailable. Select the text again.');
-      return;
+    } else {
+      openThreadDraft(request, true);
     }
-    setNewThreadDraft({
-      anchor: {
-        ...createAnchor({
-          baseVersion: realtimeStore ? null : baseVersion,
-          docText: documentText.text,
-          ...textRange,
-        }),
-        ...(relativeRange ? { relativeRange } : {}),
-      },
-      quote: documentText.text.slice(textRange.from, textRange.to),
-      historyText: realtimeStore ? '' : documentText.text,
-    });
-    setNewThreadBody('');
-    setPostError('');
-    setPostStatus('');
-  };
+    onAnchoredCommentRequestHandled?.(request);
+  }, [
+    anchoredCommentRequest,
+    docId,
+    editor,
+    newThreadDraft,
+    onAnchoredCommentRequestHandled,
+    open,
+    openThreadDraft,
+  ]);
+
+  if (!open) return null;
 
   const cancelThreadDraft = () => {
     setNewThreadDraft(null);
     setNewThreadBody('');
+    setEmailDraftCopy(null);
     setPostError('');
     pendingThreadIdRef.current = null;
     window.requestAnimationFrame(() => createThreadButtonRef.current?.focus());
@@ -472,9 +561,76 @@ export function ChatPanel({
     focusEditor();
   };
 
+  const getDeliverableDraft = () => {
+    const draft = newThreadDraft;
+    if (!draft || !newThreadBody.trim() || chatActionsDisabled || reviewInFlightRef.current) {
+      return null;
+    }
+    if (realtimeStore && !realtimeStore.isReady()) {
+      setPostError('Reconnect to the document to use this comment.');
+      return null;
+    }
+    if (
+      !editor ||
+      editor.isDestroyed ||
+      draft.editor !== editor ||
+      draft.docId !== docId ||
+      draft.store !== realtimeStore
+    ) {
+      setPostError('This comment belongs to a different document.');
+      return null;
+    }
+    const relativeRange = draft.anchor.relativeRange;
+    if (relativeRange) {
+      const range = resolveChatAnchorRange(editor, relativeRange);
+      const projection = projectChatDocumentText(editor);
+      const textRange = range && projection.toTextRange(range);
+      if (textRange && projection.text.slice(textRange.from, textRange.to) === draft.quote) {
+        return draft;
+      }
+    } else if (draft.document === editor.state.doc) {
+      return draft;
+    }
+    setPostError('The selected text changed. Select the text again to start a new comment.');
+    return null;
+  };
+
+  const openEmailDraft = () => {
+    const draft = getDeliverableDraft();
+    if (!draft) return;
+    setEmailDraftCopy({ draft, mode: 'offered' });
+    try {
+      const subject = encodeURIComponent('Comment on a passage');
+      const body = encodeURIComponent(emailDraftBody(draft.quote, newThreadBody));
+      const email = document.createElement('a');
+      email.href = `mailto:?subject=${subject}&body=${body}`;
+      email.click();
+      setPostError('');
+    } catch {
+      setPostError('Lash could not open this email draft. Copy the quote and comment instead.');
+    }
+  };
+
+  const copyEmailDraft = async () => {
+    const draft = getDeliverableDraft();
+    if (!draft) return;
+    const body = emailDraftBody(draft.quote, newThreadBody);
+    let result: EmailDraftCopy = { draft, mode: 'manual' };
+    try {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(body);
+        result = { draft, mode: 'copied', body };
+      }
+    } catch {
+      // A selectable copy is still available when clipboard permission is denied.
+    }
+    setEmailDraftCopy((current) => (current?.draft === draft ? result : current));
+  };
+
   const createThread = async () => {
+    const draft = getDeliverableDraft();
+    if (!draft) return;
     const body = newThreadBody.trim();
-    if (chatActionsDisabled || !newThreadDraft || !body) return;
     const id =
       pendingThreadIdRef.current ?? (realtimeStore ? crypto.randomUUID() : createLocalId('thread'));
     pendingThreadIdRef.current = id;
@@ -492,10 +648,10 @@ export function ChatPanel({
         {
           id,
           docId,
-          anchor: newThreadDraft.anchor,
+          anchor: draft.anchor,
           messages: [message],
           filters: {},
-          historyText: newThreadDraft.historyText,
+          historyText: draft.historyText,
           status: 'open',
           resolvedAt: null,
           updatedAt: ts,
@@ -506,7 +662,7 @@ export function ChatPanel({
       ? await submitReview({
           type: 'create',
           threadId: id,
-          anchor: { ...newThreadDraft.anchor, baseVersion: null },
+          anchor: { ...draft.anchor, baseVersion: null },
           body,
         })
       : updateLocalThreads(createLocalThread);
@@ -517,6 +673,7 @@ export function ChatPanel({
     setPostStatus('Comment posted.');
     setNewThreadDraft(null);
     setNewThreadBody('');
+    setEmailDraftCopy(null);
     pendingThreadIdRef.current = null;
   };
 
@@ -690,7 +847,7 @@ export function ChatPanel({
             }
             aria-expanded={Boolean(newThreadDraft)}
             aria-controls="chat-new-thread-composer"
-            onClick={openThreadDraft}
+            onClick={() => editor && openThreadDraft(editor.state.selection)}
           >
             Add comment
           </button>
@@ -763,6 +920,10 @@ export function ChatPanel({
             value={newThreadBody}
             onChange={(event) => setNewThreadBody(event.target.value)}
           />
+          <p className="chat-new-thread-quote">
+            {realtimeStore ? 'Post to shared discussion.' : 'Post on this device.'} Email opens a
+            draft for you to address and send.
+          </p>
           <div className="chat-new-thread-actions">
             <button
               type="button"
@@ -774,6 +935,15 @@ export function ChatPanel({
               Cancel
             </button>
             <button
+              type="button"
+              className="chat-action-button"
+              data-testid="chat-open-email-draft"
+              disabled={chatActionsDisabled || !newThreadBody.trim()}
+              onClick={openEmailDraft}
+            >
+              Open email draft
+            </button>
+            <button
               type="submit"
               className="chat-action-button"
               data-testid="chat-post-thread"
@@ -782,6 +952,34 @@ export function ChatPanel({
               {sendingReview ? 'Posting…' : 'Post comment'}
             </button>
           </div>
+          {emailDraftCopy?.draft === newThreadDraft ? (
+            <>
+              <button
+                type="button"
+                className="chat-action-button"
+                data-testid="chat-copy-email-draft"
+                disabled={chatActionsDisabled || !newThreadBody.trim()}
+                onClick={() => void copyEmailDraft()}
+              >
+                Copy quote and comment
+              </button>
+              {emailDraftCopy.mode === 'copied' &&
+              emailDraftCopy.body === emailDraftBody(newThreadDraft.quote, newThreadBody) ? (
+                <p role="status" className="chat-new-thread-quote">
+                  Quote and comment copied.
+                </p>
+              ) : emailDraftCopy.mode === 'manual' && !chatActionsDisabled ? (
+                <textarea
+                  ref={manualEmailCopyRef}
+                  className="chat-new-thread-textarea"
+                  aria-label="Quote and comment to copy"
+                  rows={4}
+                  readOnly
+                  value={emailDraftBody(newThreadDraft.quote, newThreadBody)}
+                />
+              ) : null}
+            </>
+          ) : null}
         </form>
       ) : null}
       {suggestionComposer}

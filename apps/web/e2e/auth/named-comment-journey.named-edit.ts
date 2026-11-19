@@ -244,13 +244,23 @@ test('a named Comment reviewer proposes an exact edit without edit or History ac
       await expectReviewerAccess(reviewer, documentTitle, privatePrior);
       await expect(editor(reviewer)).toHaveText(original);
       await expect(reviewer.getByRole('button', { name: 'Select text in document' })).toBeVisible();
+      await reviewer.getByRole('button', { name: 'Close activity panel', exact: true }).click();
+      await expect(
+        reviewer.getByRole('button', { name: 'Discussion', exact: true }),
+      ).toHaveAttribute('aria-expanded', 'false');
     });
 
     await test.step('Post an anchored comment and propose wording for the second occurrence', async () => {
       await selectSecondPhrase(reviewer);
-      await reviewer.getByRole('button', { name: 'Add comment', exact: true }).click();
+      await reviewer.getByRole('button', { name: 'Comment', exact: true }).click();
+      await expect(reviewer.getByRole('tab', { name: 'Chat', exact: true })).toHaveAttribute(
+        'aria-selected',
+        'true',
+      );
       await expect(reviewer.getByTestId('chat-new-thread-quote')).toHaveText(repeatedPhrase);
-      await reviewer.getByRole('textbox', { name: 'Comment', exact: true }).fill(reviewComment);
+      const commentDraft = reviewer.getByRole('textbox', { name: 'Comment', exact: true });
+      await expect(commentDraft).toBeFocused();
+      await commentDraft.fill(reviewComment);
       await reviewer.getByRole('button', { name: 'Post comment', exact: true }).click();
       await expect(thread(reviewer, reviewComment)).toHaveAccessibleName(
         `Thread on ${repeatedPhrase}`,

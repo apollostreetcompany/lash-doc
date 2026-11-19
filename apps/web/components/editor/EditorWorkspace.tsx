@@ -69,12 +69,11 @@ import {
 } from 'react';
 import type * as Y from 'yjs';
 
-import { ContextualRevision } from './ContextualRevision';
 import { DocumentReferencePicker } from './DocumentReferencePicker';
 import { AIPanel } from './panels/AIPanel';
 import { AutosaveIndicator } from './panels/AutosaveIndicator';
 import { captureChatAnchorRange, projectChatDocumentText } from './panels/chatAnchorPositions';
-import { ChatPanel } from './panels/ChatPanel';
+import { ChatPanel, type AnchoredCommentRequest } from './panels/ChatPanel';
 import { DocumentSettingsDialog } from './panels/DocumentSettingsDialog';
 import { EditorToolbar, type ToolbarMeta } from './panels/EditorToolbar';
 import {
@@ -94,6 +93,7 @@ import { SharedHistoryPanel } from './panels/SharedHistoryPanel';
 import { SharePanel } from './panels/SharePanel';
 import { SuggestionCard, SuggestionComposer } from './panels/SuggestionControls';
 import { TableCellPanel, type ActiveCell } from './panels/TableCellPanel';
+import { SelectionActions } from './SelectionActions';
 import { prepareAiReplacement, type AiSelection } from '../../lib/aiSelection';
 import type { AutosaveFlushController, AutosaveSaveContext } from '../../lib/autosave';
 import { createBrowserImageUploader } from '../../lib/createBrowserImageUploader';
@@ -733,6 +733,8 @@ function ResolvedDocumentWorkspace({
   const [isMounted, setIsMounted] = useState(false);
   const [outlineItems, setOutlineItems] = useState<OutlineItem[]>([]);
   const [isFocusMode, setIsFocusMode] = useState(false);
+  const [anchoredCommentRequest, setAnchoredCommentRequest] =
+    useState<AnchoredCommentRequest | null>(null);
   const [suggestionDraft, setSuggestionDraft] = useState<SuggestionDraft | null>(null);
   const [suggestionNotice, setSuggestionNotice] = useState('');
   const [localSuggestions, setLocalSuggestions] = useState<LocalSuggestion[]>([]);
@@ -3016,6 +3018,36 @@ function ResolvedDocumentWorkspace({
   );
 
   const historyPanelEditor = documentMutationLocked || realtimeEnabled ? null : editor;
+  const canCommentOnSelection =
+    (namedComment || !documentMutationLocked) &&
+    (realtimeEnabled ? sharedSuggestionsReady : Boolean(historyHead));
+  const canReviseSelection =
+    !realtimeEnabled &&
+    !documentMutationLocked &&
+    Boolean(historyHead) &&
+    historyAvailability === 'ready';
+  const handleSelectionComment = useCallback(
+    (range: { from: number; to: number }) => {
+      if (!editor || editor.isDestroyed || !canCommentOnSelection) return;
+      setAnchoredCommentRequest({
+        editor,
+        docId: historyDocumentId,
+        document: editor.state.doc,
+        from: range.from,
+        to: range.to,
+      });
+      // The selection action disappears when focus moves into the composer.
+      openDiscussionPanel(editor.view.dom);
+    },
+    [canCommentOnSelection, editor, historyDocumentId, openDiscussionPanel],
+  );
+  const handleCommentRequestHandled = useCallback((request: AnchoredCommentRequest) => {
+    setAnchoredCommentRequest((pending) => (pending === request ? null : pending));
+  }, []);
+  const handleSelectionRevision = useCallback(
+    (trigger: HTMLButtonElement) => openDiscussionPanel(trigger, 'ai'),
+    [openDiscussionPanel],
+  );
   const canStartSuggestion = realtimeEnabled
     ? Boolean(editor && sharedSuggestionsReady && (namedComment || canEditDocument))
     : Boolean(editor && !documentMutationLocked && localBodyState === 'ready');
@@ -3409,6 +3441,8 @@ function ResolvedDocumentWorkspace({
             <ChatPanel
               editor={editor}
               docId={historyDocumentId}
+              anchoredCommentRequest={anchoredCommentRequest}
+              onAnchoredCommentRequestHandled={handleCommentRequestHandled}
               baseVersion={realtimeEnabled ? null : historyHead}
               currentText={currentText}
               open={activeTab === 'chat'}
@@ -4244,17 +4278,6 @@ function ResolvedDocumentWorkspace({
           <div className="lash-doc-wrap">
             <div className="lash-doc-layout">
               <article className="lash-doc-paper" aria-labelledby="lash-doc-title-text">
-                {editor &&
-                historyHead &&
-                historyAvailability === 'ready' &&
-                !documentMutationLocked &&
-                !realtimeEnabled &&
-                !isFocusMode ? (
-                  <ContextualRevision
-                    editor={editor}
-                    onRevise={(trigger) => openDiscussionPanel(trigger, 'ai')}
-                  />
-                ) : null}
                 <header className="lash-doc-header">
                   <input
                     aria-label="Document title"
@@ -4357,6 +4380,13 @@ function ResolvedDocumentWorkspace({
                     </div>
                   )}
                 </div>
+                {editor && !isFocusMode && (canCommentOnSelection || canReviseSelection) ? (
+                  <SelectionActions
+                    editor={editor}
+                    onComment={canCommentOnSelection ? handleSelectionComment : undefined}
+                    onRevise={canReviseSelection ? handleSelectionRevision : undefined}
+                  />
+                ) : null}
               </article>
 
               {!isFocusMode && outlineItems.length > 0 ? (

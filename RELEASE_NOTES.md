@@ -25,6 +25,9 @@ restore an earlier version, and revoke the invitation.
 - **Review a change.** Replies and suggestion decisions survive reopening the
   document. Shared History lets both editors compare versions. Owners can
   restore an earlier body as a new version.
+- **Comment on a passage.** Highlight the words and choose **Comment** beside
+  them. Post the note in the document, or choose **Open email draft** to send
+  the quoted passage and your note to someone you choose in your mail app.
 - **Keep feedback on the original words.** When an editor pastes an identical
   phrase beside a quoted passage in the same paragraph, the comment and suggestion
   follow the original passage. For a review affected by a duplicate paste in
