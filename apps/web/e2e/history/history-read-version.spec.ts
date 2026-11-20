@@ -3,6 +3,7 @@ import { expect, test, type Locator, type Page } from '@playwright/test';
 const original = 'We will publish the beta on Tuesday.';
 const revised = 'We will share the beta on Tuesday.';
 const latest = `${revised} Draft review starts this afternoon.`;
+const selectedText = 'publish the beta';
 
 async function expectKickoffBody(body: Locator, sentence: string) {
   await expect(body.getByRole('heading', { name: 'Launch plan', level: 1 })).toBeVisible();
@@ -14,9 +15,9 @@ async function expectKickoffBody(body: Locator, sentence: string) {
   await expect(body.locator(':scope > ul > li > ul > li')).toHaveText('Review launch metrics');
 }
 
-async function clickAtTextOffset(page: Page, paragraph: Locator, offset: number) {
+async function textPointAtOffset(paragraph: Locator, offset: number) {
   await paragraph.scrollIntoViewIfNeeded();
-  const point = await paragraph.evaluate((element, textOffset) => {
+  return paragraph.evaluate((element, textOffset) => {
     const text = element.firstChild;
     if (!(text instanceof Text)) throw new Error('Expected the plain kickoff paragraph.');
     const caret = document.createRange();
@@ -25,6 +26,10 @@ async function clickAtTextOffset(page: Page, paragraph: Locator, offset: number)
     const bounds = caret.getBoundingClientRect();
     return { x: bounds.left + 0.5, y: bounds.top + bounds.height / 2 };
   }, offset);
+}
+
+async function clickAtTextOffset(page: Page, paragraph: Locator, offset: number) {
+  const point = await textPointAtOffset(paragraph, offset);
   await page.mouse.click(point.x, point.y);
   const actualOffset = await paragraph.evaluate((element) => {
     const selection = window.getSelection();
@@ -74,17 +79,26 @@ test('reads the full earlier kickoff draft by keyboard and touch without restori
   await expect(versions.first()).toBeVisible();
   const firstCount = await versions.count();
   await button('Close activity panel').click();
+  await expect(openHistory).toBeFocused();
 
   const paragraph = editor.locator(':scope > p').first();
-  await clickAtTextOffset(page, paragraph, 'We will '.length);
-  for (const _ of 'publish the beta') await page.keyboard.press('Shift+ArrowRight');
-  expect(await page.evaluate(() => window.getSelection()?.toString())).toBe('publish the beta');
+  const selectionStart = 'We will '.length;
+  await clickAtTextOffset(page, paragraph, selectionStart);
+  const selectionEnd = await textPointAtOffset(paragraph, selectionStart + selectedText.length);
+  await page.keyboard.down('Shift');
+  try {
+    await page.mouse.click(selectionEnd.x, selectionEnd.y);
+  } finally {
+    await page.keyboard.up('Shift');
+  }
+  expect(await page.evaluate(() => window.getSelection()?.toString())).toBe(selectedText);
   await page.keyboard.insertText('share the beta');
   await expect(paragraph).toHaveText(revised);
   await expect(saved).toHaveText(/^All changes saved/);
   await openHistory.click();
   await expect(versions).toHaveCount(firstCount + 1);
   await button('Close activity panel').click();
+  await expect(openHistory).toBeFocused();
 
   await clickAtTextOffset(page, paragraph, revised.length);
   await page.keyboard.insertText(' Draft review starts this afternoon.');

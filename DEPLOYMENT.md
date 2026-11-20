@@ -41,50 +41,77 @@ for that server. Serialize builds and servers that share a checkout's Next outpu
 - Worker public-session issuance is independently closed unless `LASH_PUBLIC_DOCUMENT_ACCESS_PHASE=enabled` and `LASH_PUBLIC_READ_ROOM_ALLOWLIST` is a bounded, duplicate-free comma-separated list of exact canonical room IDs. This phase is separate from the existing owner-promotion `LASH_SHARE_PHASE`; enabling account ownership must never implicitly enable public recipients.
 - Typed public-comment proof is a third independently closed boundary. Next requires exact `LASH_PUBLIC_COMMENT_ACCESS_ENABLED=true` and `LASH_WORKER_PUBLIC_COMMENT_SECRET_CURRENT` of at least 32 UTF-8 bytes in addition to the existing site origin, Worker HTTP origin, account-principal key, trusted-address header, and public rate-key secret. The Worker requires exact `LASH_PUBLIC_COMMENT_ACCESS_PHASE=enabled`, its own matching current secret plus optional previous secret, and `LASH_PUBLIC_COMMENT_ROOM_ALLOWLIST`; every comment room must also be present in the public-read allowlist. Owner soft-hide moderation remains available through the existing owner-management phase and control secret even when public-comment creation is disabled.
 
-### Named editors
-
-The web server and Worker both require `LASH_NAMED_EDIT_PHASE=enabled`.
-The Worker also requires `LASH_SHARE_PHASE=enabled`. The web runtime uses
-`LASH_NAMED_EDIT_KEY`, a dedicated stable base64url key of at least 32 decoded
-bytes, for invitation identity and email protection. Retain it across deploys.
-Use `LASH_SITE_ORIGIN` for the exact HTTPS origin, configure account sign-in
-redirects for that origin, and set the matching control secret in both services.
-`NEXT_PUBLIC_LASH_REALTIME_URL` is a build-time setting. The Worker and web
-service must target the same room deployment.
-
-The owner copies a link for a named recipient. Redemption requires the matching
-verified account. Run the account and named-editor suites with two separate
-browser profiles on a staging instance before enabling the route for users.
-Keep public read and comment rollout independent. The Worker refuses public
-delivery for documents containing recipient-sensitive references.
-
-### Named reviewers
-
-The local launcher enables named comments alongside named edits. For a hosted
-rollout, deploy the compatible Worker first, then the matching web application.
-Enable `LASH_NAMED_COMMENT_PHASE=enabled` in both services for the review trial.
-A reviewer receives the current title and body. Documents with private reference
-chips, unsupported metadata or projections exceeding the 1 MiB bounds cannot
-issue a usable reviewer session. The owner sees when a document is ineligible.
-The other named access settings above still apply. Check **Can edit** and **Can
-comment** from different verified accounts. Check that a reviewer can propose
-wording, an owner can accept it, and revoking the reviewer ends their access.
-
-To disable new reviewer access, close the web and Worker comment phases. Preserve
-stored reviewer grants and feedback when reverting the application version.
-
 ## Hosting
 
-For account-backed collaboration, deploy the dynamic web service defined in
-`render.yaml` with its matching Worker and account provider. The web process
-binds to `0.0.0.0:$PORT`. Run `make verify-render` to exercise the same start
-command on a new document and the home route. Verify the deployed candidate
-with two signed-in browsers, including reload, revocation and room restart.
+The [public Documents page](https://lash-9xx.pages.dev/documents/) stores drafts
+in the writer’s browser. A hosted collaborative trial uses the dynamic web
+service in [render.yaml](render.yaml), a matching realtime Worker and a
+dedicated Supabase Auth project. Choose the web and Worker HTTPS origins first.
 
-Cloudflare Pages serves the browser-local preview. The Documents catalog lives
-at `/documents/` and local document links use `/?doc=<id>`. Account and shared
-room operations require the dynamic service. See [release notes](RELEASE_NOTES.md)
-for the supported writing and review journeys.
+### Configure the web service and Worker
+
+| Where | Setting | Value |
+| --- | --- | --- |
+| Render | `LASH_SITE_ORIGIN` | Exact HTTPS origin that writers open. Forward its hostname and HTTPS scheme to Next. |
+| Render | `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` | Auth project URL and its publishable key. Keep the same project for returning writers. |
+| Render | `NEXT_PUBLIC_LASH_REALTIME_URL`, `LASH_REALTIME_WORKER_HTTP_URL` | The same Worker origin, using `wss://` for the browser at build time and `https://` for server requests. Both omit paths. |
+| Render | `LASH_ACCOUNT_PRINCIPAL_HMAC_KEY`, `LASH_NAMED_EDIT_KEY` | Separate, stable secrets. Use at least 32 UTF-8 bytes for the first and unpadded base64url encoding of at least 32 random bytes for the second. |
+| Render | `LASH_DOCUMENT_ID_DERIVATION_KEYS` | Begin with `v1:<key>`, where the key is at least 32 random bytes encoded as unpadded base64url. This maps device IDs to account documents. Keep the ring across deploys. On rotation, put the new key first and retain the older versioned keys, up to four entries separated by commas. |
+| Render and Worker | `LASH_WORKER_CONTROL_SECRET_CURRENT` | The same server-side secret on both services, at least 32 UTF-8 bytes. |
+| Worker | `LASH_REALTIME_SESSION_SECRET` | A separate signing secret for room sessions. Store it in the Worker’s secrets. |
+
+Use the hosting providers’ secret settings. The [local launcher](scripts/dev-collab.mjs)
+shows which process consumes each value. Generate separate keys for staging.
+
+### Deliver the sign-in link
+
+In the trial’s Supabase Auth project, enable email sign-in and confirmation,
+and set the Site URL to the exact web origin. Allow the callback on that same
+origin at `/auth/confirm`. Lash generates new `next` and `state` values for
+each sign-in. Verify both arrive in the delivered link.
+Install both checked-in templates in the dashboard. Use
+[Confirm signup](supabase/templates/confirmation.html) for a new account and
+[Magic Link](supabase/templates/magic_link.html) for a returning account.
+They preserve `RedirectTo` and append the token hash and `type=email` that
+the Lash callback verifies. The writer opens the email in the browser where
+they requested it. Configure SMTP for recipients outside the project team and
+turn off mail-link tracking so the callback arrives intact.
+[Email templates](https://supabase.com/docs/guides/auth/auth-email-templates) ·
+[SMTP settings](https://supabase.com/docs/guides/auth/auth-smtp)
+
+### Deploy and verify the two roles
+
+1. Deploy the Worker at the reviewed Git revision with the sharing phases
+   closed. Verify the room and document-claim bindings using the Worker
+   preflight below. Then set `LASH_SHARE_PHASE=enabled` on the Worker and
+   `LASH_NAMED_EDIT_PHASE=enabled` on both services. For a **Can comment**
+   trial, also set `LASH_NAMED_COMMENT_PHASE=enabled` on both. Keep public
+   read and public commenting disabled during a named-only trial.
+2. Choose **Save only** after editing the Render environment. If the service
+   is Blueprint-managed, turn off Blueprint Auto Sync for the fixed trial so
+   it retains its deployment settings. Choose
+   **Manual Deploy → Deploy a specific commit** in the dashboard and select
+   the same revision as the Worker. This pins the web release and disables
+   automatic deploys for the service. The build picks up the public socket
+   URL. [Render deployment controls](https://render.com/docs/deploys#deploying-a-specific-commit) · [Blueprint sync](https://render.com/docs/infrastructure-as-code)
+3. Visit the dynamic URL in a signed-out browser. `GET /api/account/session`
+   should return `401` with `authenticated: false` and `no-store`. The root
+   health check and local `make verify-render` establish that Next serves
+   pages. Finish the account check with a first-time sign-in and a returning
+   sign-in through delivered emails. Each should return to the intended draft.
+4. In separate browser profiles, have the owner save a device draft to their
+   account, copy an invitation for a named editor, exchange edits and reload.
+   Redemption requires the matching verified account. Invite a
+   **Can comment** reviewer, propose and accept a change, and confirm the
+   reviewer cannot type directly in the body. Revoke access and verify the
+   open recipient loses it. Check that the owner’s content and history survive
+   reopening and a room restart. Use disposable trial documents.
+
+The local launcher enables both named roles. Public delivery separately refuses
+documents with recipient-sensitive references. The reviewer receives the current
+title and body. Private reference chips, unsupported metadata and projections above 1 MiB make a document ineligible
+for a reviewer session. To disable new reviewer access, close its web and
+Worker phases and retain stored grants and feedback.
 
 ## Realtime Worker Preflight
 
