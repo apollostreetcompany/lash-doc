@@ -1,15 +1,52 @@
 'use client';
 
-import { useEffect, useId, useRef } from 'react';
+import { useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 
 import type {
   MarkdownDownloadPlan,
   MarkdownImportPlan,
 } from '../../../lib/markdownDocumentTransfer';
 
+type MarkdownShareCopy = Readonly<{
+  kind: 'share-copy';
+  plan: MarkdownDownloadPlan;
+  nativeFile: File | null;
+  source: object;
+}>;
+
+export const createMarkdownShareFile = (plan: MarkdownDownloadPlan): File | null => {
+  if (
+    plan.status !== 'ready' ||
+    typeof navigator === 'undefined' ||
+    typeof navigator.share !== 'function' ||
+    typeof navigator.canShare !== 'function'
+  ) {
+    return null;
+  }
+  try {
+    const file = new File([plan.markdown], plan.filename, { type: 'text/markdown' });
+    return navigator.canShare({ files: [file] }) ? file : null;
+  } catch {
+    return null;
+  }
+};
+
+export const downloadMarkdownFile = (plan: Extract<MarkdownDownloadPlan, { status: 'ready' }>) => {
+  const blob = new Blob([plan.markdown], { type: 'text/markdown;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = plan.filename;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(url);
+};
+
 export type MarkdownTransferDialogState =
   | Readonly<{ kind: 'reading' }>
   | Readonly<{ kind: 'download'; plan: MarkdownDownloadPlan }>
+  | MarkdownShareCopy
   | Readonly<{
       kind: 'import-error';
       detail: string;
@@ -25,12 +62,14 @@ export type MarkdownTransferDialogState =
         | 'created-open-failed';
       plan: MarkdownImportPlan;
       sourceReady: boolean;
+      sourceProof?: 'initial-empty';
       detail?: string;
     }>;
 
 export interface MarkdownTransferDialogProps {
   state: MarkdownTransferDialogState | null;
   returnFocusTo: HTMLElement | null;
+  canShareCopy?(source: object): boolean;
   onClose(): void;
   onConfirm(): void;
   onRetryOpen(): void;
@@ -42,6 +81,7 @@ const formatLabel = (plan: MarkdownImportPlan) =>
 export function MarkdownTransferDialog({
   state,
   returnFocusTo,
+  canShareCopy,
   onClose,
   onConfirm,
   onRetryOpen,
@@ -49,6 +89,11 @@ export function MarkdownTransferDialog({
   const dialogRef = useRef<HTMLDialogElement | null>(null);
   const primaryRef = useRef<HTMLButtonElement | null>(null);
   const cancelRef = useRef<HTMLButtonElement | null>(null);
+  const currentShareCopy = useRef<MarkdownShareCopy | null>(null);
+  const nativeSharePending = useRef(false);
+  const [nativeShare, setNativeShare] = useState<
+    { phase: 'sharing' } | { phase: 'failed'; copy: MarkdownShareCopy } | null
+  >(null);
   const titleId = useId();
   const descriptionId = useId();
 
@@ -56,13 +101,26 @@ export function MarkdownTransferDialog({
     state?.kind === 'import' && (state.phase === 'committing' || state.phase === 'created-opening');
   const importConfirmDisabled =
     state?.kind === 'import' && (state.phase !== 'preview' || !state.sourceReady);
-  const downloadBlocked = state?.kind === 'download' && state.plan.status === 'blocked';
+  const shareCopy = state?.kind === 'share-copy' ? state : null;
+  const isExport = state?.kind === 'download' || state?.kind === 'share-copy';
+  const downloadBlocked = isExport && state.plan.status === 'blocked';
+
+  useLayoutEffect(() => {
+    currentShareCopy.current = shareCopy;
+    setNativeShare((current) =>
+      current?.phase === 'failed' && current.copy !== shareCopy ? null : current,
+    );
+    return () => {
+      currentShareCopy.current = null;
+    };
+  }, [shareCopy]);
 
   useEffect(() => {
     const dialog = dialogRef.current;
     if (!dialog || !state) return;
     if (!dialog.open) dialog.showModal();
     const frame = window.requestAnimationFrame(() => {
+      if (!dialog.open) return;
       if (!importConfirmDisabled && !downloadBlocked && !pending) {
         primaryRef.current?.focus({ preventScroll: true });
       } else {
@@ -77,14 +135,66 @@ export function MarkdownTransferDialog({
 
   if (!state) return null;
 
+  const shareFile = async () => {
+    if (
+      shareCopy?.plan.status !== 'ready' ||
+      !shareCopy.nativeFile ||
+      currentShareCopy.current !== shareCopy ||
+      nativeSharePending.current ||
+      !canShareCopy?.(shareCopy.source)
+    ) {
+      return;
+    }
+    nativeSharePending.current = true;
+    setNativeShare({ phase: 'sharing' });
+    let failed = false;
+    try {
+      await navigator.share({ files: [shareCopy.nativeFile] });
+    } catch (error) {
+      failed = !(
+        typeof error === 'object' &&
+        error !== null &&
+        'name' in error &&
+        error.name === 'AbortError'
+      );
+    } finally {
+      nativeSharePending.current = false;
+      setNativeShare(
+        failed && currentShareCopy.current === shareCopy && canShareCopy(shareCopy.source)
+          ? { phase: 'failed', copy: shareCopy }
+          : null,
+      );
+    }
+  };
+
   const close = () => {
     if (pending) return;
+    if (shareCopy) {
+      currentShareCopy.current = null;
+      dialogRef.current?.close();
+      onClose();
+      returnFocusTo?.focus({ preventScroll: true });
+      return;
+    }
     onClose();
     window.requestAnimationFrame(() => returnFocusTo?.focus({ preventScroll: true }));
   };
 
-  const title =
-    state.kind === 'download'
+  const downloadCopy = () => {
+    if (
+      shareCopy?.plan.status !== 'ready' ||
+      currentShareCopy.current !== shareCopy ||
+      !canShareCopy?.(shareCopy.source)
+    ) {
+      return;
+    }
+    downloadMarkdownFile(shareCopy.plan);
+    close();
+  };
+
+  const title = shareCopy
+    ? 'Share a copy'
+    : state.kind === 'download'
       ? 'Download Markdown'
       : state.kind === 'reading'
         ? 'Import Markdown'
@@ -98,6 +208,7 @@ export function MarkdownTransferDialog({
       aria-modal="true"
       className="lash-markdown-transfer-dialog"
       data-testid="markdown-transfer-dialog"
+      id={shareCopy ? 'lash-owner-share-dialog' : undefined}
       onCancel={(event) => {
         event.preventDefault();
         close();
@@ -113,13 +224,28 @@ export function MarkdownTransferDialog({
             <p id={descriptionId} role="status" aria-live="polite">
               Reading Markdown…
             </p>
-          ) : state.kind === 'download' ? (
+          ) : isExport ? (
             <>
-              <p id={descriptionId}>
-                Markdown includes the document title and supported body formatting. Comments,
-                suggestions, version history, authorship, chat, collaborators, and access details
-                are not included. Your Lash document will not change.
-              </p>
+              {state.kind === 'share-copy' && state.plan.status === 'ready' ? (
+                <>
+                  <p id={descriptionId}>
+                    {state.nativeFile ? 'Share or download ' : 'Download '}
+                    <strong className="lash-markdown-filename">{state.plan.filename}</strong> to
+                    send to another writer. They can open it with <strong>Import Markdown</strong>{' '}
+                    in Lash.
+                  </p>
+                  <p>
+                    The file includes the title and formatted text. Comments, suggestions, version
+                    history, authorship, chat, and sharing permissions stay with your draft.
+                  </p>
+                </>
+              ) : (
+                <p id={descriptionId}>
+                  Markdown includes the document title and supported body formatting. Comments,
+                  suggestions, version history, authorship, chat, collaborators, and access details
+                  are not included. Your Lash document will not change.
+                </p>
+              )}
               {state.plan.warnings.length ? (
                 <section aria-labelledby={`${titleId}-warnings`}>
                   <h3 id={`${titleId}-warnings`}>Some formatting will be simplified:</h3>
@@ -139,6 +265,11 @@ export function MarkdownTransferDialog({
                     ))}
                   </ul>
                 </div>
+              ) : null}
+              {nativeShare?.phase === 'failed' && nativeShare.copy === shareCopy ? (
+                <p className="lash-markdown-transfer-error" role="alert">
+                  Could not open the share menu. You can download the Markdown file instead.
+                </p>
               ) : null}
             </>
           ) : state.kind === 'import-error' ? (
@@ -208,11 +339,11 @@ export function MarkdownTransferDialog({
             >
               Open created document
             </button>
-          ) : state.kind === 'download' && state.plan.status === 'ready' ? (
+          ) : isExport && state.plan.status === 'ready' ? (
             <button
               ref={primaryRef}
               className="lash-markdown-transfer-primary"
-              onClick={onConfirm}
+              onClick={shareCopy ? downloadCopy : onConfirm}
               type="button"
             >
               Download Markdown
@@ -235,6 +366,16 @@ export function MarkdownTransferDialog({
                   : 'Create new document'}
             </button>
           ) : null}
+          {shareCopy?.plan.status === 'ready' && shareCopy.nativeFile ? (
+            <button
+              aria-disabled={nativeShare?.phase === 'sharing'}
+              className="lash-markdown-transfer-secondary"
+              onClick={() => void shareFile()}
+              type="button"
+            >
+              Share file…
+            </button>
+          ) : null}
           {!pending ? (
             <button
               ref={cancelRef}
@@ -242,7 +383,9 @@ export function MarkdownTransferDialog({
               onClick={close}
               type="button"
             >
-              {state.kind === 'import' && state.phase === 'created-open-failed' ? 'Done' : 'Cancel'}
+              {shareCopy || (state.kind === 'import' && state.phase === 'created-open-failed')
+                ? 'Done'
+                : 'Cancel'}
             </button>
           ) : null}
         </footer>

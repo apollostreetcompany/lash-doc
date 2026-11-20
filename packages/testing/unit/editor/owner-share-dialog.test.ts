@@ -3,10 +3,16 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
+  createMarkdownShareFile,
+  MarkdownTransferDialog,
+  type MarkdownTransferDialogProps,
+} from '../../../../apps/web/components/editor/panels/MarkdownTransferDialog';
+import {
   OwnerShareDialog,
   type OwnerShareDialogProps,
 } from '../../../../apps/web/components/editor/panels/OwnerShareDialog';
 import { TopBar } from '../../../../apps/web/components/shell/TopBar';
+import type { MarkdownDownloadPlan } from '../../../../apps/web/lib/markdownDocumentTransfer';
 import * as React from '../../../../apps/web/node_modules/react';
 import { createRoot, type Root } from '../../../../apps/web/node_modules/react-dom/client';
 
@@ -36,6 +42,37 @@ const render = async (node: React.ReactNode) => {
 const button = (host: HTMLElement, text: string) =>
   Array.from(host.querySelectorAll('button')).find((element) => element.textContent === text);
 
+const readyMarkdown = {
+  status: 'ready',
+  filename: 'launch-notes.md',
+  normalizedTitle: 'Launch notes',
+  markdown: '# Launch notes\n\nRésumé with **bold** text.\n',
+  warnings: ['Some formatting was simplified.'],
+} satisfies MarkdownDownloadPlan;
+
+const allowNativeShare = (
+  shareFile: (data: ShareData) => Promise<void> = async () => {},
+  canShareFile: (data: ShareData) => boolean = () => true,
+) => {
+  const share = vi.fn(shareFile);
+  const canShare = vi.fn(canShareFile);
+  Object.defineProperty(navigator, 'canShare', { configurable: true, value: canShare });
+  Object.defineProperty(navigator, 'share', { configurable: true, value: share });
+  return { canShare, share };
+};
+
+const shareCopyProps = (
+  plan: MarkdownDownloadPlan = readyMarkdown,
+  source: object = {},
+): MarkdownTransferDialogProps => ({
+  state: { kind: 'share-copy', plan, nativeFile: createMarkdownShareFile(plan), source },
+  canShareCopy: () => true,
+  returnFocusTo: null,
+  onClose: vi.fn(),
+  onConfirm: vi.fn(),
+  onRetryOpen: vi.fn(),
+});
+
 beforeEach(() => {
   vi.stubGlobal('React', React);
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
@@ -58,8 +95,145 @@ afterEach(async () => {
   }
   document.body.replaceChildren();
   Reflect.deleteProperty(navigator, 'clipboard');
+  Reflect.deleteProperty(navigator, 'canShare');
+  Reflect.deleteProperty(navigator, 'share');
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
+});
+
+describe('share a Markdown copy', () => {
+  it('uses exactly the checked Markdown file and prevents a second native handoff while pending', async () => {
+    let finishShare = () => {};
+    const pending = new Promise<void>((resolve) => {
+      finishShare = resolve;
+    });
+    const { canShare, share } = allowNativeShare(() => pending);
+    const input = shareCopyProps();
+    const { host } = await render(React.createElement(MarkdownTransferDialog, input));
+    expect(host.querySelector('h2')?.textContent).toBe('Share a copy');
+    expect(host.textContent).toContain(readyMarkdown.warnings[0]);
+    expect(canShare).toHaveBeenCalledOnce();
+    const file = canShare.mock.calls[0]?.[0].files?.[0];
+    if (!file) throw new Error('Expected a native Markdown file');
+    expect(file.name).toBe(readyMarkdown.filename);
+    expect(file.type).toBe('text/markdown');
+    const contents = await new Promise<string | ArrayBuffer | null>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result);
+      reader.onerror = () => reject(reader.error);
+      reader.readAsText(file);
+    });
+    expect(contents).toBe(readyMarkdown.markdown);
+
+    const nativeButton = button(host, 'Share file…');
+    nativeButton?.focus();
+    await React.act(async () => {
+      nativeButton?.click();
+      nativeButton?.click();
+    });
+    expect(share).toHaveBeenCalledOnce();
+    expect(share).toHaveBeenCalledWith({ files: [file] });
+    expect(nativeButton?.getAttribute('aria-disabled')).toBe('true');
+    expect(document.activeElement).toBe(nativeButton);
+    expect(button(host, 'Download Markdown')?.disabled).toBe(false);
+    expect(button(host, 'Done')?.disabled).toBe(false);
+    await React.act(async () => finishShare());
+    expect(nativeButton?.getAttribute('aria-disabled')).toBe('false');
+    expect(document.activeElement).toBe(nativeButton);
+    expect(host.querySelector('dialog')?.open).toBe(true);
+    expect(host.querySelector('[role="alert"], [role="status"]')).toBeNull();
+  });
+
+  it.each(['AbortError', 'NotAllowedError'])(
+    'keeps the same downloadable copy after a native %s',
+    async (name) => {
+      allowNativeShare(async () => {
+        throw new DOMException('Native handoff did not complete', name);
+      });
+      const opener = document.createElement('button');
+      document.body.append(opener);
+      const input = { ...shareCopyProps(), returnFocusTo: opener };
+      const { host } = await render(React.createElement(MarkdownTransferDialog, input));
+      const dialog = host.querySelector('dialog');
+      const nativeButton = button(host, 'Share file…');
+      nativeButton?.focus();
+      await React.act(async () => button(host, 'Share file…')?.click());
+      expect(host.querySelector('dialog')).toBe(dialog);
+      expect(dialog?.open).toBe(true);
+      expect(nativeButton?.getAttribute('aria-disabled')).toBe('false');
+      expect(button(host, 'Done')?.disabled).toBe(false);
+      if (name === 'AbortError') {
+        expect(host.querySelector('[role="alert"]')).toBeNull();
+      } else {
+        expect(host.querySelector('[role="alert"]')?.textContent).toContain(
+          'You can download the Markdown file instead.',
+        );
+      }
+      const createObjectURL = vi.fn((_blob: Blob) => 'blob:download-test');
+      const revokeObjectURL = vi.fn();
+      vi.stubGlobal(
+        'URL',
+        class extends URL {
+          static createObjectURL = createObjectURL;
+          static revokeObjectURL = revokeObjectURL;
+        },
+      );
+      const downloaded = vi
+        .spyOn(HTMLAnchorElement.prototype, 'click')
+        .mockImplementation(function (this: HTMLAnchorElement) {
+          expect(this.download).toBe(readyMarkdown.filename);
+        });
+      await React.act(async () => button(host, 'Download Markdown')?.click());
+      expect(downloaded).toHaveBeenCalledOnce();
+      expect(createObjectURL).toHaveBeenCalledOnce();
+      expect(revokeObjectURL).toHaveBeenCalledWith('blob:download-test');
+      expect(input.onClose).toHaveBeenCalledOnce();
+      expect(dialog?.open).toBe(false);
+      expect(document.activeElement).toBe(opener);
+    },
+  );
+
+  it('offers Download when the file cannot be natively shared, and neither action for blocked Markdown', async () => {
+    const { canShare } = allowNativeShare(undefined, () => false);
+    const input = shareCopyProps();
+    const { host, rerender } = await render(React.createElement(MarkdownTransferDialog, input));
+    expect(canShare).toHaveBeenCalledOnce();
+    expect(button(host, 'Share file…')).toBeUndefined();
+    expect(button(host, 'Download Markdown')?.disabled).toBe(false);
+
+    const blocked = shareCopyProps({
+      status: 'blocked',
+      warnings: [],
+      reasons: ['A document element needs an exact Lash copy.'],
+    });
+    await rerender(React.createElement(MarkdownTransferDialog, blocked));
+    expect(canShare).toHaveBeenCalledOnce();
+    expect(button(host, 'Share file…')).toBeUndefined();
+    expect(button(host, 'Download Markdown')).toBeUndefined();
+    expect(host.querySelector('[role="alert"]')?.textContent).toContain(
+      'A document element needs an exact Lash copy.',
+    );
+    expect(button(host, 'Done')?.disabled).toBe(false);
+  });
+
+  it('retires a native rejection when the writer closes or changes the copy', async () => {
+    let rejectShare = (_error: Error) => {};
+    const pending = new Promise<void>((_resolve, reject) => {
+      rejectShare = reject;
+    });
+    const { share } = allowNativeShare(() => pending);
+    const input = shareCopyProps();
+    const { host, rerender } = await render(React.createElement(MarkdownTransferDialog, input));
+    await React.act(async () => button(host, 'Share file…')?.click());
+    expect(share).toHaveBeenCalledOnce();
+    await rerender(React.createElement(MarkdownTransferDialog, { ...input, state: null }));
+    const next = shareCopyProps({ ...readyMarkdown, filename: 'next-draft.md' });
+    await rerender(React.createElement(MarkdownTransferDialog, next));
+    await React.act(async () => rejectShare(new DOMException('Failed', 'NotAllowedError')));
+    expect(host.querySelector('[role="alert"]')).toBeNull();
+    expect(button(host, 'Share file…')?.getAttribute('aria-disabled')).toBe('false');
+    expect(button(host, 'Download Markdown')?.disabled).toBe(false);
+  });
 });
 
 describe('owner Share dialog', () => {
@@ -136,6 +310,21 @@ describe('owner Share dialog', () => {
     expect(signIn?.textContent).toBe('Sign in to continue');
     expect(signIn?.getAttribute('href')).toBe('/auth/sign-in?next=%2Fdoc%2Flaunch-notes');
     expect(button(host, 'Save to my account')).toBeUndefined();
+  });
+
+  it('offers a device copy alongside sign-in and first account save only', async () => {
+    const onShareCopy = vi.fn();
+    const input = props({ phase: 'signed-out', onShareCopy });
+    const { host, rerender } = await render(React.createElement(OwnerShareDialog, input));
+    expect(host.querySelector('a')?.textContent).toBe('Sign in to continue');
+    await React.act(async () => button(host, 'Share a copy')?.click());
+    expect(onShareCopy).toHaveBeenCalledOnce();
+
+    await rerender(React.createElement(OwnerShareDialog, { ...input, phase: 'ready' }));
+    expect(button(host, 'Save to my account')?.disabled).toBe(false);
+    expect(button(host, 'Share a copy')).toBeDefined();
+    await rerender(React.createElement(OwnerShareDialog, { ...input, phase: 'saved' }));
+    expect(button(host, 'Share a copy')).toBeUndefined();
   });
 
   it('discloses the adjunct inventory and renders no save action when promotion is blocked', async () => {

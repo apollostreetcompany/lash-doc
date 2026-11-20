@@ -21,6 +21,8 @@ import {
   localDocumentBodyKey,
   saveLocalDocumentBody,
   type LocalBodyDocJson,
+  type LocalBodyExpectedRevision,
+  type LocalBodyPersistenceOptions,
   type LocalBodySchemaValidator,
 } from './localDocumentBodyPersistence';
 
@@ -244,10 +246,12 @@ export const createMarkdownDownloadPlan = (input: {
   doc: LocalBodyDocJson;
   title: string;
   documentId: string;
+  mode?: 'share-copy';
 }): MarkdownDownloadPlan => {
   const result = serializeDocToMarkdownFile(input.doc, {
     title: input.title,
     documentId: input.documentId,
+    mode: input.mode,
   });
   if (result.blockedReasons.length) {
     return {
@@ -695,6 +699,13 @@ export const commitNewDeviceDocument = (
 export const commitMarkdownImport = ({ plan, ...options }: CommitMarkdownImportOptions) =>
   commitNewDeviceDocument({ ...options, doc: plan.doc, title: plan.title });
 
+type InitialEmptyMarkdownSource = LocalBodyPersistenceOptions & {
+  expected: LocalBodyExpectedRevision | null;
+};
+
+export const isVerifiedInitialEmptyMarkdownSource = (source: InitialEmptyMarkdownSource | null) =>
+  source?.expected === null && loadLocalDocumentBody(source).state === 'empty';
+
 export type MarkdownImportSourceQuiescence =
   | Readonly<{
       kind: 'local';
@@ -705,6 +716,7 @@ export type MarkdownImportSourceQuiescence =
         | 'ready'
         | 'recovered-awaiting-confirmation'
         | 'unavailable';
+      initialEmpty?: InitialEmptyMarkdownSource | null;
       flushVerified(): Promise<boolean>;
     }>
   | Readonly<{
@@ -726,7 +738,7 @@ export type MarkdownImportSourceQuiescence =
 
 export const verifyMarkdownImportSourceQuiescence = async (
   source: MarkdownImportSourceQuiescence,
-): Promise<Readonly<{ ok: true }> | Readonly<{ ok: false; message: string }>> => {
+): Promise<Readonly<{ ok: true; source?: 'initial-empty' }> | Readonly<{ ok: false; message: string }>> => {
   if (source.kind === 'remote') {
     return source.accessHydrated &&
       source.providerHydrated &&
@@ -740,6 +752,9 @@ export const verifyMarkdownImportSourceQuiescence = async (
     return { ok: false, message: SOURCE_QUIESCENCE_MESSAGE };
   }
   try {
+    if (isVerifiedInitialEmptyMarkdownSource(source.initialEmpty ?? null)) {
+      return { ok: true, source: 'initial-empty' };
+    }
     return (await source.flushVerified())
       ? { ok: true }
       : { ok: false, message: SOURCE_QUIESCENCE_MESSAGE };

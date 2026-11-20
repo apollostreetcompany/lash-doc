@@ -751,7 +751,7 @@ Plain text with **bold text**.
       'Image sizing is omitted from Markdown.',
       'Merged table-cell spans are flattened in Markdown.',
       'Table-cell column widths are omitted from Markdown.',
-      'Status/select table-cell semantics are exported as plain text.',
+      'Table controls become plain text. This download includes stored cell text and values, including any hidden in the editor.',
       'Table cells with multiple blocks were flattened into a single line because Markdown tables cannot represent multi-block cells.',
       'First-row table cells are promoted to headers in Markdown.',
       'Underline formatting is exported as emphasis in Markdown.',
@@ -916,26 +916,48 @@ Plain text with **bold text**.
   });
 
   it('rejects unsafe export URLs and structurally invalid documents', () => {
+    const unsafeParagraph = {
+      type: 'paragraph',
+      content: [
+        {
+          type: 'text',
+          text: 'unsafe',
+          marks: [{ type: 'link', attrs: { href: 'javascript:alert(1)' } }],
+        },
+      ],
+    };
     const unsafe = serializeDocToMarkdownFile(
+      { type: 'doc', content: [unsafeParagraph] },
+      { title: 'Unsafe' },
+    );
+    expect(unsafe.markdown).toBe('');
+    expect(unsafe.blockedReasons).toEqual(['Link uses an unsafe URL.']);
+
+    const unsafeShareCopy = serializeDocToMarkdownFile(
       {
         type: 'doc',
         content: [
           {
-            type: 'paragraph',
+            type: 'table',
             content: [
               {
-                type: 'text',
-                text: 'unsafe',
-                marks: [{ type: 'link', attrs: { href: 'javascript:alert(1)' } }],
+                type: 'tableRow',
+                content: [
+                  {
+                    type: 'tableCell',
+                    attrs: { cellType: 'status', value: 'Done' },
+                    content: [unsafeParagraph],
+                  },
+                ],
               },
             ],
           },
         ],
       },
-      { title: 'Unsafe' },
+      { title: 'Unsafe', mode: 'share-copy' },
     );
-    expect(unsafe.markdown).toBe('');
-    expect(unsafe.blockedReasons).toEqual(['Link uses an unsafe URL.']);
+    expect(unsafeShareCopy.markdown).toBe('');
+    expect(unsafeShareCopy.blockedReasons).toEqual(['Link uses an unsafe URL.']);
 
     const invalid = serializeDocToMarkdownFile(
       { type: 'paragraph', content: [{ type: 'text', text: 'not a doc' }] },

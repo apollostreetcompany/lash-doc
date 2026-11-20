@@ -89,6 +89,8 @@ import {
 import { LocalBodyRecoveryNotice, type LocalBodyNotice } from './panels/LocalBodyRecoveryNotice';
 import { MarkdownIO } from './panels/MarkdownIO';
 import {
+  createMarkdownShareFile,
+  downloadMarkdownFile,
   MarkdownTransferDialog,
   type MarkdownTransferDialogState,
 } from './panels/MarkdownTransferDialog';
@@ -166,6 +168,7 @@ import {
   commitNewDeviceDocument,
   createMarkdownDownloadPlan,
   createMarkdownImportNavigationController,
+  isVerifiedInitialEmptyMarkdownSource,
   persistMarkdownImportHandoff,
   readMarkdownFileForImport,
   verifyMarkdownImportSourceQuiescence,
@@ -783,6 +786,7 @@ function ResolvedDocumentWorkspace({
     | 'allowsInviteIssuance'
     | 'captureInviteIssuance'
     | 'checkAccountCopy'
+    | 'getResolution'
     | 'getSnapshot'
     | 'openAccountCopy'
     | 'promoteOwnerDocument'
@@ -966,6 +970,7 @@ function ResolvedDocumentWorkspace({
         ? localBody.notice
         : localBody;
   const localBodyExpectedRef = useRef<LocalBodyExpectedRevision | null>(null);
+  const initialEmptyMarkdownBodyRef = useRef<EditorNode | null>(null);
   const divergentHistoryMarkerRef = useRef<LocalBodyEnvelope['divergentHistoryHead']>(undefined);
   const recoveredLocalBodyRef = useRef<{
     envelope: LocalBodyEnvelope;
@@ -1478,6 +1483,7 @@ function ResolvedDocumentWorkspace({
     if (!editor || hydratedLocalEditorRef.current === editor) return;
     hydratedLocalEditorRef.current = editor;
     localBodyExpectedRef.current = null;
+    initialEmptyMarkdownBodyRef.current = null;
     divergentHistoryMarkerRef.current = undefined;
     firstHistoryCheckpointRef.current = 'none';
     localSuggestionsRef.current = [];
@@ -1526,8 +1532,10 @@ function ResolvedDocumentWorkspace({
         // A fresh body can later reconstruct its first checkpoint from this
         // exact schema baseline. Existing unmarked drafts retain their history.
         const emptyDocument = editor.schema.topNodeType.createAndFill();
-        if (emptyDocument?.eq(editor.state.doc))
+        if (emptyDocument?.eq(editor.state.doc)) {
           firstHistoryCheckpointRef.current = 'initially-empty';
+          initialEmptyMarkdownBodyRef.current = editor.state.doc;
+        }
         localBodyMutationsAllowedRef.current = true;
         setLocalBody({ kind: 'ready' });
         return;
@@ -2281,7 +2289,13 @@ function ResolvedDocumentWorkspace({
   }, [editor, exposeTestHooks, localBodyMutationLocked]);
 
   const isEditorReady = Boolean(editor && (realtimeEnabled || localBodyState !== 'loading'));
-  const canImportMarkdown = isEditorReady && localBodyState !== 'recovered-awaiting-confirmation';
+  const waitingForInitialHistory =
+    !realtimeEnabled &&
+    !!editor &&
+    initialEmptyMarkdownBodyRef.current === editor.state.doc &&
+    historyAvailability === 'loading';
+  const canImportMarkdown =
+    isEditorReady && localBodyState !== 'recovered-awaiting-confirmation' && !waitingForInitialHistory;
 
   const handleToolbarClick = useCallback(
     (spec: ToolbarButtonSpec) => {
@@ -2849,6 +2863,41 @@ function ResolvedDocumentWorkspace({
       : null;
   }, [activeDocumentId, editor, localBodyState, realtimeEnabled, validateLocalBodySchema]);
 
+  const readInitialEmptyMarkdownSource = useCallback(() => {
+    const current = inviteIssuanceAuthority.getResolution();
+    if (
+      current?.kind !== 'local' ||
+      current !== resolution ||
+      current.routeDocumentId !== activeDocumentId ||
+      inviteIssuanceAuthority.getSnapshot().phase !== 'local-ready' ||
+      localBodyState !== 'ready' ||
+      historyAvailability !== 'empty-baseline' ||
+      !editor ||
+      editor.isDestroyed ||
+      editor.view.composing ||
+      hydratedLocalEditorRef.current !== editor ||
+      initialEmptyMarkdownBodyRef.current !== editor.state.doc ||
+      !mutationAuthority.allowsBodyMutation(mutationAuthority.capture())
+    ) return null;
+    const storage = browserLocalStorage();
+    if (!storage) return null;
+    return {
+      storage,
+      documentId: activeDocumentId,
+      expected: localBodyExpectedRef.current,
+      validateSchema: validateLocalBodySchema,
+    };
+  }, [
+    activeDocumentId,
+    editor,
+    historyAvailability,
+    inviteIssuanceAuthority,
+    localBodyState,
+    mutationAuthority,
+    resolution,
+    validateLocalBodySchema,
+  ]);
+
   const inspectCurrentMarkdownSource = useCallback(
     () =>
       realtimeEnabled
@@ -2861,18 +2910,17 @@ function ResolvedDocumentWorkspace({
             queuedUpdateCount: realtimeSnapshot.queuedUpdateCount,
             readOnly: !canEditDocument,
           })
-        : Promise.resolve(
-            readVerifiedLocalBodyReceipt()
-              ? ({ ok: true } as const)
-              : ({
-                  ok: false,
-                  message:
-                    'Finish saving or recover your current document before opening the imported document.',
-                } as const),
-          ),
+        : verifyMarkdownImportSourceQuiescence({
+            kind: 'local',
+            localBodyState,
+            initialEmpty: readInitialEmptyMarkdownSource(),
+            flushVerified: async () => Boolean(readVerifiedLocalBodyReceipt()),
+          }),
     [
       accessSnapshot.hydrated,
       canEditDocument,
+      localBodyState,
+      readInitialEmptyMarkdownSource,
       readVerifiedLocalBodyReceipt,
       realtimeEnabled,
       realtimeSnapshot.hydrated,
@@ -2912,15 +2960,19 @@ function ResolvedDocumentWorkspace({
       if (!file || !editor || !canImportMarkdown) return;
       const generation = markdownGenerationRef.current + 1;
       markdownGenerationRef.current = generation;
+      const isCurrent = () =>
+        markdownGenerationRef.current === generation &&
+        !editor.isDestroyed &&
+        inviteIssuanceAuthority.getResolution() === resolution;
       setMarkdownDialogState({ kind: 'reading' });
       const result = await readMarkdownFileForImport({
         file,
         generation,
-        isGenerationCurrent: () => markdownGenerationRef.current === generation,
+        isGenerationCurrent: isCurrent,
         validateSchema: validateLocalBodySchema,
         canonicalizeSchema: canonicalizeLocalBodySchema,
       });
-      if (markdownGenerationRef.current !== generation || result.status === 'ignored') return;
+      if (!isCurrent() || result.status === 'ignored') return;
       if (result.status === 'error') {
         setMarkdownDialogState({ kind: 'import-error', detail: result.message });
         return;
@@ -2932,12 +2984,13 @@ function ResolvedDocumentWorkspace({
         sourceReady: false,
       });
       const quiescence = await inspectCurrentMarkdownSource();
-      if (markdownGenerationRef.current !== generation) return;
+      if (!isCurrent()) return;
       setMarkdownDialogState({
         kind: 'import',
         phase: 'preview',
         plan: result.plan,
         sourceReady: quiescence.ok,
+        sourceProof: quiescence.ok ? quiescence.source : undefined,
       });
     },
     [
@@ -2945,8 +2998,62 @@ function ResolvedDocumentWorkspace({
       canonicalizeLocalBodySchema,
       editor,
       inspectCurrentMarkdownSource,
+      inviteIssuanceAuthority,
+      resolution,
       validateLocalBodySchema,
     ],
+  );
+
+  const deviceCopyEditor =
+    resolution.kind === 'local' &&
+    resolution.routeDocumentId === activeDocumentId &&
+    accessSnapshot.phase === 'local-ready' &&
+    localBodyState === 'ready' &&
+    editor &&
+    !editor.isDestroyed &&
+    hydratedLocalEditorRef.current === editor
+      ? editor
+      : null;
+  const canShareCopy = useCallback(
+    (source: object) =>
+      deviceCopyEditor === source &&
+      !deviceCopyEditor.isDestroyed &&
+      hydratedLocalEditorRef.current === deviceCopyEditor &&
+      inviteIssuanceAuthority.getResolution() === resolution &&
+      inviteIssuanceAuthority.getSnapshot().phase === 'local-ready' &&
+      resolution.authority.getSnapshot().bodyWrite,
+    [deviceCopyEditor, inviteIssuanceAuthority, resolution],
+  );
+  const shareCopy = markdownDialogState?.kind === 'share-copy' ? markdownDialogState : null;
+  const shareCopyOpen = Boolean(shareCopy && canShareCopy(shareCopy.source));
+
+  useLayoutEffect(() => {
+    if (shareCopy && !shareCopyOpen) {
+      setMarkdownDialogState((current) => (current === shareCopy ? null : current));
+    }
+  }, [shareCopy, shareCopyOpen]);
+
+  const openShareCopy = useCallback(
+    (trigger: HTMLElement | null) => {
+      if (!deviceCopyEditor || !canShareCopy(deviceCopyEditor) || promotionInFlightRef.current) {
+        return false;
+      }
+      const plan = createMarkdownDownloadPlan({
+        doc: deviceCopyEditor.getJSON(),
+        title: docTitle,
+        documentId: activeDocumentId,
+        mode: 'share-copy',
+      });
+      markdownTriggerRef.current = trigger;
+      setMarkdownDialogState({
+        kind: 'share-copy',
+        plan,
+        nativeFile: createMarkdownShareFile(plan),
+        source: deviceCopyEditor,
+      });
+      return true;
+    },
+    [activeDocumentId, canShareCopy, deviceCopyEditor, docTitle],
   );
 
   const handleExportMarkdown = useCallback(
@@ -2975,21 +3082,7 @@ function ResolvedDocumentWorkspace({
     if (!state) return;
     if (state.kind === 'download') {
       if (state.plan.status !== 'ready') return;
-      const { filename, markdown } = state.plan;
-      (
-        window as Window & {
-          __lashLastExport?: string;
-        }
-      ).__lashLastExport = markdown;
-      const blob = new Blob([markdown], { type: 'text/markdown;charset=utf-8' });
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement('a');
-      link.href = url;
-      link.download = filename;
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      URL.revokeObjectURL(url);
+      downloadMarkdownFile(state.plan);
       setMarkdownDialogState(null);
       window.requestAnimationFrame(() =>
         markdownTriggerRef.current?.focus({ preventScroll: true }),
@@ -2999,14 +3092,24 @@ function ResolvedDocumentWorkspace({
     if (state.kind !== 'import' || state.phase !== 'preview' || !state.sourceReady) return;
 
     const plan = state.plan;
+    const isCurrent = () =>
+      markdownGenerationRef.current === plan.generation &&
+      !!editor &&
+      !editor.isDestroyed &&
+      inviteIssuanceAuthority.getResolution() === resolution;
+    if (!isCurrent()) return;
     setMarkdownDialogState({
       kind: 'import',
       phase: 'committing',
       plan,
       sourceReady: true,
     });
-    const quiescence = await verifyCurrentMarkdownSource();
-    if (!quiescence.ok) {
+    const sourceReady =
+      state.sourceProof === 'initial-empty'
+        ? isVerifiedInitialEmptyMarkdownSource(readInitialEmptyMarkdownSource())
+        : (await verifyCurrentMarkdownSource()).ok;
+    if (!isCurrent()) return;
+    if (!sourceReady) {
       setMarkdownDialogState({
         kind: 'import',
         phase: 'preview',
@@ -3100,9 +3203,13 @@ function ResolvedDocumentWorkspace({
     controller.start(destination);
   }, [
     activeDocumentId,
+    editor,
+    inviteIssuanceAuthority,
     markdownDialogState,
     navigateDocument,
+    readInitialEmptyMarkdownSource,
     refreshDocuments,
+    resolution,
     staticPreview,
     validateLocalBodySchema,
     verifyCurrentMarkdownSource,
@@ -3114,6 +3221,7 @@ function ResolvedDocumentWorkspace({
 
   useEffect(
     () => () => {
+      markdownGenerationRef.current += 1;
       markdownNavigationControllerRef.current?.dispose();
       markdownNavigationControllerRef.current = null;
     },
@@ -4122,6 +4230,7 @@ function ResolvedDocumentWorkspace({
     (trigger?: HTMLElement | null) => {
       cancelPendingMobileRailAction();
       if (runtimeMode !== 'development-loopback') {
+        if (staticPreview && openShareCopy(trigger ?? null)) return;
         shareTriggerRef.current = trigger ?? null;
         setOwnerShare((current) => {
           if (current.phase !== 'closed') return current;
@@ -4138,7 +4247,7 @@ function ResolvedDocumentWorkspace({
           return staticPreview
             ? {
                 phase: 'unavailable',
-                detail: 'Account saving and sharing aren’t available in this preview.',
+                detail: 'This document isn’t ready to share a copy. Return to it and try again.',
               }
             : { phase: 'checking-account' };
         });
@@ -4152,6 +4261,7 @@ function ResolvedDocumentWorkspace({
       docTitle,
       editor,
       openActivityPanel,
+      openShareCopy,
       ownerBacked,
       runtimeMode,
       staticPreview,
@@ -4636,7 +4746,7 @@ function ResolvedDocumentWorkspace({
       shareExpanded={
         runtimeMode === 'development-loopback'
           ? railVisible && activeTab === 'share'
-          : shareDialogOpen
+          : shareDialogOpen || shareCopyOpen
       }
       settingsExpanded={documentSettingsOpen}
       shareControlsPresent={railOpen}
@@ -4913,6 +5023,13 @@ function ResolvedDocumentWorkspace({
         documentTitle={docTitle.trim() || DEFAULT_DOC_TITLE}
         onClose={closeOwnerShareDialog}
         onPrimary={handleOwnerSharePrimary}
+        onShareCopy={
+          !staticPreview && deviceCopyEditor
+            ? () => {
+                if (openShareCopy(shareTriggerRef.current)) setOwnerShare({ phase: 'closed' });
+              }
+            : undefined
+        }
         onCreateDeviceDraft={
           ownerShare.phase === 'promotion-recovery' && ownerShare.mayCreateDeviceDraft
             ? () => void createSeparateDeviceDraft()
@@ -4948,8 +5065,9 @@ function ResolvedDocumentWorkspace({
         signInHref={staticPreview ? undefined : signInHref}
       />
       <MarkdownTransferDialog
-        state={markdownDialogState}
+        state={shareCopy && !shareCopyOpen ? null : markdownDialogState}
         returnFocusTo={markdownTriggerRef.current}
+        canShareCopy={canShareCopy}
         onClose={closeMarkdownDialog}
         onConfirm={() => void confirmMarkdownTransfer()}
         onRetryOpen={retryOpeningImportedDocument}
