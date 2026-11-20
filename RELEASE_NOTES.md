@@ -15,9 +15,11 @@ runs in workspaces configured for accounts and collaboration.
   you can choose which copy to open. You can also make a separate device
   draft with the current formatted text. Discussion and versions stay with
   the original.
-- Choose **Read version** in local History to read an entire earlier draft.
-  It preserves supported headings, lists and emphasis. Close it to return to
-  the current text. Reading a version does not restore or change the document.
+- Open **History** and choose **Read previous draft** to see the preceding
+  saved draft with its headings, lists and emphasis. **Back to latest** returns
+  to the current text. To inspect a different version, select its row and choose
+  **Read version**. On desktop, pressing Enter on **History** moves keyboard
+  focus into the panel.
 - The page, title and toolbar are readable as soon as the editor renders. On
   phones, closing History returns focus to its button. Widening the window
   releases the drawer so you can keep writing.
@@ -53,6 +55,13 @@ restore an earlier version, and revoke the invitation.
 - **Recover a local draft.** History records ordinary edits after the browser
   confirms the draft was saved. If the saved draft and a verified History
   version disagree, you can keep writing and preview the other version's text.
+- **Find a shared draft again.** After you open a named invitation, return to
+  **Documents** and search for the current title under **Recently shared**.
+  Lash remembers up to eight shared documents opened in this browser and checks
+  your access before displaying their titles.
+- **Pass on an invitation.** Create the invite link and copy it to the person
+  you invited. If the browser blocks copying, choose **Select invite link** and
+  copy the selected text manually. The recipient signs in with the invited email.
 - **Invite a reviewer.** Owners can choose **Can comment** for a verified account.
   The reviewer can select a passage, discuss it and suggest wording. The document
   title and body stay read-only for that reviewer. **Show** highlights the
