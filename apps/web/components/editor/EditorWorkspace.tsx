@@ -606,6 +606,17 @@ export function EditorWorkspace({
         accessSnapshot.recoveryExportAvailable,
       )
     : null;
+  const gateDetail = checking
+    ? canonicalNamedRoute
+      ? 'Checking your access to this shared document.'
+      : null
+    : recoveryPresentation
+      ? recoveryPresentation.detail
+      : commentConnectionLost
+        ? 'Reconnect to open the latest copy and continue the discussion.'
+        : canonicalNamedRoute
+          ? 'Use the account that accepted the invitation, or ask the owner to check your access.'
+          : 'No document content was opened. Return to your local documents to keep writing safely.';
   const handleExportRecovery = () => {
     const payload = controllerRef.current?.exportRealtimeRecovery() ?? null;
     if (!payload) {
@@ -686,7 +697,7 @@ export function EditorWorkspace({
             tabIndex={checking ? undefined : -1}
           >
             {checking
-              ? 'Checking shared document access…'
+              ? 'Opening document…'
               : recoveryPresentation
                 ? recoveryPresentation.heading
                 : accessSnapshot.reason === 'sign-in-required'
@@ -699,17 +710,7 @@ export function EditorWorkspace({
                         ? 'This invite cannot load a shared document on this build'
                         : 'This invite could not be opened'}
           </h1>
-          <p>
-            {checking
-              ? 'Lash will show the document only after access and shared content have been checked.'
-              : recoveryPresentation
-                ? recoveryPresentation.detail
-                : commentConnectionLost
-                  ? 'Reconnect to open the latest copy and continue the discussion.'
-                  : canonicalNamedRoute
-                    ? 'Use the account that accepted the invitation, or ask the owner to check your access.'
-                    : 'No document content was opened. Return to your local documents to keep writing safely.'}
-          </p>
+          {gateDetail ? <p>{gateDetail}</p> : null}
         </div>
         {!checking && recoveryPresentation ? (
           <div className="lash-local-body-notice-actions">
