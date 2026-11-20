@@ -47,7 +47,7 @@ test('keeps an unreadable document list while a draft opened by its link stays e
   await page.evaluate((value) => localStorage.setItem('lash:documents', value), raw);
 
   await page.goto('/documents');
-  await expect(page.getByRole('alert')).toContainText(
+  await expect(page.getByRole('main', { name: 'Documents' }).getByRole('alert')).toContainText(
     'Couldn’t load the documents in this browser.',
   );
   await page.getByRole('button', { name: 'New document', exact: true }).click();
