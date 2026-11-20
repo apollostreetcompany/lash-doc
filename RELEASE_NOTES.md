@@ -2,6 +2,14 @@
 
 ## Writing and review
 
+- If a save to your account is interrupted, keep writing in the device draft.
+  **Check account copy** verifies the existing save. When Lash confirms it,
+  you can choose which copy to open. You can also make a separate device
+  draft with the current formatted text. Discussion and versions stay with
+  the original.
+- Choose **Read version** in local History to read an entire earlier draft.
+  It preserves supported headings, lists and emphasis. Close it to return to
+  the current text. Reading a version does not restore or change the document.
 - The page, title and toolbar are readable as soon as the editor renders. On
   phones, closing History returns focus to its button. Widening the window
   releases the drawer so you can keep writing.
