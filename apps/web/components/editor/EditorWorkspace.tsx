@@ -193,7 +193,7 @@ import {
   type RealtimeSuggestionResolutionRecord,
   type RealtimeSnapshot,
 } from '../../lib/realtimeCollaboration';
-import { AppShell } from '../shell/AppShell';
+import { AppShell, completeMobileRailDocumentNavigation } from '../shell/AppShell';
 import { Icon } from '../shell/Icon';
 import { RightRail, type RailTab, type RailTabConfig } from '../shell/RightRail';
 import { Sidebar } from '../shell/Sidebar';
@@ -1305,15 +1305,21 @@ function ResolvedDocumentWorkspace({
   }, [cancelPendingMobileRailAction]);
 
   const handleDocumentNavigation = useCallback(
-    (navigateToTarget: () => void) => {
+    (navigateToTarget: () => boolean | void) => {
       if (mobileRailOpen && getWorkspaceViewport() === 'mobile') {
         // The document target owns focus once the modal and scroll lock are gone.
-        queueMobileRailAfterClose(navigateToTarget);
+        const canvas = document.getElementById('lash-main');
+        if (!canvas) return;
+        const rail = canvas.parentElement?.querySelector<HTMLElement>('#lash-rail') ?? null;
+        const opener = mobileRailFocusRequest.trigger;
+        queueMobileRailAfterClose(() =>
+          completeMobileRailDocumentNavigation(navigateToTarget, { canvas, rail, opener }),
+        );
       } else {
         navigateToTarget();
       }
     },
-    [mobileRailOpen, queueMobileRailAfterClose],
+    [mobileRailFocusRequest.trigger, mobileRailOpen, queueMobileRailAfterClose],
   );
 
   const openActivityPanel = useCallback(

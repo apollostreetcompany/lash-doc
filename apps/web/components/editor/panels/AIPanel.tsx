@@ -27,7 +27,7 @@ export interface AIPanelProps {
   open?: boolean;
   revisionFocusRequest?: number;
   showTestControls?: boolean;
-  requestDocumentNavigation?: (navigateToTarget: () => void) => void;
+  requestDocumentNavigation?: (navigateToTarget: () => boolean) => void;
   onApplyPatch: (
     patch: EditPatch,
     selection: AiSelection,
@@ -69,7 +69,7 @@ const IDLE = { phase: 'idle' } as const;
 const NO_RESULT = { kind: 'notice', status: '' } as const;
 
 function focusSource(editor: Editor, source: Source) {
-  editor.chain().focus().setTextSelection(source.selection.pmRange).run();
+  return editor.chain().focus().setTextSelection(source.selection.pmRange).run();
 }
 
 function canFocusSource({ selection: { document, pmRange } }: Source) {
@@ -404,10 +404,8 @@ export function AIPanel({
       );
       return;
     }
-    const navigate = () => {
-      // On phones the original draft can change while the drawer closes.
-      if (canReturn()) focusSource(editor, source);
-    };
+    // On phones the original draft can change while the drawer closes.
+    const navigate = () => canReturn() && focusSource(editor, source);
     if (requestDocumentNavigation) requestDocumentNavigation(navigate);
     else navigate();
   };
