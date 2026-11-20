@@ -9,11 +9,20 @@ test('finds and reopens an older title in a large document library', async ({ pa
       createdAt: '2024-05-01T12:00:00Z',
       updatedAt: new Date(Date.UTC(2024, 4, 1, 12, index)).toISOString(),
     }));
+    records.push({
+      id: `doc-v1-${'a'.repeat(64)}`,
+      title: 'Old shared title from the browser',
+      createdAt: '2024-05-01T12:00:00Z',
+      updatedAt: '2024-05-03T12:00:00Z',
+    });
     localStorage.setItem('lash:documents', JSON.stringify(records));
   });
   await page.reload();
   const list = page.getByRole('list', { name: 'Documents, most recent first' });
   await expect(list.getByRole('link').first()).toHaveAccessibleName(/^Workshop notes 119/);
+  await expect(page.getByRole('link', { name: /^Old shared title from the browser/ })).toHaveCount(
+    0,
+  );
   const initialRows = await list.getByRole('link').count();
   expect(initialRows).toBeLessThan(120);
   await page.getByRole('button', { name: 'Show more documents' }).click();
@@ -24,6 +33,13 @@ test('finds and reopens an older title in a large document library', async ({ pa
   await older.click();
   await expect(page.getByRole('textbox', { name: 'Document title' })).toHaveValue(
     'Original field notes',
+  );
+  const options = page.getByRole('combobox', { name: 'Open document' });
+  await expect(
+    options.getByRole('option', { name: 'Old shared title from the browser' }),
+  ).toHaveCount(0);
+  expect(await page.evaluate(() => localStorage.getItem('lash:documents'))).toContain(
+    'Old shared title from the browser',
   );
 });
 

@@ -8,6 +8,8 @@ const domainDigest = (key: Buffer, purpose: string, ...parts: string[]) =>
     .update(JSON.stringify(['lash:named-edit:v1', purpose, ...parts]))
     .digest();
 
+type NamedEditEncryptionPurpose = 'email' | 'continuation' | 'recent';
+
 export const normalizeNamedEditEmail = (address: string) => {
   const email = address.trim().normalize('NFC');
   const at = email.lastIndexOf('@');
@@ -48,7 +50,7 @@ export const hashNamedEditToken = (token: string) =>
 
 export const encryptNamedEditValue = (
   key: Buffer,
-  purpose: 'email' | 'continuation',
+  purpose: NamedEditEncryptionPurpose,
   value: string,
   ...binding: string[]
 ) => {
@@ -60,7 +62,7 @@ export const encryptNamedEditValue = (
 
 export const decryptNamedEditValue = (
   key: Buffer,
-  purpose: 'email' | 'continuation',
+  purpose: NamedEditEncryptionPurpose,
   encoded: string,
   ...binding: string[]
 ) => {

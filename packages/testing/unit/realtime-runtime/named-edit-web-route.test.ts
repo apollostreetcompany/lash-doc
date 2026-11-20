@@ -1,12 +1,16 @@
 import { createHash, createHmac } from 'node:crypto';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import { POST as postRecentRoute } from '../../../../apps/web/app/api/documents/recent/route';
 import {
   namedEditPath,
   type NamedEditOperation,
 } from '../../../../apps/web/lib/namedEdit/contract';
 import { handleNamedEdit } from '../../../../apps/web/lib/namedEdit/routeHandler';
-import { encryptNamedEditValue } from '../../../../apps/web/lib/namedEdit/serverCrypto';
+import {
+  decryptNamedEditValue,
+  encryptNamedEditValue,
+} from '../../../../apps/web/lib/namedEdit/serverCrypto';
 import { NextRequest } from '../../../../apps/web/node_modules/next/server.js';
 import {
   namedEditFailure,
@@ -14,7 +18,7 @@ import {
   parseNamedEditCommand,
 } from '../../../realtime-worker/src/namedEdit';
 
-const auth = vi.hoisted(() => ({ principal: vi.fn() }));
+const auth = vi.hoisted(() => ({ principal: vi.fn(), passive: vi.fn() }));
 vi.mock('../../../../apps/web/node_modules/server-only/index.js', () => ({}));
 vi.mock('../../../../apps/web/lib/auth/serverPrincipal', () => ({
   requireServerAccountPrincipal: auth.principal,
@@ -24,6 +28,7 @@ vi.mock('../../../../apps/web/lib/auth/serverClient', () => ({
     client: {},
     applyTo: (response: Response) => response,
   }),
+  verifyPassiveRouteAccount: auth.passive,
 }));
 
 const origin = 'https://lash.test';
@@ -67,11 +72,34 @@ const post = (operation: NamedEditOperation, body: Record<string, unknown>, cook
     operation,
   );
 
+const bookmarkFor = (id: string, principal = member, site = origin) =>
+  encryptNamedEditValue(Buffer.from(testKey, 'base64url'), 'recent', id, principal, site);
+
+const postRecent = (body: unknown, headers?: HeadersInit, search = '') => {
+  const requestHeaders = new Headers({
+    host: 'lash.test',
+    origin,
+    'content-type': 'application/json',
+    'sec-fetch-site': 'same-origin',
+    'sec-fetch-mode': 'cors',
+    'sec-fetch-dest': 'empty',
+  });
+  new Headers(headers).forEach((value, name) => requestHeaders.set(name, value));
+  return postRecentRoute(
+    new NextRequest(origin + '/api/documents/recent' + search, {
+      method: 'POST',
+      headers: requestHeaders,
+      body: JSON.stringify(body),
+    }),
+  );
+};
+
 describe('named edit browser and Worker contract', () => {
   afterEach(() => {
     vi.unstubAllEnvs();
     vi.unstubAllGlobals();
     auth.principal.mockReset();
+    auth.passive.mockReset();
   });
 
   it('fails closed when the phase is disabled and refuses browser-supplied grant fields', async () => {
@@ -239,9 +267,20 @@ describe('named edit browser and Worker contract', () => {
     expect(accepted.status).toBe(200);
     expect(await accepted.json()).toEqual({ ok: true, version: 1 });
     expect(accepted.headers.get('set-cookie')).toContain('Max-Age=0');
+    expect(accepted.headers.has('X-Lash-Recent-Bookmark')).toBe(false);
 
     const reopened = await post('session', { token: null }, cookiePair);
     expect(reopened.status).toBe(200);
+    const bookmark = reopened.headers.get('X-Lash-Recent-Bookmark') ?? '';
+    expect(bookmark).toMatch(/^[A-Za-z0-9_-]+$/u);
+    expect(bookmark).not.toContain(roomId);
+    expect(bookmark).not.toContain(token);
+    expect(bookmark).not.toContain(member);
+    const key = Buffer.from(testKey, 'base64url');
+    expect(decryptNamedEditValue(key, 'recent', bookmark, member, origin)).toBe(roomId);
+    expect(decryptNamedEditValue(key, 'recent', bookmark, owner, origin)).toBeNull();
+    expect(decryptNamedEditValue(key, 'recent', bookmark, member, 'https://other.test')).toBeNull();
+    expect(decryptNamedEditValue(key, 'continuation', bookmark, member, origin)).toBeNull();
     expect(JSON.parse(String(worker.mock.calls.at(-1)?.[1].body))).toEqual({
       browserOrigin: origin,
       emailDigest: null,
@@ -312,6 +351,7 @@ describe('named edit browser and Worker contract', () => {
     expect(await accepted.json()).toEqual({ ok: true, version: 1 });
     expect(accepted.headers.get('set-cookie')).toContain('Max-Age=0');
     const reopened = await post('session', { token: null });
+    expect(reopened.headers.has('X-Lash-Recent-Bookmark')).toBe(true);
     expect(await reopened.json()).toMatchObject({
       session: {
         role: 'comment',
@@ -320,6 +360,152 @@ describe('named edit browser and Worker contract', () => {
         socketUrl: `wss://worker.test/api/realtime/rooms/${roomId}/socket?protocolVersion=6&actorId=${actorId}`,
       },
     });
+  });
+
+  it('reauthorizes distinct bookmark rooms in input order and discloses only current titles', async () => {
+    configure();
+    auth.passive.mockResolvedValue({ status: 'authenticated', principal: { id: member } });
+    const revoked = `doc-v1-${'b'.repeat(64)}`;
+    const third = `doc-v1-${'c'.repeat(64)}`;
+    const bookmark = bookmarkFor(roomId);
+    const tampered = `${bookmark.startsWith('a') ? 'b' : 'a'}${bookmark.slice(1)}`;
+    let finishFirst!: (response: Response) => void;
+    const first = new Promise<Response>((resolve) => {
+      finishFirst = resolve;
+    });
+    const worker = vi.fn(async (url: string, request: RequestInit) => {
+      const path = new URL(url).pathname;
+      const headers = new Headers(request.headers);
+      const id = path.split('/').at(-3);
+      expect(path).toBe(`/api/management/documents/${id}/named-edit/recent`);
+      expect(request).toMatchObject({
+        method: 'POST',
+        body: '{"version":1}',
+        cache: 'no-store',
+        credentials: 'omit',
+        redirect: 'error',
+      });
+      const hash = createHash('sha256').update(String(request.body)).digest('base64url');
+      expect(headers.get('x-lash-control-body-sha256')).toBe(hash);
+      expect(headers.get('x-lash-control-principal-id')).toBe(member);
+      const assertion = [
+        'lash-worker-control:v2',
+        'POST',
+        path,
+        hash,
+        headers.get('x-lash-control-request-id'),
+        member,
+        headers.get('x-lash-control-expires-at'),
+      ].join('\n');
+      const signature = createHmac('sha256', controlSecret).update(assertion).digest('base64url');
+      expect(headers.get('authorization')).toBe(`Lash-Control v2:${signature}`);
+      if (id === roomId) return first;
+      if (id === revoked) return namedEditResponse(namedEditFailure('forbidden'));
+      expect(id).toBe(third);
+      finishFirst(Response.json({ ok: true, version: 1, title: 'Current launch brief' }));
+      return Response.json({ ok: true, version: 1, title: 'Earlier planning notes' });
+    });
+    vi.stubGlobal('fetch', worker);
+    const anotherEnvelopeForFirst = bookmarkFor(roomId);
+    expect(anotherEnvelopeForFirst).not.toBe(bookmark);
+    const response = await postRecent({
+      version: 1,
+      bookmarks: [
+        bookmark,
+        bookmarkFor(revoked),
+        anotherEnvelopeForFirst,
+        bookmarkFor(third),
+        tampered,
+        bookmarkFor(revoked, owner),
+        bookmarkFor(revoked, member, 'https://other.test'),
+        bookmarkFor(`${roomId}\n`),
+      ],
+    });
+    expect(response.status).toBe(200);
+    expect(response.headers.get('cache-control')).toContain('no-store');
+    expect(response.headers.get('vary')).toBe('Cookie, Origin');
+    expect(await response.json()).toEqual({
+      ok: true,
+      version: 1,
+      documents: [
+        { id: roomId, title: 'Current launch brief' },
+        { id: third, title: 'Earlier planning notes' },
+      ],
+    });
+    expect(auth.passive).toHaveBeenCalledTimes(1);
+    expect(worker).toHaveBeenCalledTimes(3);
+  });
+
+  it('bounds lookup inputs and checks site, feature and account authority before the Worker', async () => {
+    configure();
+    const worker = vi.fn();
+    vi.stubGlobal('fetch', worker);
+    const bookmark = bookmarkFor(roomId);
+    const body = { version: 1, bookmarks: [bookmark] };
+    const invalidInputs = [
+      { ...body, id: roomId },
+      { ...body, version: 2 },
+      { ...body, bookmarks: Array(9).fill(bookmark) },
+      { ...body, bookmarks: [`${bookmark}\n`] },
+      { ...body, bookmarks: [`${bookmark}=`] },
+      { ...body, bookmarks: ['a'.repeat(8193)] },
+    ];
+    for (const invalid of invalidInputs) expect((await postRecent(invalid)).status).toBe(400);
+    expect((await postRecent(body, { 'content-encoding': 'gzip' })).status).toBe(400);
+    expect((await postRecent(body, { 'content-length': '8193' })).status).toBe(400);
+    expect((await postRecent(body, { origin: 'https://other.test' })).status).toBe(403);
+    expect((await postRecent(body, { 'sec-fetch-site': 'same-site' })).status).toBe(403);
+    expect((await postRecent(body, undefined, '?room=1')).status).toBe(400);
+    vi.stubEnv('LASH_NAMED_EDIT_PHASE', 'disabled');
+    expect((await postRecent(body)).status).toBe(404);
+    expect(auth.passive).not.toHaveBeenCalled();
+
+    vi.stubEnv('LASH_NAMED_EDIT_PHASE', 'enabled');
+    auth.passive.mockResolvedValueOnce({ status: 'anonymous' });
+    const signedOut = await postRecent(body);
+    expect(signedOut.status).toBe(401);
+    expect(signedOut.headers.get('cache-control')).toContain('no-store');
+    expect(await signedOut.json()).toEqual({ ok: false, version: 1, error: 'sign-in-required' });
+    auth.passive.mockResolvedValue({ status: 'authenticated', principal: { id: owner } });
+    expect(await (await postRecent(body)).json()).toEqual({ ok: true, version: 1, documents: [] });
+    expect(worker).not.toHaveBeenCalled();
+  });
+
+  it('reports inconclusive Worker replies as retryable without returning mixed results', async () => {
+    configure();
+    auth.passive.mockResolvedValue({ status: 'authenticated', principal: { id: member } });
+    const other = `doc-v1-${'b'.repeat(64)}`;
+    const badReplies = [
+      namedEditResponse(namedEditFailure('invalid-request')),
+      namedEditResponse(namedEditFailure('rate-limited')),
+      Response.json(
+        { ok: false, version: 1, error: 'forbidden', retryable: true },
+        { status: 403 },
+      ),
+      Response.json({ ok: true, version: 1, title: 'Private', token: 'unexpected' }),
+      Response.json({ ok: true, version: 1, title: 'é'.repeat(2049) }),
+      Response.json({ ok: true, version: 1, title: 'a'.repeat(26 * 1024) }),
+    ];
+    const worker = vi.fn(async (url: string) =>
+      url.includes(roomId)
+        ? Response.json({ ok: true, version: 1, title: 'Allowed title' })
+        : (badReplies.shift() ?? Promise.reject(new TypeError('offline'))),
+    );
+    vi.stubGlobal('fetch', worker);
+    const attempts = badReplies.length + 1;
+    for (let i = 0; i < attempts; i++) {
+      const response = await postRecent({
+        version: 1,
+        bookmarks: [bookmarkFor(roomId), bookmarkFor(other)],
+      });
+      expect(response.status).toBe(503);
+      expect(response.headers.get('cache-control')).toContain('no-store');
+      expect(await response.json()).toEqual({
+        ok: false,
+        version: 1,
+        error: 'temporarily-unavailable',
+      });
+    }
   });
 
   it('discloses an unavailable Comment projection only for owner-directed issuance', async () => {

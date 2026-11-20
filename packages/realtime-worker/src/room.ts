@@ -55,6 +55,7 @@ import {
   isSafePublicYjsProjection,
   loadRoomYjsProjection,
   readCanonicalRoomYjsBody,
+  readRoomYjsTitle,
 } from './namedEditProjection';
 import {
   consumeNamedCommentTicket,
@@ -63,6 +64,7 @@ import {
   initializeNamedEditStorage,
   isCurrentNamedCommentGrant,
   isCurrentNamedEditGrant,
+  readNamedEditRecentTitle,
   type NamedCommentGrant,
   type NamedEditGrant,
 } from './namedEditStore';
@@ -1776,6 +1778,7 @@ class SqlPublicCommentStore implements PublicCommentStore, PublicCommentModerati
 export class LashRealtimeRoom extends DurableObject<Env> {
   private projectionCache: Y.Doc | null = null;
   private canonicalBodyCache: string | null = null;
+  private commentRecentEligible: boolean | null = null;
   private commentReviewFingerprint: string | null = null;
 
   constructor(ctx: DurableObjectState, env: Env) {
@@ -3004,6 +3007,7 @@ export class LashRealtimeRoom extends DurableObject<Env> {
     this.projectionCache?.destroy();
     this.projectionCache = null;
     this.canonicalBodyCache = null;
+    this.commentRecentEligible = null;
   }
 
   private publicProjectionCanBeShared() {
@@ -3057,6 +3061,7 @@ export class LashRealtimeRoom extends DurableObject<Env> {
   }
 
   private validateAccountProjection(update: string) {
+    this.commentRecentEligible = null;
     const projection = this.loadProjection();
     const body = projection && applyNamedEditYjsUpdate(projection, update);
     if (body !== null) return body;
@@ -3066,6 +3071,7 @@ export class LashRealtimeRoom extends DurableObject<Env> {
 
   private advanceProjection(update: string) {
     this.canonicalBodyCache = null;
+    this.commentRecentEligible = null;
     if (this.projectionCache && !applyRoomYjsUpdate(this.projectionCache, update)) {
       this.clearProjection();
     }
@@ -3124,7 +3130,7 @@ export class LashRealtimeRoom extends DurableObject<Env> {
       return namedEditResponse(namedEditFailure('named-edit-disabled'));
     }
     const url = new URL(request.url);
-    const route = /^\/__lash-room\/named-edit\/([^/]+)\/(issue|list|revoke|session)$/u.exec(
+    const route = /^\/__lash-room\/named-edit\/([^/]+)\/(issue|list|revoke|session|recent)$/u.exec(
       url.pathname,
     );
     const roomId = route?.[1];
@@ -3145,6 +3151,23 @@ export class LashRealtimeRoom extends DurableObject<Env> {
       ? parseNamedEditCommand(route![2] as NamedEditAction, body.value)
       : null;
     if (!command) return namedEditResponse(namedEditFailure('invalid-request'));
+    if (command.action === 'recent') {
+      return namedEditResponse(
+        readNamedEditRecentTitle({
+          storage: this.ctx.storage,
+          principalId,
+          roomId,
+          commentEnabled: this.namedCommentIsEnabled(),
+          // Library refreshes reuse the exact Comment hydration gate for this projection.
+          commentProjectionAvailable: () =>
+            (this.commentRecentEligible ??= this.commentHydrationUpdate() !== null),
+          readTitle: () => {
+            const projection = this.loadProjection();
+            return projection && readRoomYjsTitle(projection);
+          },
+        }),
+      );
+    }
     const result = await executeNamedEdit({
       storage: this.ctx.storage,
       command,

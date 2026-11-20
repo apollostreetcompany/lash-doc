@@ -20,6 +20,7 @@ import {
   type RealtimeSnapshot,
 } from '../../../../apps/web/lib/realtimeCollaboration';
 import { createRealtimeRecoveryJournal } from '../../../../apps/web/lib/realtimeRecoveryJournal';
+import { RECENT_SHARED_BOOKMARKS_KEY } from '../../../../apps/web/lib/recentSharedDocuments';
 
 const disabledRuntime: RealtimeRuntimeSelection = {
   invitationMode: 'unavailable',
@@ -155,8 +156,18 @@ describe('browser document access controller', () => {
       source: 'named',
       ticketProtocol: `lash-named-comment-ticket.${'c'.repeat(43)}`,
     } as const;
-    const requestNamedSession = vi.fn(async () => ({ ok: true as const, session: commentSession }));
+    const initialBookmark = 'a'.repeat(100);
+    const renewedBookmark = 'b'.repeat(100);
+    const requestNamedSession = vi
+      .fn(async () => ({ ok: true as const, session: commentSession, recentBookmark: renewedBookmark }))
+      .mockResolvedValueOnce({ ok: true, session: commentSession, recentBookmark: initialBookmark });
     const harness = createHarness({ requestNamedSession }, configuredRuntime);
+    const storage = createRecoveryStorage();
+    vi.stubGlobal('window', { localStorage: storage });
+    let endHydration!: () => void;
+    vi.mocked(harness.provider.start).mockImplementationOnce(() => new Promise<void>((resolve) => {
+      endHydration = resolve;
+    }));
     const providerSnapshot: RealtimeSnapshot = {
       ...harness.provider.getSnapshot(), actorId, canWrite: false,
     };
@@ -168,7 +179,11 @@ describe('browser document access controller', () => {
       .mockReturnValueOnce({ doc: renewed.doc, provider: renewed.provider });
     const controller = createDocumentAccessController({ documentId: roomId }, harness.dependencies);
     try {
-      await controller.start();
+      const opening = controller.start();
+      await vi.waitFor(() => expect(harness.provider.start).toHaveBeenCalledOnce());
+      expect(storage.getItem(RECENT_SHARED_BOOKMARKS_KEY)).toBeNull();
+      endHydration();
+      await opening;
       expect(controller.getSnapshot()).toMatchObject({
         phase: 'remote-ready', scope: 'comment', authorized: true, hydrated: true,
         canWrite: false, canIssueInvites: false, authoritativeOwner: false,
@@ -177,6 +192,15 @@ describe('browser document access controller', () => {
         phase: 'ready-read', bodyWrite: false, metadataWrite: 'none',
       });
       expect(controller.getResolution()).toMatchObject({ kind: 'remote', doc: harness.doc });
+      const recorded = storage.getItem(RECENT_SHARED_BOOKMARKS_KEY);
+      expect(JSON.parse(recorded!)).toEqual({
+        version: 1,
+        bookmarks: [{ actorId, bookmark: initialBookmark }],
+      });
+      const [, resourceOptions] = vi.mocked(harness.dependencies.createResources).mock.calls[0];
+      await resourceOptions?.refreshOwnerSession?.(roomId, new AbortController().signal);
+      expect(requestNamedSession).toHaveBeenCalledTimes(2);
+      expect(storage.getItem(RECENT_SHARED_BOOKMARKS_KEY)).toBe(recorded);
 
       observers.mock.calls[0]?.[0]({
         ...providerSnapshot, connectionState: 'reconnecting', syncState: 'reconnecting',
@@ -189,7 +213,7 @@ describe('browser document access controller', () => {
       expect(harness.provider.destroy).toHaveBeenCalledOnce();
 
       await controller.retry();
-      expect(requestNamedSession).toHaveBeenCalledTimes(2);
+      expect(requestNamedSession).toHaveBeenCalledTimes(3);
       expect(controller.getResolution()).toMatchObject({ kind: 'remote', doc: renewed.doc });
       expect(controller.getMutationAuthority().getSnapshot()).toMatchObject({
         phase: 'ready-read', bodyWrite: false, metadataWrite: 'none',
@@ -197,6 +221,7 @@ describe('browser document access controller', () => {
       expect(controller.captureInviteIssuance()).toBeNull();
     } finally {
       controller.destroy();
+      vi.unstubAllGlobals();
     }
   });
 

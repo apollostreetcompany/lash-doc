@@ -88,6 +88,25 @@ describe('named editor account session', () => {
     }
   });
 
+  it('passes a valid optional bookmark separately and drops it when the request is aborted', async () => {
+    const session = commentSession();
+    const recentBookmark = 'o'.repeat(100);
+    const fetcher = () => Promise.resolve(Response.json({ ok: true, version: 1, session }, {
+      headers: { 'X-Lash-Recent-Bookmark': recentBookmark },
+    }));
+    const controller = new AbortController();
+    await expect(requestNamedEditSession(roomId, controller.signal, fetcher)).resolves.toEqual({
+      ok: true,
+      session,
+      recentBookmark,
+    });
+    controller.abort();
+    await expect(requestNamedEditSession(roomId, controller.signal, fetcher)).resolves.toEqual({
+      ok: true,
+      session,
+    });
+  });
+
   it('distinguishes an invalid successful response from HTTP or network unavailability', async () => {
     const request = (fetcher: typeof fetch) =>
       requestNamedEditSession(roomId, new AbortController().signal, fetcher);
