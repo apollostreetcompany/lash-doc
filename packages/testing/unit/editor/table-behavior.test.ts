@@ -174,6 +174,63 @@ describe('Table behavior', () => {
     }
   });
 
+  it('moves focus through the clicked cell menu without changing the editor selection', () => {
+    const editor = createEditor();
+    const editorDom = editor.view.dom;
+    document.body.append(editorDom);
+    try {
+      ensureTable(editor, 2, 2);
+      selectCell(editor, 0, 1);
+      lashCommands.setTableCellType(editor, 'status');
+      selectCell(editor, 1, 0);
+      const before = editor.state.selection;
+      const cell = editorDom.querySelectorAll('td')[1];
+      const control = cell.querySelector<HTMLButtonElement>('.lash-table-cell-control')!;
+      const menu = cell.querySelector<HTMLUListElement>('.lash-table-cell-menu')!;
+      control.click();
+      expect(document.activeElement).toBe(menu);
+
+      menu.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }));
+      const active = menu.querySelector('[aria-selected="true"]');
+      expect(active?.textContent).toBe(DEFAULT_STATUS_CELL_OPTIONS[1]);
+      expect(menu.getAttribute('aria-activedescendant')).toBe(active?.id);
+      menu.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+
+      expect(getCellAttrs(editor, 0, 1).value).toBe(DEFAULT_STATUS_CELL_OPTIONS[1]);
+      expect(editor.state.selection.eq(before)).toBe(true);
+      expect(menu.hidden).toBe(true);
+      expect(document.activeElement).toBe(control);
+    } finally {
+      editor.destroy();
+      editorDom.remove();
+    }
+  });
+
+  it('closes the active picker and discards stale option clicks when editing becomes unavailable', async () => {
+    const editor = createEditor();
+    try {
+      ensureTable(editor, 2, 2);
+      selectCell(editor, 0, 1);
+      lashCommands.setTableCellType(editor, 'status');
+      const cell = editor.view.dom.querySelectorAll('td')[1];
+      const control = cell.querySelector<HTMLButtonElement>('.lash-table-cell-control')!;
+      control.click();
+      const option = cell.querySelectorAll<HTMLButtonElement>('.lash-table-cell-menu-option')[1];
+      expect(control.getAttribute('aria-expanded')).toBe('true');
+
+      editor.setEditable(false);
+      expect(control.getAttribute('aria-expanded')).toBe('false');
+      option.click();
+      expect(getCellAttrs(editor, 0, 1).value).toBe(DEFAULT_STATUS_CELL_OPTIONS[0]);
+      await Promise.resolve();
+      editor.setEditable(true);
+      expect(TABLE_INTERACTION_PLUGIN_KEY.getState(editor.state)?.openCellPos).toBeNull();
+      expect(control.getAttribute('aria-expanded')).toBe('false');
+    } finally {
+      editor.destroy();
+    }
+  });
+
   it('reports active cell attrs through helper', () => {
     const editor = createEditor();
     ensureTable(editor, 1, 2);
