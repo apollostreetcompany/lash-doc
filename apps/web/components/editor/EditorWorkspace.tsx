@@ -168,6 +168,7 @@ import {
   commitNewDeviceDocument,
   createMarkdownDownloadPlan,
   createMarkdownImportNavigationController,
+  isVerifiedInitialEmptyMarkdownSource,
   persistMarkdownImportHandoff,
   readMarkdownFileForImport,
   verifyMarkdownImportSourceQuiescence,
@@ -969,6 +970,7 @@ function ResolvedDocumentWorkspace({
         ? localBody.notice
         : localBody;
   const localBodyExpectedRef = useRef<LocalBodyExpectedRevision | null>(null);
+  const initialEmptyMarkdownBodyRef = useRef<EditorNode | null>(null);
   const divergentHistoryMarkerRef = useRef<LocalBodyEnvelope['divergentHistoryHead']>(undefined);
   const recoveredLocalBodyRef = useRef<{
     envelope: LocalBodyEnvelope;
@@ -1481,6 +1483,7 @@ function ResolvedDocumentWorkspace({
     if (!editor || hydratedLocalEditorRef.current === editor) return;
     hydratedLocalEditorRef.current = editor;
     localBodyExpectedRef.current = null;
+    initialEmptyMarkdownBodyRef.current = null;
     divergentHistoryMarkerRef.current = undefined;
     firstHistoryCheckpointRef.current = 'none';
     localSuggestionsRef.current = [];
@@ -1529,8 +1532,10 @@ function ResolvedDocumentWorkspace({
         // A fresh body can later reconstruct its first checkpoint from this
         // exact schema baseline. Existing unmarked drafts retain their history.
         const emptyDocument = editor.schema.topNodeType.createAndFill();
-        if (emptyDocument?.eq(editor.state.doc))
+        if (emptyDocument?.eq(editor.state.doc)) {
           firstHistoryCheckpointRef.current = 'initially-empty';
+          initialEmptyMarkdownBodyRef.current = editor.state.doc;
+        }
         localBodyMutationsAllowedRef.current = true;
         setLocalBody({ kind: 'ready' });
         return;
@@ -2284,7 +2289,13 @@ function ResolvedDocumentWorkspace({
   }, [editor, exposeTestHooks, localBodyMutationLocked]);
 
   const isEditorReady = Boolean(editor && (realtimeEnabled || localBodyState !== 'loading'));
-  const canImportMarkdown = isEditorReady && localBodyState !== 'recovered-awaiting-confirmation';
+  const waitingForInitialHistory =
+    !realtimeEnabled &&
+    !!editor &&
+    initialEmptyMarkdownBodyRef.current === editor.state.doc &&
+    historyAvailability === 'loading';
+  const canImportMarkdown =
+    isEditorReady && localBodyState !== 'recovered-awaiting-confirmation' && !waitingForInitialHistory;
 
   const handleToolbarClick = useCallback(
     (spec: ToolbarButtonSpec) => {
@@ -2852,6 +2863,41 @@ function ResolvedDocumentWorkspace({
       : null;
   }, [activeDocumentId, editor, localBodyState, realtimeEnabled, validateLocalBodySchema]);
 
+  const readInitialEmptyMarkdownSource = useCallback(() => {
+    const current = inviteIssuanceAuthority.getResolution();
+    if (
+      current?.kind !== 'local' ||
+      current !== resolution ||
+      current.routeDocumentId !== activeDocumentId ||
+      inviteIssuanceAuthority.getSnapshot().phase !== 'local-ready' ||
+      localBodyState !== 'ready' ||
+      historyAvailability !== 'empty-baseline' ||
+      !editor ||
+      editor.isDestroyed ||
+      editor.view.composing ||
+      hydratedLocalEditorRef.current !== editor ||
+      initialEmptyMarkdownBodyRef.current !== editor.state.doc ||
+      !mutationAuthority.allowsBodyMutation(mutationAuthority.capture())
+    ) return null;
+    const storage = browserLocalStorage();
+    if (!storage) return null;
+    return {
+      storage,
+      documentId: activeDocumentId,
+      expected: localBodyExpectedRef.current,
+      validateSchema: validateLocalBodySchema,
+    };
+  }, [
+    activeDocumentId,
+    editor,
+    historyAvailability,
+    inviteIssuanceAuthority,
+    localBodyState,
+    mutationAuthority,
+    resolution,
+    validateLocalBodySchema,
+  ]);
+
   const inspectCurrentMarkdownSource = useCallback(
     () =>
       realtimeEnabled
@@ -2864,18 +2910,17 @@ function ResolvedDocumentWorkspace({
             queuedUpdateCount: realtimeSnapshot.queuedUpdateCount,
             readOnly: !canEditDocument,
           })
-        : Promise.resolve(
-            readVerifiedLocalBodyReceipt()
-              ? ({ ok: true } as const)
-              : ({
-                  ok: false,
-                  message:
-                    'Finish saving or recover your current document before opening the imported document.',
-                } as const),
-          ),
+        : verifyMarkdownImportSourceQuiescence({
+            kind: 'local',
+            localBodyState,
+            initialEmpty: readInitialEmptyMarkdownSource(),
+            flushVerified: async () => Boolean(readVerifiedLocalBodyReceipt()),
+          }),
     [
       accessSnapshot.hydrated,
       canEditDocument,
+      localBodyState,
+      readInitialEmptyMarkdownSource,
       readVerifiedLocalBodyReceipt,
       realtimeEnabled,
       realtimeSnapshot.hydrated,
@@ -2915,15 +2960,19 @@ function ResolvedDocumentWorkspace({
       if (!file || !editor || !canImportMarkdown) return;
       const generation = markdownGenerationRef.current + 1;
       markdownGenerationRef.current = generation;
+      const isCurrent = () =>
+        markdownGenerationRef.current === generation &&
+        !editor.isDestroyed &&
+        inviteIssuanceAuthority.getResolution() === resolution;
       setMarkdownDialogState({ kind: 'reading' });
       const result = await readMarkdownFileForImport({
         file,
         generation,
-        isGenerationCurrent: () => markdownGenerationRef.current === generation,
+        isGenerationCurrent: isCurrent,
         validateSchema: validateLocalBodySchema,
         canonicalizeSchema: canonicalizeLocalBodySchema,
       });
-      if (markdownGenerationRef.current !== generation || result.status === 'ignored') return;
+      if (!isCurrent() || result.status === 'ignored') return;
       if (result.status === 'error') {
         setMarkdownDialogState({ kind: 'import-error', detail: result.message });
         return;
@@ -2935,12 +2984,13 @@ function ResolvedDocumentWorkspace({
         sourceReady: false,
       });
       const quiescence = await inspectCurrentMarkdownSource();
-      if (markdownGenerationRef.current !== generation) return;
+      if (!isCurrent()) return;
       setMarkdownDialogState({
         kind: 'import',
         phase: 'preview',
         plan: result.plan,
         sourceReady: quiescence.ok,
+        sourceProof: quiescence.ok ? quiescence.source : undefined,
       });
     },
     [
@@ -2948,6 +2998,8 @@ function ResolvedDocumentWorkspace({
       canonicalizeLocalBodySchema,
       editor,
       inspectCurrentMarkdownSource,
+      inviteIssuanceAuthority,
+      resolution,
       validateLocalBodySchema,
     ],
   );
@@ -3040,14 +3092,24 @@ function ResolvedDocumentWorkspace({
     if (state.kind !== 'import' || state.phase !== 'preview' || !state.sourceReady) return;
 
     const plan = state.plan;
+    const isCurrent = () =>
+      markdownGenerationRef.current === plan.generation &&
+      !!editor &&
+      !editor.isDestroyed &&
+      inviteIssuanceAuthority.getResolution() === resolution;
+    if (!isCurrent()) return;
     setMarkdownDialogState({
       kind: 'import',
       phase: 'committing',
       plan,
       sourceReady: true,
     });
-    const quiescence = await verifyCurrentMarkdownSource();
-    if (!quiescence.ok) {
+    const sourceReady =
+      state.sourceProof === 'initial-empty'
+        ? isVerifiedInitialEmptyMarkdownSource(readInitialEmptyMarkdownSource())
+        : (await verifyCurrentMarkdownSource()).ok;
+    if (!isCurrent()) return;
+    if (!sourceReady) {
       setMarkdownDialogState({
         kind: 'import',
         phase: 'preview',
@@ -3141,9 +3203,13 @@ function ResolvedDocumentWorkspace({
     controller.start(destination);
   }, [
     activeDocumentId,
+    editor,
+    inviteIssuanceAuthority,
     markdownDialogState,
     navigateDocument,
+    readInitialEmptyMarkdownSource,
     refreshDocuments,
+    resolution,
     staticPreview,
     validateLocalBodySchema,
     verifyCurrentMarkdownSource,
@@ -3155,6 +3221,7 @@ function ResolvedDocumentWorkspace({
 
   useEffect(
     () => () => {
+      markdownGenerationRef.current += 1;
       markdownNavigationControllerRef.current?.dispose();
       markdownNavigationControllerRef.current = null;
     },

@@ -76,7 +76,11 @@ test('creates, finds, reopens and shares a draft using only static files', async
   await page.keyboard.press('Enter');
   const share = page.getByRole('dialog', { name: 'Share a copy', exact: true });
   await expect(share).toBeVisible();
-  await expect(share).toContainText(/comments, suggestions, version history.*are not included/i);
+  await expect(share).toContainText('original-draft.md');
+  await expect(share).toContainText('open it with Import Markdown in Lash');
+  await expect(share).toContainText(
+    /comments, suggestions, version history.*stay with your draft/i,
+  );
   await expect(share.getByRole('link', { name: /Sign in/ })).toHaveCount(0);
   const pendingDownload = page.waitForEvent('download');
   await share.getByRole('button', { name: 'Download Markdown', exact: true }).click();
@@ -117,7 +121,12 @@ test('creates, finds, reopens and shares a draft using only static files', async
     const importDialog = recipientPage.getByRole('dialog', {
       name: 'Import Markdown as new document',
     });
-    await importDialog.getByRole('button', { name: 'Create new document', exact: true }).tap();
+    const createImportedDocument = importDialog.getByRole('button', {
+      name: 'Create new document',
+      exact: true,
+    });
+    await expect(createImportedDocument).toBeEnabled();
+    await createImportedDocument.tap();
     await expect(recipientPage).toHaveURL(/\/\?doc=doc-[a-z0-9-]+$/);
     expect(recipientPage.url()).not.toBe(senderUrl);
     const recipientTitle = recipientPage.getByRole('textbox', { name: 'Document title' });
@@ -138,6 +147,11 @@ test('creates, finds, reopens and shares a draft using only static files', async
     await expect(recipientTitle).toHaveValue('Recipient draft');
     await expect(recipientEditor).toContainText(recipientEdit);
     await expect(recipientEditor.getByText(formattedText, { exact: true })).toBeVisible();
+    const blankSourceSlots = await recipientPage.evaluate(() => [
+      localStorage.getItem('lash:body:demo-document'),
+      localStorage.getItem('lash:body-backup:demo-document'),
+    ]);
+    expect(blankSourceSlots).toEqual([null, null]);
 
     await page.reload();
     await expect(page).toHaveURL(senderUrl);

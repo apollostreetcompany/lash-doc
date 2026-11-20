@@ -62,6 +62,7 @@ export type MarkdownTransferDialogState =
         | 'created-open-failed';
       plan: MarkdownImportPlan;
       sourceReady: boolean;
+      sourceProof?: 'initial-empty';
       detail?: string;
     }>;
 
@@ -225,11 +226,26 @@ export function MarkdownTransferDialog({
             </p>
           ) : isExport ? (
             <>
-              <p id={descriptionId}>
-                Markdown includes the document title and supported body formatting. Comments,
-                suggestions, version history, authorship, chat, collaborators, and access details
-                are not included. Your Lash document will not change.
-              </p>
+              {state.kind === 'share-copy' && state.plan.status === 'ready' ? (
+                <>
+                  <p id={descriptionId}>
+                    {state.nativeFile ? 'Share or download ' : 'Download '}
+                    <strong className="lash-markdown-filename">{state.plan.filename}</strong> to
+                    send to another writer. They can open it with <strong>Import Markdown</strong>{' '}
+                    in Lash.
+                  </p>
+                  <p>
+                    The file includes the title and formatted text. Comments, suggestions, version
+                    history, authorship, chat, and sharing permissions stay with your draft.
+                  </p>
+                </>
+              ) : (
+                <p id={descriptionId}>
+                  Markdown includes the document title and supported body formatting. Comments,
+                  suggestions, version history, authorship, chat, collaborators, and access details
+                  are not included. Your Lash document will not change.
+                </p>
+              )}
               {state.plan.warnings.length ? (
                 <section aria-labelledby={`${titleId}-warnings`}>
                   <h3 id={`${titleId}-warnings`}>Some formatting will be simplified:</h3>

@@ -32,6 +32,7 @@ import {
   commitNewDeviceDocument,
   createMarkdownDownloadPlan,
   createMarkdownImportNavigationController,
+  isVerifiedInitialEmptyMarkdownSource,
   persistMarkdownImportHandoff,
   readMarkdownFileForImport,
   verifyMarkdownImportSourceQuiescence,
@@ -1354,6 +1355,83 @@ describe('separate device draft', () => {
 });
 
 describe('source quiescence', () => {
+  it('accepts a verified-empty local source without flushing or creating a body receipt', async () => {
+    const storage = new MemoryStorage();
+    const flushVerified = vi.fn(async () => false);
+    const source = {
+      kind: 'local',
+      localBodyState: 'ready',
+      initialEmpty: {
+        storage,
+        documentId: 'empty-source',
+        expected: null,
+        validateSchema: () => undefined,
+      },
+      flushVerified,
+    } as const;
+
+    await expect(verifyMarkdownImportSourceQuiescence(source)).resolves.toEqual({
+      ok: true,
+      source: 'initial-empty',
+    });
+    expect(flushVerified).not.toHaveBeenCalled();
+    expect(storage.values.size).toBe(0);
+  });
+
+  it('invalidates the empty proof if a saved body appears before confirmation', async () => {
+    const storage = new MemoryStorage();
+    const initialEmpty = {
+      storage,
+      documentId: 'empty-source',
+      expected: null,
+      validateSchema: () => undefined,
+    };
+
+    await expect(verifyMarkdownImportSourceQuiescence({
+      kind: 'local',
+      localBodyState: 'ready',
+      initialEmpty,
+      flushVerified: async () => false,
+    })).resolves.toMatchObject({ ok: true, source: 'initial-empty' });
+    const saved = saveLocalDocumentBody({ ...initialEmpty, doc: readyPlan().doc });
+    const before = new Map(storage.values);
+
+    expect(isVerifiedInitialEmptyMarkdownSource(initialEmpty)).toBe(false);
+    expect(storage.values).toEqual(before);
+    expect(loadLocalDocumentBody(initialEmpty)).toMatchObject({ state: 'ready', envelope: saved });
+  });
+
+  it.each(['saved body', 'backup only', 'corrupt backup', 'unavailable backup'])(
+    'does not treat a %s as a verified-empty local source',
+    async (condition) => {
+      const storage = new MemoryStorage();
+      const options = { storage, documentId: 'empty-source', validateSchema: () => undefined };
+      const primaryKey = localDocumentBodyKey(options.documentId);
+      const backupKey = localDocumentBodyBackupKey(options.documentId);
+      if (condition === 'saved body' || condition === 'backup only') {
+        saveLocalDocumentBody({ ...options, doc: readyPlan().doc, expected: null });
+      }
+      if (condition === 'backup only') {
+        storage.values.set(backupKey, storage.getItem(primaryKey)!);
+        storage.values.delete(primaryKey);
+      } else if (condition === 'corrupt backup') {
+        storage.values.set(backupKey, '{');
+      } else if (condition === 'unavailable backup') {
+        storage.failAt.add(`get:${backupKey}`);
+      }
+      const before = new Map(storage.values);
+      const source = {
+        kind: 'local',
+        localBodyState: 'ready',
+        initialEmpty: { ...options, expected: null },
+        flushVerified: vi.fn(async () => false),
+      } as const;
+
+      await expect(verifyMarkdownImportSourceQuiescence(source)).resolves.toMatchObject({ ok: false });
+      expect(storage.values).toEqual(before);
+    },
+  );
+
   it('requires a verified local flush of the current editor JSON', async () => {
     const flushVerified = vi.fn(async () => true);
     const source: MarkdownImportSourceQuiescence = {

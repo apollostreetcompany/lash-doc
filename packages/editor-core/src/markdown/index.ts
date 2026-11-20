@@ -1563,8 +1563,12 @@ const sanitizeNodeForFile = (
         ((typeof attrs.cellType === 'string' && attrs.cellType !== 'text') ||
           attrs.value ||
           (Array.isArray(attrs.options) && attrs.options.length));
-      if (sharePicker || legacyCellAttributes) {
-        preflight.warnings.add('Status/select table-cell semantics are exported as plain text.');
+      if (sharePicker) {
+        preflight.warnings.add('Status and select cells are copied as their displayed labels.');
+      } else if (legacyCellAttributes) {
+        preflight.warnings.add(
+          'Table controls become plain text. This download includes stored cell text and values, including any hidden in the editor.',
+        );
       }
       // Check the source children even when the picker hides them from readers.
       let content = sanitizeChildren('tableCell');

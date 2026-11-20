@@ -751,7 +751,7 @@ Plain text with **bold text**.
       'Image sizing is omitted from Markdown.',
       'Merged table-cell spans are flattened in Markdown.',
       'Table-cell column widths are omitted from Markdown.',
-      'Status/select table-cell semantics are exported as plain text.',
+      'Table controls become plain text. This download includes stored cell text and values, including any hidden in the editor.',
       'Table cells with multiple blocks were flattened into a single line because Markdown tables cannot represent multi-block cells.',
       'First-row table cells are promoted to headers in Markdown.',
       'Underline formatting is exported as emphasis in Markdown.',

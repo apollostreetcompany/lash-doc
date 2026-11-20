@@ -377,6 +377,14 @@
   line-height: 1.6;
 }
 
+.lash-markdown-transfer-body > p + p {
+  margin-top: var(--space-3);
+}
+
+.lash-markdown-filename {
+  overflow-wrap: anywhere;
+}
+
 .lash-markdown-transfer-body section {
   padding-top: 22px;
 }
