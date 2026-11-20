@@ -1,9 +1,11 @@
 /** @vitest-environment jsdom */
 
 import { createLashEditorExtensions, selectTableCells } from '@lash/editor-core';
+import { createDocumentId } from '@lash/types';
 import { Editor } from '@tiptap/core';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { AIPanel } from '../../../../apps/web/components/editor/panels/AIPanel';
 import { SelectionActions } from '../../../../apps/web/components/editor/SelectionActions';
 import * as React from '../../../../apps/web/node_modules/react';
 import { createRoot, type Root } from '../../../../apps/web/node_modules/react-dom/client';
@@ -54,11 +56,13 @@ afterEach(async () => {
   Reflect.deleteProperty(Range.prototype, 'getBoundingClientRect');
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
+  vi.useRealTimers();
 });
 
 async function mountActions(
   editable = false,
   content = '<p>First line</p><p><strong>Second line</strong></p>',
+  panelOpen?: boolean,
 ) {
   editor = new Editor({
     element: editorHost,
@@ -68,10 +72,28 @@ async function mountActions(
   });
   const onComment = vi.fn();
   const onRevise = vi.fn();
-  await React.act(async () =>
-    root.render(React.createElement(SelectionActions, { editor, onComment, onRevise })),
-  );
-  return { onComment, onRevise };
+  const renderPanel = async (open?: boolean) =>
+    React.act(async () =>
+      root.render(
+        React.createElement(
+          React.Fragment,
+          null,
+          React.createElement(SelectionActions, { editor, onComment, onRevise }),
+          open !== undefined &&
+            React.createElement(AIPanel, {
+              editor,
+              docId: createDocumentId('writing-model-readiness'),
+              baseVersion: 'base-version',
+              currentText: editor.getText(),
+              schemaVersion: '1',
+              open,
+              onApplyPatch: async () => ({ ok: true as const }),
+            }),
+        ),
+      ),
+    );
+  await renderPanel(panelOpen);
+  return { onComment, onRevise, renderPanel };
 }
 
 async function select(start: Node, from: number, end: Node, to: number) {
@@ -88,6 +110,98 @@ async function select(start: Node, from: number, end: Node, to: number) {
 function commentButton() {
   return [...paper.querySelectorAll('button')].find((button) => button.textContent === 'Comment');
 }
+
+describe('shared writing model readiness', () => {
+  async function mountWithSelectedText(panelOpen = true) {
+    vi.useFakeTimers();
+    vi.stubGlobal('matchMedia', (query: string) => ({
+      matches: query.includes('pointer: fine'),
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+    }));
+    const { renderPanel } = await mountActions(true, '<p>First line</p>', panelOpen);
+    await React.act(async () => editor.commands.setTextSelection({ from: 1, to: 6 }));
+    const text = editor.view.dom.querySelector('p')!.firstChild!;
+    await select(text, 0, text, 5);
+    return renderPanel;
+  }
+
+  function improveButton() {
+    return paper.querySelector<HTMLButtonElement>('[data-testid="ai-improve-button"]');
+  }
+
+  it('recovers in the open panel and selection toolbar when the browser responds past the deadline', async () => {
+    let finishProbe!: (result: string) => void;
+    const pending = new Promise<string>((resolve) => {
+      finishProbe = resolve;
+    });
+    const availability = vi.fn(() => pending);
+    const create = vi.fn();
+    vi.stubGlobal('LanguageModel', { availability, create });
+    await mountWithSelectedText();
+
+    await React.act(async () => vi.advanceTimersByTimeAsync(8000));
+    expect(paper.textContent).toContain('on-device model didn’t respond');
+    expect(paper.textContent).not.toContain('Revise selection');
+    expect(improveButton()).toBeNull();
+
+    await React.act(async () => finishProbe('available'));
+    expect(paper.textContent).toContain('Revise selection');
+    expect(paper.textContent).not.toContain('Check again');
+    expect(improveButton()?.disabled).toBe(false);
+    expect(availability).toHaveBeenCalledOnce();
+    expect(create).not.toHaveBeenCalled();
+  });
+
+  it('checks again for both surfaces and ignores results from the older check', async () => {
+    let finishFirst!: (result: string) => void;
+    let finishRetry!: (result: string) => void;
+    const first = new Promise<string>((resolve) => {
+      finishFirst = resolve;
+    });
+    const retry = new Promise<string>((resolve) => {
+      finishRetry = resolve;
+    });
+    const availability = vi.fn(() => first);
+    vi.stubGlobal('LanguageModel', { availability });
+    await mountWithSelectedText();
+
+    await React.act(async () => vi.advanceTimersByTimeAsync(8000));
+    const checkAgain = [...paper.querySelectorAll('button')].find(
+      (button) => button.textContent === 'Check again',
+    );
+    expect(checkAgain).toBeDefined();
+    availability.mockImplementation(() => retry);
+    await React.act(async () => checkAgain?.click());
+    expect(paper.textContent).toContain('Checking for an on-device model');
+
+    await React.act(async () => finishFirst('available'));
+    expect(paper.textContent).toContain('Checking for an on-device model');
+    expect(paper.textContent).not.toContain('Revise selection');
+    expect(improveButton()).toBeNull();
+
+    await React.act(async () => finishRetry('downloadable'));
+    expect(paper.textContent).toContain('Revise selection');
+    expect(improveButton()?.disabled).toBe(false);
+    expect(availability).toHaveBeenCalledTimes(2);
+  });
+
+  it('rechecks a failed toolbar probe when the writer opens the panel', async () => {
+    const availability = vi.fn<[], Promise<string>>();
+    availability.mockRejectedValueOnce(new Error('Browser unavailable'));
+    availability.mockResolvedValueOnce('available');
+    vi.stubGlobal('LanguageModel', { availability });
+    const renderPanel = await mountWithSelectedText(false);
+    expect(paper.textContent).not.toContain('Revise selection');
+    expect(availability).toHaveBeenCalledOnce();
+
+    await renderPanel(true);
+
+    expect(paper.textContent).toContain('Revise selection');
+    expect(improveButton()?.disabled).toBe(false);
+    expect(availability).toHaveBeenCalledTimes(2);
+  });
+});
 
 it('requires fresh model availability when revision becomes eligible again', async () => {
   vi.stubGlobal('matchMedia', (query: string) => ({

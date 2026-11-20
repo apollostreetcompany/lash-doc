@@ -1,3 +1,5 @@
+import { useSyncExternalStore } from 'react';
+
 export const MAX_AI_SELECTION_LENGTH = 1200;
 export const MAX_AI_QUESTION_LENGTH = 400;
 export const MAX_AI_REVISION_LENGTH = 2400;
@@ -5,7 +7,7 @@ const MAX_CONTEXT_LENGTH = 350;
 const MODEL_AVAILABILITY_TIMEOUT_MS = 8000;
 
 type BrowserModelAvailability = 'available' | 'downloadable' | 'downloading' | 'unavailable';
-export type WritingModelAvailability = BrowserModelAvailability | 'timed-out';
+type WritingModelAvailability = BrowserModelAvailability | 'checking' | 'timed-out';
 
 interface LanguageModelSession {
   prompt(
@@ -28,26 +30,87 @@ function getLanguageModel(): BrowserLanguageModel | undefined {
   return (globalThis as typeof globalThis & { LanguageModel?: BrowserLanguageModel }).LanguageModel;
 }
 
-export async function getWritingModelAvailability(): Promise<WritingModelAvailability> {
-  let timer: ReturnType<typeof setTimeout> | undefined;
+async function readWritingModelAvailability(): Promise<BrowserModelAvailability> {
   try {
-    const model = getLanguageModel();
-    if (!model) return 'unavailable';
-    const deadline = new Promise<'timed-out'>((resolve) => {
-      timer = setTimeout(() => resolve('timed-out'), MODEL_AVAILABILITY_TIMEOUT_MS);
-    });
-    const availability = await Promise.race([model.availability(), deadline]);
-    return availability === 'available' ||
-      availability === 'downloadable' ||
-      availability === 'downloading' ||
-      availability === 'timed-out'
-      ? availability
-      : 'unavailable';
+    const result = await getLanguageModel()?.availability();
+    return canUseWritingModel(result) ? result : 'unavailable';
   } catch {
     return 'unavailable';
-  } finally {
-    clearTimeout(timer);
   }
+}
+
+export function canUseWritingModel(
+  result: WritingModelAvailability | undefined,
+): result is 'available' | 'downloadable' | 'downloading' {
+  return result === 'available' || result === 'downloadable' || result === 'downloading';
+}
+
+let availability: WritingModelAvailability = 'checking';
+let activeCheck: { timer: ReturnType<typeof setTimeout> } | undefined;
+const listeners = new Set<() => void>();
+
+function setAvailability(next: WritingModelAvailability) {
+  if (availability === next) return;
+  availability = next;
+  for (const listener of listeners) listener();
+}
+
+function clearAvailabilityCheck() {
+  clearTimeout(activeCheck?.timer);
+  activeCheck = undefined;
+}
+
+function startAvailabilityCheck(initialAvailability: WritingModelAvailability) {
+  clearAvailabilityCheck();
+  const check = {
+    // Give the writer a way to retry without discarding a late browser response.
+    timer: setTimeout(() => setAvailability('timed-out'), MODEL_AVAILABILITY_TIMEOUT_MS),
+  };
+  activeCheck = check;
+  setAvailability(initialAvailability);
+  void readWritingModelAvailability().then((result) => {
+    if (activeCheck !== check) return;
+    clearAvailabilityCheck();
+    setAvailability(result);
+  });
+}
+
+export function checkWritingModelAvailability() {
+  startAvailabilityCheck('checking');
+}
+
+export function markWritingModelAvailable() {
+  clearAvailabilityCheck();
+  setAvailability('available');
+}
+
+function subscribeToAvailability(listener: () => void, refreshOnSubscribe = false) {
+  listeners.add(listener);
+  if (!activeCheck && (listeners.size === 1 || refreshOnSubscribe)) {
+    // Reopening the panel can recover from a failed check, but an ongoing check is shared.
+    const known =
+      refreshOnSubscribe && canUseWritingModel(availability) ? availability : 'checking';
+    startAvailabilityCheck(known);
+  }
+  return () => {
+    listeners.delete(listener);
+    if (listeners.size === 0) clearAvailabilityCheck();
+  };
+}
+
+const getInitialAvailability = () => 'checking' as const;
+const getAvailability = () => (listeners.size ? availability : getInitialAvailability());
+const subscribeToNothing = () => () => {};
+const subscribeAndRefreshAvailability = (listener: () => void) =>
+  subscribeToAvailability(listener, true);
+
+export function useWritingModelAvailability(enabled: boolean, { refreshOnSubscribe = false } = {}) {
+  const subscribe = refreshOnSubscribe ? subscribeAndRefreshAvailability : subscribeToAvailability;
+  return useSyncExternalStore(
+    enabled ? subscribe : subscribeToNothing,
+    enabled ? getAvailability : getInitialAvailability,
+    getInitialAvailability,
+  );
 }
 
 interface RequestContext {
