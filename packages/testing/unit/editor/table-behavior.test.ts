@@ -147,14 +147,31 @@ describe('Table behavior', () => {
     }
   });
 
-  it('retains an open cell’s option buttons through a value change and closes on conversion to text', () => {
+  it('mounts picker controls only for typed cells and preserves them through a value change', () => {
     const editor = createEditor();
     try {
-      ensureTable(editor, 2, 2);
+      ensureTable(editor, 2, 3);
+      const table = editor.view.dom.querySelector('table')!;
+      const cells = [...table.querySelectorAll('td')];
+      const pickerChrome = () =>
+        table.querySelectorAll('.lash-table-cell-control, .lash-table-cell-menu');
+      expect(cells).toHaveLength(6);
+      expect(
+        cells.every(
+          (cell) => cell.children.length === 1 && cell.firstElementChild?.tagName === 'P',
+        ),
+      ).toBe(true);
+      expect(pickerChrome()).toHaveLength(0);
       selectCell(editor, 0, 1);
+      lashCommands.setTableCellValue(editor, 'Writer’s notes');
+      const textCell = editor.view.dom.querySelectorAll('td')[1];
+      expect(textCell.querySelector(':scope > p')?.textContent).toBe('Writer’s notes');
       lashCommands.setTableCellType(editor, 'status');
       const cell = editor.view.dom.querySelectorAll('td')[1];
+      expect(cell).not.toBe(textCell);
+      expect(pickerChrome()).toHaveLength(2);
       expect(cell.dataset.cellType).toBe('status');
+      expect(getCellText(editor, 0, 1)).toBe('Writer’s notes');
       const control = cell.querySelector<HTMLButtonElement>('.lash-table-cell-control')!;
       const option = () => cell.querySelector('.lash-table-cell-menu-option');
       control.click();
@@ -166,7 +183,13 @@ describe('Table behavior', () => {
       expect(option()).toBe(firstOption);
 
       lashCommands.setTableCellType(editor, 'text');
-      expect(cell.dataset.cellType).toBe('text');
+      const restoredCell = editor.view.dom.querySelectorAll('td')[1];
+      expect(restoredCell).not.toBe(cell);
+      expect(restoredCell.dataset.cellType).toBe('text');
+      expect(restoredCell.querySelector(':scope > p')?.textContent).toBe(
+        DEFAULT_STATUS_CELL_OPTIONS[2],
+      );
+      expect(pickerChrome()).toHaveLength(0);
       expect(control.getAttribute('aria-expanded')).toBe('false');
       expect(cell.querySelector<HTMLUListElement>('.lash-table-cell-menu')?.hidden).toBe(true);
     } finally {

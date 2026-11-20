@@ -109,7 +109,33 @@ type NodeViewInstance = {
   destroy: () => void;
 };
 
-const createCellNodeView = (
+const createTextCellNodeView = ({
+  node: initialNode,
+  HTMLAttributes,
+}: NodeViewRendererProps): Pick<NodeViewInstance, 'dom' | 'contentDOM' | 'update'> => {
+  const dom = document.createElement('td');
+  let node = initialNode;
+  const syncAttributes = (target: ProseMirrorNode) => {
+    applyBaseAttributes(dom, HTMLAttributes, target);
+    dom.dataset.cellType = 'text';
+    dom.dataset.cellValue = typeof target.attrs.value === 'string' ? target.attrs.value : '';
+    delete dom.dataset.cellOptions;
+  };
+  syncAttributes(node);
+  return {
+    dom,
+    contentDOM: dom,
+    update(updatedNode) {
+      if (updatedNode.type !== node.type || sanitizeCellType(updatedNode.attrs.cellType) !== 'text')
+        return false;
+      if (!node.sameMarkup(updatedNode)) syncAttributes(updatedNode);
+      node = updatedNode;
+      return true;
+    },
+  };
+};
+
+const createPickerCellNodeView = (
   props: NodeViewRendererProps,
   defaultStatusOptions: string[],
   defaultSelectOptions: string[],
@@ -128,6 +154,8 @@ const createCellNodeView = (
 
   const contentDOM = document.createElement('div');
   contentDOM.className = 'lash-table-cell-content';
+  contentDOM.dataset.hiddenContent = 'true';
+  contentDOM.style.display = 'none';
   wrapper.append(contentDOM);
 
   const control = document.createElement('button');
@@ -138,7 +166,7 @@ const createCellNodeView = (
   control.dataset.controlId = `control-${cellId}`;
   control.setAttribute('aria-haspopup', 'listbox');
   control.setAttribute('aria-expanded', 'false');
-  control.tabIndex = -1;
+  control.tabIndex = 0;
   wrapper.append(control);
 
   const menu = document.createElement('ul');
@@ -193,20 +221,15 @@ const createCellNodeView = (
     wrapper.dataset.cellType = cellType;
     wrapper.classList.toggle('lash-table-cell--status', cellType === 'status');
     wrapper.classList.toggle('lash-table-cell--select', cellType === 'select');
-    wrapper.classList.toggle('lash-table-cell--text', cellType === 'text');
     const providedOptions = Array.isArray(attrs.options)
       ? attrs.options.filter((item) => typeof item === 'string')
       : [];
     const fallbackOptions =
-      cellType === 'status'
-        ? providedOptions.length
-          ? providedOptions
-          : defaultStatusOptions
-        : cellType === 'select'
-          ? providedOptions.length
-            ? providedOptions
-            : defaultSelectOptions
-          : [];
+      providedOptions.length > 0
+        ? providedOptions
+        : cellType === 'status'
+          ? defaultStatusOptions
+          : defaultSelectOptions;
     const optionsChanged =
       currentOptions.length !== fallbackOptions.length ||
       currentOptions.some((option, index) => option !== fallbackOptions[index]);
@@ -223,24 +246,10 @@ const createCellNodeView = (
     }
 
     const rawValue = typeof attrs.value === 'string' ? attrs.value : '';
-    const displayValue =
-      cellType === 'text'
-        ? rawValue
-        : currentOptions.includes(rawValue)
-          ? rawValue
-          : (currentOptions[0] ?? '');
+    const displayValue = currentOptions.includes(rawValue) ? rawValue : (currentOptions[0] ?? '');
     dom.dataset.cellValue = displayValue;
     wrapper.dataset.cellValue = displayValue;
     control.textContent = displayValue;
-    control.hidden = cellType === 'text';
-    control.tabIndex = cellType === 'text' ? -1 : 0;
-    if (cellType !== 'text') {
-      contentDOM.setAttribute('data-hidden-content', 'true');
-      contentDOM.style.display = 'none';
-    } else {
-      contentDOM.removeAttribute('data-hidden-content');
-      contentDOM.style.display = '';
-    }
   };
 
   const handleToggleRequest = () => {
@@ -327,7 +336,10 @@ const createCellNodeView = (
       cleanupOptionListeners();
     },
     update(updatedNode: ProseMirrorNode) {
-      if (updatedNode.type.name !== node.type.name) {
+      if (
+        updatedNode.type !== node.type ||
+        sanitizeCellType(updatedNode.attrs.cellType) === 'text'
+      ) {
         return false;
       }
       const attrsChanged = !node.sameMarkup(updatedNode);
@@ -843,7 +855,9 @@ const LashTableCell = BaseTableCellExtension.extend<{ table: LashTableOptions }>
     const defaultStatusOptions = tableOptions.defaultStatusOptions ?? cloneDefaultStatusOptions();
     const defaultSelectOptions = tableOptions.defaultSelectOptions ?? cloneDefaultSelectOptions();
     return (props) =>
-      createCellNodeView(props, [...defaultStatusOptions], [...defaultSelectOptions]);
+      sanitizeCellType(props.node.attrs.cellType) === 'text'
+        ? createTextCellNodeView(props)
+        : createPickerCellNodeView(props, [...defaultStatusOptions], [...defaultSelectOptions]);
   },
 });
 
