@@ -1,7 +1,7 @@
 /** @vitest-environment jsdom */
 
 import { createLashEditorExtensions } from '@lash/editor-core';
-import { createDocumentId, type HistoryEntry } from '@lash/types';
+import { createDocumentId, type DiffJSON, type HistoryEntry } from '@lash/types';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
@@ -65,6 +65,15 @@ describe('reading a local History version', () => {
     if (!element) throw new Error(`Missing ${name} button`);
     return element;
   };
+
+  const baselineField = () => host.querySelector<HTMLSelectElement>('select');
+  const chooseBaseline = (entryId: string) =>
+    React.act(async () => {
+      const field = baselineField();
+      if (!field) throw new Error('Missing Compare with field');
+      field.value = entryId;
+      field.dispatchEvent(new Event('change', { bubbles: true }));
+    });
 
   beforeEach(() => {
     vi.stubGlobal('React', React);
@@ -206,6 +215,185 @@ describe('reading a local History version', () => {
     } finally {
       documentOpener.remove();
     }
+  });
+
+  it('compares saved versions and announces text and formatting changes without changing the reader target', async () => {
+    const loadVersion = vi.fn(async () => ({ text: 'Destination text' }));
+    const longChange = 'A long deleted passage. '.repeat(100);
+    const loadDiff = vi.fn(
+      async (from: string, to: string): Promise<DiffJSON> => ({
+        from,
+        to,
+        spans: [
+          { id: 'text', kind: 'inserted', from: 0, to: 4, text: 'note' },
+          { id: 'long', kind: 'deleted', from: 4, to: longChange.length + 4, text: longChange },
+          {
+            id: 'format',
+            kind: 'attrChanged',
+            from: 0,
+            to: 4,
+            nodeId: 'document',
+            before: {},
+            after: {},
+          },
+        ],
+      }),
+    );
+    await render({
+      entries: [entry(1), { ...entry(2), intent: 'suggest' }, entry(3), entry(4)],
+      selectedEntryId: 'entry-3',
+      loadDiff,
+      loadVersion,
+    });
+    expect(loadDiff).toHaveBeenLastCalledWith('version-2', 'version-3');
+    expect(Array.from(baselineField()?.options ?? [], (option) => option.text)).toEqual([
+      'Previous version',
+      'Version 1',
+      'Version 4',
+    ]);
+    await chooseBaseline('entry-1');
+    expect(loadDiff).toHaveBeenLastCalledWith('version-1', 'version-3');
+    const diff = host.querySelector('[data-testid="history-diff"]');
+    expect(diff?.getAttribute('aria-label')).toBe('Version diff, Version 1 to Version 3');
+    expect(diff?.previousElementSibling?.textContent).toBe('Formatting or structure changed.');
+    expect(diff?.getAttribute('tabindex')).toBe('0');
+    expect(diff?.querySelector('del')?.textContent).toBe(longChange);
+    const summary = host.querySelector('[data-testid="history-diff-announcement"]');
+    expect(summary?.getAttribute('aria-live')).toBe('polite');
+    expect(summary?.textContent).toMatch(/^Formatting or structure changed\. .*inserted "note"/);
+    expect(summary?.textContent).toContain('…');
+    expect(summary?.textContent?.length).toBeLessThan(200);
+    await React.act(async () => button('Read version').click());
+    expect(loadVersion).toHaveBeenLastCalledWith('version-3');
+    expect(host.querySelector('dialog h2')?.textContent).toBe('Version 3');
+  });
+
+  it('keeps a pinned pair on unrelated saves, retires superseded results, and resets beyond the visible scope', async () => {
+    let finish!: (result: DiffJSON) => void;
+    const pending = new Promise<DiffJSON>((resolve) => {
+      finish = resolve;
+    });
+    const loadDiff = vi.fn(
+      async (from: string, to: string): Promise<DiffJSON> =>
+        from === 'version-1' ? pending : { from, to, spans: [] },
+    );
+    const entries = [entry(1), entry(2), entry(3), entry(4)];
+    const onSelect = vi.fn();
+    const options = { selectedEntryId: 'entry-4', entries, loadDiff, onSelect };
+    await render({ ...options, selectedEntryId: null });
+    await chooseBaseline('entry-1');
+    expect(onSelect.mock.calls).toEqual([['entry-4']]);
+    await render(options);
+    await chooseBaseline('entry-2');
+    await React.act(async () =>
+      finish({
+        from: 'version-1',
+        to: 'version-4',
+        spans: [{ id: 'old', kind: 'inserted', from: 0, to: 8, text: 'old diff' }],
+      }),
+    );
+    const diff = host.querySelector('[data-testid="history-diff"]');
+    expect(diff?.getAttribute('aria-label')).toBe('Version diff, Version 2 to Version 4');
+    expect(diff?.textContent).toBe('No textual changes.');
+    await render({ ...options, entries: [...entries, entry(5)] });
+    const selectedRow = host.querySelector<HTMLButtonElement>(
+      '[data-testid="history-version"][aria-pressed="true"]',
+    );
+    await React.act(async () => selectedRow?.click());
+    expect(onSelect.mock.calls).toEqual([['entry-4'], ['entry-4']]);
+    expect(baselineField()?.value).toBe('entry-2');
+    expect(loadDiff.mock.calls).toEqual([
+      ['version-3', 'version-4'],
+      ['version-1', 'version-4'],
+      ['version-2', 'version-4'],
+    ]);
+
+    await render({ ...options, authorFilter: 'writer' });
+    expect(baselineField()?.value).toBe('');
+    await chooseBaseline('entry-2');
+    await render({ ...options, authorFilter: 'writer', open: false });
+    await render({ ...options, authorFilter: 'writer' });
+    expect(baselineField()?.value).toBe('');
+    expect(loadDiff).toHaveBeenLastCalledWith('version-3', 'version-4');
+  });
+
+  it('can restore the selected saved body during and after a failed optional comparison', async () => {
+    let decline!: (error: Error) => void;
+    const pending = new Promise<DiffJSON>((_, reject) => {
+      decline = reject;
+    });
+    const selected: HistoryEntry = {
+      ...entry(3),
+      ops: [{ op: 'pm_step', step: { type: 'lash_patch_body_v1', changes: [] } }],
+    };
+    const onRestore = vi.fn();
+    await render({
+      editor: {} as NonNullable<HistoryPanelProps['editor']>,
+      entries: [entry(1), entry(2), selected],
+      selectedEntryId: selected.id,
+      canRestore: true,
+      loadDiff: async (from, to) => (from === 'version-1' ? pending : { from, to, spans: [] }),
+      onRestore,
+    });
+    await chooseBaseline('entry-1');
+    expect(host.textContent).toContain('Comparing versions');
+    const restore = button('Restore');
+    expect(restore.disabled).toBe(false);
+    const descriptionId = restore.getAttribute('aria-describedby');
+    expect(baselineField()?.getAttribute('aria-describedby')).toBe(descriptionId);
+    expect(document.getElementById(descriptionId ?? '')?.textContent).toBe('Version 3');
+
+    await React.act(async () => decline(new Error('Comparison read failed')));
+    expect(host.textContent).toContain('This version comparison is unavailable.');
+    expect(button('Restore')).toBe(restore);
+    await React.act(async () => restore.click());
+    expect(onRestore.mock.calls).toEqual([[selected]]);
+  });
+
+  it('rechecks same-hash restores and retires earlier replies when choosing a different saved row', async () => {
+    const result = (text: string): DiffJSON => ({
+      from: 'version-1',
+      to: 'version-2',
+      spans: [
+        {
+          id: 'text',
+          kind: 'inserted',
+          from: 0,
+          to: text.length,
+          text,
+          authorId: 'writer',
+          intent: 'edit',
+        },
+      ],
+    });
+    let finishEarlier!: (diff: DiffJSON) => void;
+    const earlier = new Promise<DiffJSON>((resolve) => {
+      finishEarlier = resolve;
+    });
+    const loadDiff = vi
+      .fn<Parameters<HistoryPanelProps['loadDiff']>, Promise<DiffJSON>>()
+      .mockResolvedValueOnce(result('first comparison'))
+      .mockReturnValueOnce(earlier)
+      .mockResolvedValueOnce(result('selected comparison'));
+    const insertion = () => host.querySelector('[data-testid="history-diff-insert"]');
+    const options = { selectedEntryId: 'entry-2', loadDiff };
+    await render(options);
+    expect(insertion()?.getAttribute('data-author-id')).toBe('writer');
+
+    await render({
+      ...options,
+      entries: [entry(1), entry(2), { ...entry(3), resultSha: 'version-1' }],
+    });
+    expect(insertion()).toBeNull();
+    await chooseBaseline('entry-3');
+    await React.act(async () => finishEarlier(result('superseded comparison')));
+    expect(loadDiff.mock.calls).toEqual(
+      Array.from({ length: 3 }, () => ['version-1', 'version-2']),
+    );
+    expect(insertion()?.textContent).toBe('selected comparison');
+    expect(insertion()?.getAttribute('aria-label')).toBe('Inserted text: selected comparison');
+    expect(insertion()?.getAttribute('data-author-id')).toBe('');
+    expect(insertion()?.hasAttribute('title')).toBe(false);
   });
 
   it('reads the full formatted body without fetching or exposing stored reference attributes', async () => {
