@@ -27,6 +27,7 @@ import {
   type UnchangedSpan,
 } from '@lash/types';
 
+import { mixedBodyFormattingChanged, textDiffEdges } from './bodyDiff';
 import { applyBodyPatch, createBodyPatch } from './bodyPatch';
 import {
   HISTORY_CANONICAL_VERSION,
@@ -997,7 +998,7 @@ export const createHistoryStore = (config: CreateHistoryStoreConfig = {}): Histo
         toSha,
         from === undefined ? undefined : { sha: fromSha, doc: from },
       );
-      return diffStates(fromSha, toSha, from, to, state.entries);
+      return diffStates(fromSha, toSha, from, to, state.entries, state.baseSha);
     },
     async restore(docId, targetSha, actor, audit, options) {
       const preparedDocId = docId;
@@ -1060,20 +1061,17 @@ type DiffSpanInput =
 const spanId = (span: DiffSpanInput, index: number): string =>
   `span:${index}:${canonicalize(span)}`;
 
-const textOf = (doc: unknown): string => toHistoryState(doc, true).text;
-
-const materializeVersions = (entries: HistoryEntry[], baseline: HistoryDocumentState): Map<string, unknown> => {
+const materializeVersions = (entries: HistoryEntry[], baseline: HistoryDocumentState) => {
   const states = new Map<string, unknown>();
   let state: unknown = cloneJson(baseline);
   const sorted = [...entries].sort((a, b) => a.seq - b.seq);
-  if (sorted[0]) {
-    states.set(sorted[0].parentSha, cloneJson(state));
-  }
+  const baseSha = sorted[0]?.parentSha;
+  if (baseSha !== undefined) states.set(baseSha, cloneJson(state));
   for (const entry of sorted) {
     state = replayHistoryOps(state, entry.ops);
     states.set(entry.resultSha, cloneJson(state));
   }
-  return states;
+  return { states, baseSha };
 };
 
 export const computeDiff = (
@@ -1082,9 +1080,30 @@ export const computeDiff = (
   entries: HistoryEntry[],
   baseline: HistoryDocumentState = EMPTY_HISTORY_DOC,
 ): DiffJSON => {
-  const states = materializeVersions(entries, baseline);
-  return diffStates(fromSha, toSha, states.get(fromSha), states.get(toSha), entries);
+  const { states, baseSha } = materializeVersions(entries, baseline);
+  return diffStates(fromSha, toSha, states.get(fromSha), states.get(toSha), entries, baseSha);
 };
+
+function uniquelyAdjacentEdit(
+  fromSha: string,
+  toSha: string,
+  entries: readonly HistoryEntry[],
+  baseSha: string | undefined,
+): HistoryEntry | undefined {
+  // The initial baseline is also a version when a later restore reuses its hash.
+  let fromCount = Number(fromSha === baseSha);
+  let toCount = Number(toSha === baseSha);
+  let target: HistoryEntry | undefined;
+  for (const entry of entries) {
+    if (entry.resultSha === fromSha) fromCount += 1;
+    if (entry.resultSha === toSha) {
+      target = entry;
+      toCount += 1;
+    }
+    if (fromCount > 1 || toCount > 1) return undefined;
+  }
+  return fromCount === 1 && toCount === 1 && target?.parentSha === fromSha ? target : undefined;
+}
 
 const diffStates = (
   fromSha: string,
@@ -1092,30 +1111,24 @@ const diffStates = (
   fromDoc: unknown,
   toDoc: unknown,
   entries: readonly HistoryEntry[],
+  baseSha: string | undefined,
 ): DiffJSON => {
   if (fromDoc === undefined || toDoc === undefined) {
     throw new Error('computeDiff: unknown from/to version');
   }
 
-  const before = textOf(fromDoc);
-  const after = textOf(toDoc);
-  const toEntry = entries.find((entry) => entry.resultSha === toSha);
-  const fromEntry = entries.find((entry) => entry.resultSha === fromSha);
+  const { text: before, body: beforeBody } = toHistoryState(fromDoc, true);
+  const { text: after, body: afterBody } = toHistoryState(toDoc, true);
+  const edit = uniquelyAdjacentEdit(fromSha, toSha, entries, baseSha);
+  const attribution = edit && {
+    entryId: edit.id,
+    authorId: edit.actor.id,
+    actorType: edit.actor.type,
+    intent: edit.intent,
+    ts: edit.ts,
+  };
   const spans: DiffSpan[] = [];
-
-  let prefix = 0;
-  while (prefix < before.length && prefix < after.length && before[prefix] === after[prefix]) {
-    prefix += 1;
-  }
-
-  let suffix = 0;
-  while (
-    suffix < before.length - prefix &&
-    suffix < after.length - prefix &&
-    before[before.length - 1 - suffix] === after[after.length - 1 - suffix]
-  ) {
-    suffix += 1;
-  }
+  const { prefix, suffix } = textDiffEdges(before, after);
 
   const addSpan = (span: DiffSpanInput) => {
     spans.push({ ...span, id: spanId(span, spans.length) } as DiffSpan);
@@ -1132,11 +1145,7 @@ const diffStates = (
       from: prefix,
       to: prefix,
       text: deleted,
-      entryId: fromEntry?.id,
-      authorId: fromEntry?.actor.id,
-      actorType: fromEntry?.actor.type,
-      intent: fromEntry?.intent,
-      ts: fromEntry?.ts,
+      ...attribution,
     });
   }
 
@@ -1147,12 +1156,8 @@ const diffStates = (
       from: prefix,
       to: prefix + inserted.length,
       text: inserted,
-      entryId: toEntry?.id,
-      opIndex: 0,
-      authorId: toEntry?.actor.id,
-      actorType: toEntry?.actor.type,
-      intent: toEntry?.intent,
-      ts: toEntry?.ts,
+      ...attribution,
+      ...(edit ? { opIndex: 0 } : {}),
     });
   }
 
@@ -1160,9 +1165,22 @@ const diffStates = (
     addSpan({ kind: 'unchanged', from: after.length - suffix, to: after.length });
   }
 
-  if (before === after && isRecord(fromDoc) && isRecord(toDoc) && fromDoc.body && toDoc.body &&
-      canonicalize(fromDoc.body) !== canonicalize(toDoc.body)) {
-    addSpan({ kind: 'attrChanged', from: 0, to: after.length, nodeId: 'document', before: {}, after: {} });
+  if (
+    beforeBody &&
+    afterBody &&
+    beforeBody !== afterBody &&
+    (before === after
+      ? canonicalize(beforeBody) !== canonicalize(afterBody)
+      : mixedBodyFormattingChanged(beforeBody, afterBody))
+  ) {
+    addSpan({
+      kind: 'attrChanged',
+      from: 0,
+      to: after.length,
+      nodeId: 'document',
+      before: {},
+      after: {},
+    });
   }
 
   if (!spans.length) {

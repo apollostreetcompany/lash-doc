@@ -3080,6 +3080,36 @@ li[data-type='taskItem'] > div p {
   text-decoration: underline;
 }
 
+.lash-history-panel {
+  --history-compare-control-height: 2rem;
+}
+
+.history-compare-control {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  color: var(--color-text-secondary);
+  font-size: var(--text-meta);
+}
+
+.history-compare-control select {
+  flex: 1;
+  min-width: 0;
+  min-height: var(--history-compare-control-height);
+  padding-inline: var(--space-2);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-paper);
+  color: var(--color-text-primary);
+  font: inherit;
+}
+
+@media (pointer: coarse) {
+  .lash-history-panel {
+    --history-compare-control-height: 2.75rem;
+  }
+}
+
 .history-version-list {
   list-style: none;
   margin: 0;
@@ -3092,6 +3122,16 @@ li[data-type='taskItem'] > div p {
   overscroll-behavior-y: contain;
   scroll-padding-block: var(--space-1);
   scrollbar-gutter: stable;
+}
+
+@media (max-height: 650px), (max-width: 767px) {
+  .lash-history-panel:has(.history-compare-control) .history-version-list {
+    max-height: clamp(
+      4.5rem,
+      calc(23dvh - var(--history-compare-control-height) - var(--space-3)),
+      11rem
+    );
+  }
 }
 
 .history-version-button {
@@ -3172,6 +3212,12 @@ li[data-type='taskItem'] > div p {
   color: var(--color-text-primary);
   max-height: 240px;
   overflow-y: auto;
+}
+
+.history-diff-formatting {
+  margin: 0;
+  color: var(--color-text-secondary);
+  font-size: var(--text-meta);
 }
 
 textarea.history-diff {

@@ -35,10 +35,18 @@ type SuggestionResolutionRecord = {
 type SavedHistorySnapshot = { readonly text: string };
 type LoadSavedHistoryPreview = () => Promise<SavedHistorySnapshot | null>;
 type LoadHistoryDiff = (fromSha: string, toSha: string) => Promise<DiffJSON>;
+type HistoryComparisonChoice = {
+  baselineId: string;
+  destinationId: string;
+  load: LoadHistoryDiff;
+  authorFilter: string | null;
+  timeFilter: HistoryTimeFilter;
+};
 type HistoryComparison = {
   load: LoadHistoryDiff;
   fromSha: string;
   toSha: string;
+  versionKey: string;
   result: { state: 'ready'; diff: DiffJSON } | { state: 'unavailable' };
 };
 
@@ -73,6 +81,7 @@ export interface HistoryPanelProps {
 }
 
 const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000;
+const FORMATTING_CHANGE_NOTICE = 'Formatting or structure changed.';
 
 const matchesTimeFilter = (entry: HistoryEntry, filter: HistoryTimeFilter) => {
   if (!filter) return true;
@@ -97,35 +106,41 @@ const cleanDiffText = (text: string) => text.replace(/\s+/g, ' ').trim() || 'whi
 const isTextDiffSpan = (span: DiffSpan): span is TextDiffSpan =>
   span.kind === 'inserted' || span.kind === 'deleted';
 
-const spanAnnouncement = (span: TextDiffSpan) => {
+const spanAnnouncement = (span: TextDiffSpan, showAttribution: boolean) => {
   const action = span.kind === 'inserted' ? 'Inserted text' : 'Deleted text';
-  const actor = span.authorId ? ` by ${span.authorId}` : '';
-  const intent = span.intent ? ` as ${span.intent}` : '';
+  const actor = showAttribution && span.authorId ? ` by ${span.authorId}` : '';
+  const intent = showAttribution && span.intent ? ` as ${span.intent}` : '';
   return `${action}${actor}${intent}: ${cleanDiffText(span.text)}`;
 };
 
-const diffAnnouncement = (spans: DiffSpan[]) => {
-  const changedSpans = spans.filter(isTextDiffSpan).filter((span) => span.text.length > 0);
-  if (!changedSpans.length) return 'Version diff contains no textual changes.';
-  return `Version diff contains ${changedSpans
-    .map(
-      (span) =>
-        `${span.kind === 'inserted' ? 'inserted' : 'deleted'} "${cleanDiffText(span.text)}"`,
-    )
-    .join('; ')}.`;
+const diffAnnouncement = (changedSpans: TextDiffSpan[], formattingChanged: boolean) => {
+  const textChanges = changedSpans
+    .slice(0, 2)
+    .map((span) => {
+      const excerpt = span.text.match(/^.{1,80}/su)?.[0] ?? '';
+      const more = excerpt.length < span.text.length ? '…' : '';
+      return `${span.kind === 'inserted' ? 'inserted' : 'deleted'} "${cleanDiffText(excerpt)}${more}"`;
+    })
+    .join(' and ');
+  const summary = `Version diff contains ${textChanges || 'no textual changes'}.`;
+  const formattingSummary = formattingChanged ? `${FORMATTING_CHANGE_NOTICE} ` : '';
+  const moreChanges = changedSpans.length > 2 ? ' More changes are in the version diff.' : '';
+  return `${formattingSummary}${summary}${moreChanges}`;
 };
 
-const renderSpan = (span: DiffSpan) => {
-  const title = spanTitle(span) || undefined;
+const renderSpan = (span: DiffSpan, showAttribution: boolean) => {
+  const title = showAttribution ? spanTitle(span) || undefined : undefined;
+  const authorId = (showAttribution && span.authorId) || '';
+  const intent = (showAttribution && span.intent) || '';
   if (span.kind === 'inserted') {
     return (
       <ins
         key={span.id}
         className="history-diff-insert"
         data-testid="history-diff-insert"
-        data-author-id={span.authorId ?? ''}
-        data-intent={span.intent ?? ''}
-        aria-label={spanAnnouncement(span)}
+        data-author-id={authorId}
+        data-intent={intent}
+        aria-label={spanAnnouncement(span, showAttribution)}
         title={title}
       >
         {span.text}
@@ -138,18 +153,16 @@ const renderSpan = (span: DiffSpan) => {
         key={span.id}
         className="history-diff-delete"
         data-testid="history-diff-delete"
-        data-author-id={span.authorId ?? ''}
-        data-intent={span.intent ?? ''}
-        aria-label={spanAnnouncement(span)}
+        data-author-id={authorId}
+        data-intent={intent}
+        aria-label={spanAnnouncement(span, showAttribution)}
         title={title}
       >
         {span.text}
       </del>
     );
   }
-  if (span.kind === 'attrChanged') {
-    return <span key={span.id}>Formatting or structure changed.</span>;
-  }
+  if (span.kind === 'attrChanged') return null;
   return (
     <span key={span.id} className="history-diff-unchanged">
       {''}
@@ -273,6 +286,9 @@ export function HistoryPanel({
   onAcceptSuggestion,
   onRejectSuggestion,
 }: HistoryPanelProps) {
+  const baselineFieldId = useId();
+  const selectedVersionLabelId = useId();
+  const [choice, setChoice] = useState<HistoryComparisonChoice | null>(null);
   const [loaded, setLoaded] = useState<HistoryComparison | null>(null);
   const versionListRef = useRef<HTMLOListElement>(null);
   const selectedVersionRef = useRef<HTMLButtonElement>(null);
@@ -291,8 +307,43 @@ export function HistoryPanel({
   const selectedVersionIndex = requestedIndex < 0 ? visibleEntries.length - 1 : requestedIndex;
   const selectedEntry = visibleEntries[selectedVersionIndex] ?? null;
   const selectedVersionId = selectedEntry?.id;
-  const fromSha = selectedEntry?.parentSha;
+  const baselines =
+    selectedEntry && selectedEntry.intent !== 'suggest'
+      ? visibleEntries.filter(
+          (entry) => entry.id !== selectedVersionId && entry.intent !== 'suggest',
+        )
+      : [];
+  const comparisonBaseline =
+    choice &&
+    choice.destinationId === selectedVersionId &&
+    choice.load === loadDiff &&
+    choice.authorFilter === authorFilter &&
+    choice.timeFilter === timeFilter
+      ? baselines.find((entry) => entry.id === choice.baselineId)
+      : undefined;
+  const fromSha = comparisonBaseline?.resultSha ?? selectedEntry?.parentSha;
   const toSha = selectedEntry?.resultSha;
+  // A restored snapshot can reuse either content hash while referring to a different saved row.
+  const versionKey =
+    fromSha && toSha
+      ? JSON.stringify([
+          selectedVersionId,
+          comparisonBaseline?.id,
+          entries
+            .filter((entry) => entry.resultSha === fromSha || entry.resultSha === toSha)
+            .map((entry) => entry.id),
+        ])
+      : null;
+  const showAttribution =
+    !comparisonBaseline ||
+    (comparisonBaseline.resultSha === selectedEntry?.parentSha &&
+      comparisonBaseline.seq + 1 === selectedEntry.seq);
+
+  useEffect(() => {
+    // Clear retired choices even if the same filter or version is opened again later.
+    if (choice && !comparisonBaseline)
+      setChoice((current) => (current === choice ? null : current));
+  }, [choice, comparisonBaseline]);
 
   useLayoutEffect(() => {
     const list = versionListRef.current;
@@ -309,10 +360,10 @@ export function HistoryPanel({
   }, [selectedVersionId, selectedVersionIndex]);
 
   useEffect(() => {
-    if (!fromSha || !toSha) return;
+    if (!fromSha || !toSha || !versionKey) return;
     let active = true;
     const publish = (result: HistoryComparison['result']) => {
-      if (active) setLoaded({ load: loadDiff, fromSha, toSha, result });
+      if (active) setLoaded({ load: loadDiff, fromSha, toSha, versionKey, result });
     };
     const compare = async () => {
       try {
@@ -325,16 +376,22 @@ export function HistoryPanel({
     return () => {
       active = false;
     };
-  }, [fromSha, loadDiff, toSha]);
+  }, [fromSha, loadDiff, toSha, versionKey]);
   if (!open) return null;
   const authorIds = historyVerified
     ? Array.from(new Set(entries.map((entry) => entry.actor.id))).sort()
     : [];
   const comparison =
-    loaded?.load === loadDiff && loaded.fromSha === fromSha && loaded.toSha === toSha
+    loaded?.load === loadDiff &&
+    loaded.fromSha === fromSha &&
+    loaded.toSha === toSha &&
+    loaded.versionKey === versionKey
       ? loaded.result
       : null;
   const diff = comparison?.state === 'ready' ? comparison.diff : null;
+  const formattingChanged = Boolean(diff?.spans.some((span) => span.kind === 'attrChanged'));
+  const textChanges =
+    diff?.spans.filter(isTextDiffSpan).filter((span) => span.text.length > 0) ?? [];
   const readSelectedVersion = selectedEntry?.intent === 'suggest' ? undefined : loadVersion;
   const canRestoreSelected = selectedEntry ? entryHasHistoryBody(selectedEntry) : false;
   const hasActiveFilters = Boolean(authorFilter || timeFilter);
@@ -445,6 +502,39 @@ export function HistoryPanel({
 
       {previousDraft ? versionReader : null}
 
+      {selectedEntry && baselines.length ? (
+        <div className="history-compare-control">
+          <label htmlFor={baselineFieldId}>Compare with</label>
+          <select
+            id={baselineFieldId}
+            aria-describedby={selectedVersionLabelId}
+            value={comparisonBaseline?.id ?? ''}
+            onChange={(event) => {
+              const baselineId = event.currentTarget.value;
+              if (baselineId && selectedEntryId !== selectedEntry.id) onSelect(selectedEntry.id);
+              setChoice(
+                baselineId
+                  ? {
+                      baselineId,
+                      destinationId: selectedEntry.id,
+                      load: loadDiff,
+                      authorFilter,
+                      timeFilter,
+                    }
+                  : null,
+              );
+            }}
+          >
+            <option value="">Previous version</option>
+            {baselines.map((entry) => (
+              <option key={entry.id} value={entry.id}>
+                Version {entry.seq}
+              </option>
+            ))}
+          </select>
+        </div>
+      ) : null}
+
       {historyVerified ? (
         <div className="history-filter-controls" data-testid="history-filter-controls">
           {authorIds.map((authorId) => (
@@ -521,9 +611,14 @@ export function HistoryPanel({
                   data-testid="history-version"
                   data-selected={selected ? 'true' : 'false'}
                   aria-pressed={selected ? 'true' : 'false'}
-                  onClick={() => onSelect(entry.id)}
+                  onClick={() => {
+                    if (!selected) setChoice(null);
+                    onSelect(entry.id);
+                  }}
                 >
-                  <span>Version {entry.seq}</span>
+                  <span id={selected ? selectedVersionLabelId : undefined}>
+                    Version {entry.seq}
+                  </span>
                   <span>{entry.restoredFromVersion ? 'Restored' : entry.intent}</span>
                 </button>
               </li>
@@ -536,15 +631,17 @@ export function HistoryPanel({
         </p>
       ) : null}
 
-      {historyVerified && selectedEntry && comparison?.state === 'unavailable' ? (
-        <p role="status">This version comparison is unavailable.</p>
-      ) : null}
-
-      {historyVerified && selectedEntry && (diff || readSelectedVersion) ? (
+      {historyVerified && selectedEntry && (diff || readSelectedVersion || comparisonBaseline) ? (
         <div className="history-diff-card">
           <div className="history-diff-meta">
             <span data-testid="history-selected-version">Version {selectedEntry.seq}</span>
-            <span>{selectedEntry.actor.type === 'ai' ? 'AI' : selectedEntry.actor.id}</span>
+            <span>
+              {comparisonBaseline
+                ? `Changes from Version ${comparisonBaseline.seq}`
+                : selectedEntry.actor.type === 'ai'
+                  ? 'AI'
+                  : selectedEntry.actor.id}
+            </span>
           </div>
           {previousDraft ? null : versionReader}
           {selectedEntry.intent === 'suggest' ? (
@@ -556,22 +653,40 @@ export function HistoryPanel({
                   : 'Pending suggestion'}
             </div>
           ) : null}
-          {diff ? (
-            <>
-              <pre
-                className="history-diff"
-                data-testid="history-diff"
-                aria-label="Version diff"
-                aria-describedby={diffDescriptionId}
-                aria-live="polite"
-              >
-                {diff.spans.map(renderSpan)}
-              </pre>
-              <p id={diffDescriptionId} className="sr-only" data-testid="history-diff-announcement">
-                {diffAnnouncement(diff.spans)}
-              </p>
-            </>
+          {formattingChanged ? (
+            <p className="history-diff-formatting">{FORMATTING_CHANGE_NOTICE}</p>
           ) : null}
+          {diff && (textChanges.length || !formattingChanged) ? (
+            <pre
+              className="history-diff"
+              data-testid="history-diff"
+              role="region"
+              tabIndex={0}
+              aria-label={
+                comparisonBaseline
+                  ? `Version diff, Version ${comparisonBaseline.seq} to Version ${selectedEntry.seq}`
+                  : 'Version diff'
+              }
+              aria-describedby={diffDescriptionId}
+            >
+              {comparisonBaseline && !textChanges.length
+                ? 'No textual changes.'
+                : diff.spans.map((span) => renderSpan(span, showAttribution))}
+            </pre>
+          ) : comparisonBaseline && !comparison ? (
+            <p className="history-empty" role="status">
+              Comparing versions…
+            </p>
+          ) : null}
+          <p
+            aria-atomic="true"
+            aria-live="polite"
+            id={diffDescriptionId}
+            className="sr-only"
+            data-testid="history-diff-announcement"
+          >
+            {diff ? diffAnnouncement(textChanges, formattingChanged) : ''}
+          </p>
           <div className="history-diff-actions">
             {diff &&
             selectedEntry.intent === 'suggest' &&
@@ -598,11 +713,12 @@ export function HistoryPanel({
                 </button>
               </>
             ) : null}
-            {diff ? (
+            {diff || comparisonBaseline ? (
               <button
                 type="button"
                 className="history-restore-button"
                 data-testid="history-restore-button"
+                aria-describedby={selectedVersionLabelId}
                 onClick={() => onRestore(selectedEntry)}
                 disabled={!editor || !canRestore || !canRestoreSelected}
               >
@@ -617,6 +733,10 @@ export function HistoryPanel({
             <p role="alert">{legacySuggestionError}</p>
           ) : null}
         </div>
+      ) : null}
+
+      {historyVerified && selectedEntry && comparison?.state === 'unavailable' ? (
+        <p role="status">This version comparison is unavailable.</p>
       ) : null}
 
       {historyVerified && suggestionResolutions.length ? (

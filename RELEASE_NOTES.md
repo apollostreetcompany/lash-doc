@@ -17,9 +17,10 @@ runs in workspaces configured for accounts and collaboration.
   the original.
 - Open **History** and choose **Read previous draft** to see the preceding
   saved draft with its headings, lists and emphasis. **Back to latest** returns
-  to the current text. To inspect a different version, select its row and choose
-  **Read version**. On desktop, pressing Enter on **History** moves keyboard
-  focus into the panel.
+  to the current text. To compare two saved versions of a device draft, select
+  the version you want to inspect and choose the other one under **Compare
+  with**. **Read version** and **Restore** act on the selected timeline row.
+  On desktop, pressing Enter on **History** moves keyboard focus into the panel.
 - The page, title and toolbar are readable as soon as the editor renders. On
   phones, closing History returns focus to its button. Widening the window
   releases the drawer so you can keep writing.
