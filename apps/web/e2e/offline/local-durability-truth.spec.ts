@@ -101,6 +101,7 @@ test.describe('local durability truth on a phone', () => {
   test('mobile Share remains reachable and restores focus after touch or Escape', async ({
     page,
   }, testInfo) => {
+    await page.route('**/api/account/session', (route) => route.fulfill({ status: 401 }));
     await page.goto(route(`bead-43-mobile-truth-${Date.now()}`));
     await expect(documentEditor(page)).toBeVisible();
 
@@ -112,6 +113,12 @@ test.describe('local durability truth on a phone', () => {
     await expect(shareTrigger).toHaveAttribute('aria-expanded', 'true');
     await expect(share).toBeVisible();
     await expect(share).toHaveAttribute('aria-modal', 'true');
+    const signIn = share.getByRole('link', { name: 'Sign in to continue', exact: true });
+    await expect(signIn).toBeInViewport({ ratio: 1 });
+    const signInBox = await signIn.boundingBox();
+    expect(signInBox?.height ?? 0).toBeGreaterThanOrEqual(44);
+    expect(signInBox?.width ?? 0).toBeGreaterThanOrEqual(44);
+    expect(await share.boundingBox()).toEqual({ x: 0, y: 0, width: 375, height: 812 });
     await expect(page.locator('.lash-app')).toHaveAttribute('data-rail-mobile', 'false');
     await expect(page.getByTestId('rail-tab-activity')).toHaveCount(0);
     await expectNoSimulatedCollaboration(page);

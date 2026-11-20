@@ -256,8 +256,7 @@ export class InsightRouter {
     placeId: WritingPlaceId,
     ctx: { signal?: AbortSignal } = {},
   ): Promise<WriteResult> {
-    const place = this.registry.get(placeId);
-    if (!place) {
+    if (!this.registry.has(placeId)) {
       return this.fail(payload, placeId, 'rejected', `unknown writing place "${placeId}"`);
     }
 
@@ -288,8 +287,10 @@ export class InsightRouter {
         continue;
       }
 
-      const verdict = place.accepts(payload);
-      if (verdict !== true) return this.fail(payload, placeId, 'rejected', verdict);
+      const place = this.registry.get(placeId);
+      if (!place) {
+        return this.fail(payload, placeId, 'rejected', `unknown writing place "${placeId}"`);
+      }
 
       let finish!: () => void;
       const completion = new Promise<void>((resolve) => {
@@ -301,6 +302,11 @@ export class InsightRouter {
         // The place supplies its own actionable error when unconfigured.
         let result: WriteResult;
         try {
+          const verdict = place.accepts(payload);
+          if (verdict !== true) return this.fail(payload, placeId, 'rejected', verdict);
+          if (signal?.aborted) {
+            return this.fail(payload, placeId, 'failed', 'The write was cancelled.');
+          }
           result = await place.write(payload, { now: this.now, signal });
         } catch (error) {
           result = this.makeFailure(

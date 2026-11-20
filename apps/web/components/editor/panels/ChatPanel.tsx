@@ -16,7 +16,15 @@ import {
 } from '@lash/doc-chat';
 import type { DocumentId } from '@lash/types';
 import type { Editor } from '@tiptap/core';
-import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  type ReactNode,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 
 import {
   captureChatAnchorRange,
@@ -288,19 +296,34 @@ export function ChatPanel({
   const pendingThreadFocusRef = useRef<string | null>(null);
   const pendingThreadIdRef = useRef<string | null>(null);
   const reviewScope = useRef<{ pending: boolean } | null>(null);
+  const visibleReviewVisit = useRef<object | null>(null);
 
   const setPostError = useCallback((message: string) => {
     setDiscussionAction(message ? { phase: 'failed', message } : { phase: 'idle' });
   }, []);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     const scope = { pending: false };
     reviewScope.current = scope;
     setDiscussionAction({ phase: 'idle' });
     return () => {
-      if (reviewScope.current === scope) reviewScope.current = null;
+      reviewScope.current = null;
+      pendingThreadFocusRef.current = null;
     };
-  }, [actorId, docId, editor, mutationEnabled, open, realtimeStore]);
+  }, [actorId, docId, editor, mutationEnabled, realtimeStore]);
+
+  // Review requests can settle on another tab. Focus and announcements belong to one visit.
+  useLayoutEffect(() => {
+    if (!open) {
+      setDiscussionAction((action) => (action.phase === 'posted' ? { phase: 'idle' } : action));
+      return;
+    }
+    visibleReviewVisit.current = {};
+    return () => {
+      visibleReviewVisit.current = null;
+      pendingThreadFocusRef.current = null;
+    };
+  }, [open]);
 
   const publishThreads = useCallback((nextThreads: LocalThread[]) => {
     threadsRef.current = nextThreads;
@@ -481,13 +504,14 @@ export function ChatPanel({
   );
 
   useEffect(() => {
+    if (!open) return;
     const threadId = pendingThreadFocusRef.current;
     if (!threadId) return;
     const thread = document.getElementById(`chat-thread-${domId(threadId)}`);
     if (!thread) return;
     pendingThreadFocusRef.current = null;
     thread.focus();
-  }, [activeThreadId, threadViews]);
+  }, [activeThreadId, open, threadViews]);
 
   const openThreadDraft = useCallback(
     (range: { from: number; to: number }, exact = false) => {
@@ -667,6 +691,7 @@ export function ChatPanel({
     const draft = getDeliverableDraft();
     if (!draft) return;
     const scope = reviewScope.current;
+    const visit = visibleReviewVisit.current;
     const body = newThreadBody.trim();
     const id =
       pendingThreadIdRef.current ?? (realtimeStore ? crypto.randomUUID() : createLocalId('thread'));
@@ -704,10 +729,12 @@ export function ChatPanel({
         })
       : updateLocalThreads(createLocalThread);
     if (!created || reviewScope.current !== scope) return;
-    pendingThreadFocusRef.current = id;
+    if (visit && visibleReviewVisit.current === visit) {
+      pendingThreadFocusRef.current = id;
+      setDiscussionAction({ phase: 'posted' });
+    }
     setActiveThreadId(id);
     setFilter('all');
-    setDiscussionAction({ phase: 'posted' });
     setNewThreadDraft(null);
     setNewThreadBody('');
     setEmailDraftCopy(null);

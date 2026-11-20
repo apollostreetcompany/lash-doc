@@ -37,13 +37,6 @@ describe('account-owner Share UI contract', () => {
     expect(workspace).toContain('Your document was saved, but Lash could not reconnect to it.');
   });
 
-  it('reports live comment counts to prevent silent adjunct loss', () => {
-    const chat = read('apps/web/components/editor/panels/ChatPanel.tsx');
-
-    expect(chat).toContain('onThreadCountChange?: (count: number) => void');
-    expect(chat).toContain('onThreadCountChange?.(threads.length)');
-  });
-
   it('lets trusted Yjs hydration target the committed remote document identity', () => {
     const workspace = read('apps/web/components/editor/EditorWorkspace.tsx');
 

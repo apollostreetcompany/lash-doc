@@ -12,6 +12,7 @@ import {
   HERMES_UNCONFIGURED,
   PERSEPHONE_UNCONFIGURED,
   type InsightPayload,
+  type WriteResult,
   type WritingPlace,
 } from '@lash/insight-router';
 import { describe, expect, it, vi } from 'vitest';
@@ -131,6 +132,54 @@ describe('InsightRouter routing', () => {
     expect(insert).toHaveBeenCalledTimes(1);
   });
 
+  it('reserves the write before a guard can reenter the same route', async () => {
+    const router = new InsightRouter({ now: fixedClock });
+    const insert = vi.fn(() => 'pos:1');
+    let acceptsCalls = 0;
+    let reentrant: Promise<WriteResult> | undefined;
+    router.register({
+      ...createDocumentInsertPlace(insert),
+      accepts() {
+        if (acceptsCalls++ === 0) reentrant = router.route(payload(), 'doc');
+        return true;
+      },
+    });
+
+    expect(await router.route(payload(), 'doc')).toMatchObject({ ok: true, idempotent: false });
+    expect(await reentrant).toMatchObject({ ok: true, idempotent: true, ref: 'pos:1' });
+    expect(acceptsCalls).toBe(1);
+    expect(insert).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    { failure: 'rejected', throws: false },
+    { failure: 'failed', throws: true },
+  ])('releases the reservation after a $failure guard', async ({ failure, throws }) => {
+    const router = new InsightRouter({ now: fixedClock });
+    const insert = vi.fn(() => 'pos:1');
+    let acceptsCalls = 0;
+    let reentrant: Promise<WriteResult> | undefined;
+    router.register({
+      ...createDocumentInsertPlace(insert),
+      accepts() {
+        if (acceptsCalls++ > 0) return true;
+        reentrant = router.route(payload(), 'doc');
+        if (throws) throw new Error('guard failure');
+        return 'guard failure';
+      },
+    });
+
+    const owner = router.route(payload(), 'doc');
+    await expect(owner).resolves.toMatchObject({
+      ok: false,
+      code: failure,
+      error: 'guard failure',
+    });
+    expect(await reentrant).toMatchObject({ ok: true, idempotent: false, ref: 'pos:1' });
+    expect(insert).toHaveBeenCalledTimes(1);
+    expect(router.history().map(({ result }) => result.ok)).toEqual([false, true]);
+  });
+
   it('shares a pending write only with callers using the same insight and place', async () => {
     let finish!: (ref: string) => void;
     const pending = new Promise<string>((resolve) => {
@@ -189,6 +238,33 @@ describe('InsightRouter routing', () => {
     await expect(next).resolves.toMatchObject({ ok: true, ref: 'retry ref', idempotent: false });
     expect(insert).toHaveBeenCalledTimes(2);
     expect(insert.mock.calls[1][1].signal).toBe(nextController.signal);
+  });
+
+  it('uses the replacement registration when a waiting caller takes over a failed write', async () => {
+    let rejectOwner!: (error: Error) => void;
+    const pending = new Promise<string>((_, reject) => {
+      rejectOwner = reject;
+    });
+    const previous = vi.fn().mockReturnValueOnce(pending).mockReturnValue('previous adapter');
+    const replacement = vi.fn(() => 'replacement adapter');
+    const router = new InsightRouter({ now: fixedClock }).register(
+      createDocumentInsertPlace(previous),
+    );
+
+    const owner = router.route(payload(), 'doc');
+    const waiter = router.route(payload(), 'doc');
+    router.unregister('doc');
+    router.register(createDocumentInsertPlace(replacement));
+    rejectOwner(new Error('original write failed'));
+
+    await expect(owner).resolves.toMatchObject({ ok: false, error: 'original write failed' });
+    await expect(waiter).resolves.toMatchObject({
+      ok: true,
+      idempotent: false,
+      ref: 'replacement adapter',
+    });
+    expect(previous).toHaveBeenCalledTimes(1);
+    expect(replacement).toHaveBeenCalledTimes(1);
   });
 
   it('does not cache failed writes as idempotent successes', async () => {

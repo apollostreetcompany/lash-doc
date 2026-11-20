@@ -33,6 +33,22 @@ for (const input of ['typing', 'pasting'] as const) {
 
     await page.reload();
     await expect(editorFor(page)).toHaveText(reminder + body);
+    if (input === 'typing') {
+      await page.route('**/api/account/session', (route) =>
+        route.fulfill({ status: 204, headers: { 'x-lash-account-status': 'authenticated' } }),
+      );
+      let promotionRequests = 0;
+      await page.route('**/api/documents/*/promote', (route) => {
+        promotionRequests += 1;
+        return route.abort();
+      });
+      await page.getByRole('button', { name: 'Share document', exact: true }).click();
+      const share = page.getByRole('dialog', { name: /^Share “/u });
+      await share.getByRole('button', { name: 'Save to my account', exact: true }).click();
+      await expect(share.getByRole('alert')).toContainText('0 comments and 1 suggestion');
+      expect(promotionRequests).toBe(0);
+      await share.getByRole('button', { name: 'Close sharing', exact: true }).click();
+    }
     await openSuggestions(page);
     await page.getByRole('button', { name: 'Accept suggestion' }).click();
     await expect(page.getByTestId('suggestion-status')).toHaveText('Suggestion accepted');

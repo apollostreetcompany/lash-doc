@@ -3148,6 +3148,20 @@ function ResolvedDocumentWorkspace({
     });
   };
 
+  const firstHistoryPendingForLocalSave = useCallback(() => {
+    if (firstHistoryCheckpointRef.current === 'recorded') return false;
+    if (firstHistoryCheckpointRef.current === 'initially-empty' && !localBodyExpectedRef.current)
+      return true;
+    return undefined;
+  }, []);
+
+  const publishVerifiedLocalBody = useCallback((envelope: LocalBodyEnvelope) => {
+    localBodyExpectedRef.current = localBodyExpectedRevision(envelope);
+    if (envelope.firstHistoryPending) firstHistoryCheckpointRef.current = 'pending';
+    recordSavedLocalHistoryRef.current?.(envelope);
+    setLocalBody((body) => (body.kind === 'ready' && body.notice ? { kind: 'ready' } : body));
+  }, []);
+
   const persistLocalSuggestion = (doc: EditorNode, next: LocalSuggestion[]) => {
     const storage = browserLocalStorage();
     if (!storage) {
@@ -3160,14 +3174,12 @@ function ResolvedDocumentWorkspace({
       suggestions: next,
       divergentHistoryHead: divergentHistoryMarkerRef.current,
       expected: localBodyExpectedRef.current,
-      firstHistoryPending: firstHistoryCheckpointRef.current === 'recorded' ? false : undefined,
+      firstHistoryPending: firstHistoryPendingForLocalSave(),
       validateSchema: validateLocalBodySchema,
     });
-    localBodyExpectedRef.current = localBodyExpectedRevision(envelope);
-    recordSavedLocalHistoryRef.current?.(envelope);
+    publishVerifiedLocalBody(envelope);
     localSuggestionsRef.current = next;
     setLocalSuggestions(next);
-    setLocalBody((body) => (body.kind === 'ready' && body.notice ? { kind: 'ready' } : body));
   };
 
   const localSuggestionError = (error: unknown) => {
@@ -4181,12 +4193,7 @@ function ResolvedDocumentWorkspace({
           savedAt,
           suggestions: localSuggestionsRef.current,
           divergentHistoryHead: divergentHistoryMarkerRef.current,
-          firstHistoryPending:
-            firstHistoryCheckpointRef.current === 'initially-empty' && !localBodyExpectedRef.current
-              ? true
-              : firstHistoryCheckpointRef.current === 'recorded'
-                ? false
-                : undefined,
+          firstHistoryPending: firstHistoryPendingForLocalSave(),
           validateSchema: validateLocalBodySchema,
         });
       } catch (error) {
@@ -4208,13 +4215,17 @@ function ResolvedDocumentWorkspace({
         throw error;
       }
 
-      localBodyExpectedRef.current = localBodyExpectedRevision(envelope);
-      if (envelope.firstHistoryPending) firstHistoryCheckpointRef.current = 'pending';
-      recordSavedLocalHistoryRef.current?.(envelope);
-      setLocalBody((body) => (body.kind === 'ready' && body.notice ? { kind: 'ready' } : body));
+      publishVerifiedLocalBody(envelope);
       updateLocalDocumentIndex(storage);
     },
-    [activeDocumentId, realtimeEnabled, updateLocalDocumentIndex, validateLocalBodySchema],
+    [
+      activeDocumentId,
+      firstHistoryPendingForLocalSave,
+      publishVerifiedLocalBody,
+      realtimeEnabled,
+      updateLocalDocumentIndex,
+      validateLocalBodySchema,
+    ],
   );
 
   const handleKeepRecoveredCopy = useCallback(() => {
