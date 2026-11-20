@@ -86,6 +86,98 @@ describe('reading a local History version', () => {
     vi.unstubAllGlobals();
   });
 
+  it('reads the previous distinct saved draft without selecting or restoring a row', async () => {
+    const loadVersion = vi.fn(async () => ({ text: 'Earlier saved draft' }));
+    const onSelect = vi.fn();
+    const onRestore = vi.fn();
+    await render({
+      entries: [
+        entry(1),
+        entry(2),
+        { ...entry(3), resultSha: 'version-5' },
+        { ...entry(4), intent: 'suggest' },
+        entry(5),
+      ],
+      selectedEntryId: null,
+      verifiedHeadSha: 'version-5',
+      loadVersion,
+      onSelect,
+      onRestore,
+    });
+    const trigger = button('Read previous draft · Version 2');
+    expect(trigger.getAttribute('aria-label')).toBe('Read previous draft, Version 2');
+    expect(host.querySelector('[data-testid="history-selected-version"]')?.textContent).toBe(
+      'Version 5',
+    );
+    expect(loadVersion).not.toHaveBeenCalled();
+
+    await React.act(async () => trigger.click());
+    expect(loadVersion.mock.calls).toEqual([['version-2']]);
+    expect(host.querySelector('dialog h2')?.textContent).toBe('Version 2');
+    expect(host.querySelector('article')?.textContent).toBe('Earlier saved draft');
+    expect(host.querySelector('dialog p')?.textContent).toContain('Formatting is unavailable');
+    await React.act(async () => button('Back to latest').click());
+    expect(document.activeElement).toBe(trigger);
+    expect(onSelect).not.toHaveBeenCalled();
+    expect(onRestore).not.toHaveBeenCalled();
+  });
+
+  it('offers the shortcut only when following a verified unfiltered saved head with a distinct predecessor', async () => {
+    const loadVersion = vi.fn(async () => ({ text: 'Saved prose' }));
+    const options = { selectedEntryId: null, verifiedHeadSha: 'version-2', loadVersion };
+    const shortcut = () => host.querySelector('button[aria-label^="Read previous draft,"]');
+    await render(options);
+    expect(shortcut()).not.toBeNull();
+
+    for (const override of [
+      { selectedEntryId: 'entry-2' },
+      { authorFilter: 'writer' },
+      { timeFilter: 'last-7-days' as const },
+      { verifiedHeadSha: null },
+      { verifiedHeadSha: 'version-1' },
+      { availability: 'capacity-reached' as const },
+      { availability: 'body-history-diverged' as const },
+      { entries: [{ ...entry(1), resultSha: 'version-2' }, entry(2)] },
+      { entries: [{ ...entry(1), intent: 'suggest' as const }, entry(2)] },
+      { entries: [entry(1), { ...entry(2), intent: 'suggest' as const }] },
+      { loadVersion: undefined },
+    ] satisfies Array<Partial<HistoryPanelProps>>) {
+      await render({ ...options, ...override });
+      expect(shortcut()).toBeNull();
+    }
+    await render({ ...options, selectedEntryId: 'entry-2' });
+    expect(button('Read version')).toBeDefined();
+    expect(loadVersion).not.toHaveBeenCalled();
+  });
+
+  it('keeps the explicitly opened shortcut target on new saves and reports unavailable content', async () => {
+    let finish!: (result: null) => void;
+    const pending = new Promise<null>((resolve) => {
+      finish = resolve;
+    });
+    const loadVersion = vi.fn((_sha: string) => pending);
+    const options = { selectedEntryId: null, loadVersion };
+    await render({ ...options, verifiedHeadSha: 'version-2' });
+    await React.act(async () => button('Read previous draft · Version 1').click());
+    expect(host.querySelector('dialog h2')?.textContent).toBe('Version 1');
+    expect(host.querySelector('dialog')?.textContent).toContain('Loading version');
+
+    await render({
+      ...options,
+      entries: [entry(1), entry(2), entry(3)],
+      verifiedHeadSha: 'version-3',
+    });
+    expect(host.querySelector('dialog h2')?.textContent).toBe('Version 1');
+    expect(loadVersion.mock.calls).toEqual([['version-1']]);
+    await React.act(async () => finish(null));
+    const dialog = host.querySelector('dialog');
+    expect(dialog?.textContent).toContain('This version is unavailable to read.');
+    expect(dialog?.querySelector('article')).toBeNull();
+    await React.act(async () => dialog?.dispatchEvent(new Event('cancel', { cancelable: true })));
+    expect(host.querySelector('dialog')).toBeNull();
+    expect(document.activeElement).toBe(button('Read previous draft · Version 2'));
+  });
+
   it('returns focus to History on dismissal and lets the drawer own explicit return', async () => {
     const documentOpener = document.createElement('button');
     host.before(documentOpener);

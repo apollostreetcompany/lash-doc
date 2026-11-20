@@ -836,7 +836,6 @@ function ResolvedDocumentWorkspace({
   // A writer inspecting a version keeps that selection as autosave appends new entries.
   // Null follows the history head until the writer chooses a version explicitly.
   const [inspectedHistoryEntryId, setInspectedHistoryEntryId] = useState<string | null>(null);
-  const selectedHistoryEntryId = inspectedHistoryEntryId ?? historyEntries.at(-1)?.id ?? null;
   const [historyAuthorFilter, setHistoryAuthorFilter] = useState<string | null>(null);
   const [historyTimeFilter, setHistoryTimeFilter] = useState<HistoryTimeFilter>(null);
   const [showAuthorship, setShowAuthorship] = useState(false);
@@ -4025,7 +4024,8 @@ function ResolvedDocumentWorkspace({
           editor={historyPanelEditor}
           entries={historyEntries}
           open={historyVisible}
-          selectedEntryId={selectedHistoryEntryId}
+          selectedEntryId={inspectedHistoryEntryId}
+          verifiedHeadSha={historyHead}
           authorFilter={historyAuthorFilter}
           timeFilter={historyTimeFilter}
           acceptedSuggestionIds={acceptedSuggestionIds}

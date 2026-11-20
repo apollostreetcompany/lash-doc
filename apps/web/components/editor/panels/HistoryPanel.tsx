@@ -46,6 +46,7 @@ export interface HistoryPanelProps {
   editor: Editor | null;
   entries: HistoryEntry[];
   selectedEntryId: string | null;
+  verifiedHeadSha?: string | null;
   authorFilter: string | null;
   timeFilter: HistoryTimeFilter;
   acceptedSuggestionIds: string[];
@@ -78,6 +79,14 @@ const matchesTimeFilter = (entry: HistoryEntry, filter: HistoryTimeFilter) => {
   const ts = Date.parse(entry.ts);
   if (!Number.isFinite(ts)) return false;
   return ts >= Date.now() - SEVEN_DAYS_MS;
+};
+
+const previousDistinctDraft = (entries: readonly HistoryEntry[], headSha: string) => {
+  for (let index = entries.length - 2; index >= 0; index -= 1) {
+    const entry = entries[index];
+    if (entry.intent !== 'suggest' && entry.resultSha !== headSha) return entry;
+  }
+  return undefined;
 };
 
 const spanTitle = (span: DiffSpan) =>
@@ -239,6 +248,7 @@ export function HistoryPanel({
   editor,
   entries,
   selectedEntryId,
+  verifiedHeadSha,
   authorFilter,
   timeFilter,
   acceptedSuggestionIds,
@@ -328,6 +338,16 @@ export function HistoryPanel({
   const readSelectedVersion = selectedEntry?.intent === 'suggest' ? undefined : loadVersion;
   const canRestoreSelected = selectedEntry ? entryHasHistoryBody(selectedEntry) : false;
   const hasActiveFilters = Boolean(authorFilter || timeFilter);
+  const previousDraft =
+    readSelectedVersion &&
+    selectedEntry &&
+    selectedEntryId === null &&
+    !hasActiveFilters &&
+    availability === 'ready' &&
+    selectedEntry.resultSha === verifiedHeadSha
+      ? previousDistinctDraft(entries, verifiedHeadSha)
+      : undefined;
+  const readEntry = previousDraft ?? selectedEntry;
   const selectedSuggestionAccepted = selectedEntry
     ? acceptedSuggestionIds.includes(selectedEntry.id)
     : false;
@@ -511,13 +531,14 @@ export function HistoryPanel({
             <span data-testid="history-selected-version">Version {selectedEntry.seq}</span>
             <span>{selectedEntry.actor.type === 'ai' ? 'AI' : selectedEntry.actor.id}</span>
           </div>
-          {readSelectedVersion ? (
+          {readSelectedVersion && readEntry ? (
             <div className="history-diff-actions">
               <HistoryVersionReader
-                key={`${selectedEntry.id}:${selectedEntry.resultSha}`}
+                key={previousDraft ? 'previous-draft' : `${readEntry.id}:${readEntry.resultSha}`}
                 load={readSelectedVersion}
-                sequence={selectedEntry.seq}
-                sha={selectedEntry.resultSha}
+                previousDraft={Boolean(previousDraft)}
+                sequence={readEntry.seq}
+                sha={readEntry.resultSha}
                 onReturnToDocument={onReturnToDocument}
               />
             </div>
