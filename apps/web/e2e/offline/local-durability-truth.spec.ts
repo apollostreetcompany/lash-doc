@@ -101,8 +101,9 @@ test.describe('local durability truth on a phone', () => {
   test('mobile Share remains reachable and restores focus after touch or Escape', async ({
     page,
   }, testInfo) => {
+    const draftPath = route(`bead-43-mobile-truth-${Date.now()}`);
     await page.route('**/api/account/session', (route) => route.fulfill({ status: 401 }));
-    await page.goto(route(`bead-43-mobile-truth-${Date.now()}`));
+    await page.goto(draftPath);
     await expect(documentEditor(page)).toBeVisible();
 
     const shareTrigger = page.getByRole('button', { name: 'Share document', exact: true });
@@ -114,6 +115,10 @@ test.describe('local durability truth on a phone', () => {
     await expect(share).toBeVisible();
     await expect(share).toHaveAttribute('aria-modal', 'true');
     const signIn = share.getByRole('link', { name: 'Sign in to continue', exact: true });
+    await expect(signIn).toHaveAttribute(
+      'href',
+      `/auth/sign-in?next=${encodeURIComponent(draftPath)}`,
+    );
     await expect(signIn).toBeInViewport({ ratio: 1 });
     const signInBox = await signIn.boundingBox();
     expect(signInBox?.height ?? 0).toBeGreaterThanOrEqual(44);
