@@ -51,7 +51,9 @@ const selectTextOccurrence = async (page: Page, needle: string, occurrence: numb
     { needle, occurrence },
   );
 
-test('ai-patch-apply', async ({ page }) => {
+test('ai-patch-apply previews ai-rationale and retains ai-labeling in History', async ({
+  page,
+}) => {
   await enableAiFixture(page);
   await page.goto('/');
   await ready(page);
@@ -62,16 +64,29 @@ test('ai-patch-apply', async ({ page }) => {
   await expect(page.getByTestId('history-version')).toHaveCount(1, { timeout: 5000 });
 
   await selectDiscussionTab(page, 'ai');
+  const aiTab = page.getByRole('tab', { name: 'AI', exact: true });
+  await expect(aiTab).toHaveAttribute('aria-selected', 'true');
+  await expect(page.getByRole('tabpanel', { name: 'AI' })).toBeVisible();
   await selectRough(page);
   await expect(page.getByTestId('ai-improve-button')).toBeEnabled();
   await page.getByTestId('ai-improve-button').click();
 
-  await expect(page.getByTestId('ai-patch-json')).toContainText('"op": "replace_text"');
+  await expect(page.getByTestId('ai-rationale')).toContainText('Tighten the selected wording');
+  const patch = page.getByTestId('ai-patch-json');
+  await expect(patch).toContainText('"op": "replace_text"');
+  await expect(patch).toContainText('"rationale"');
   await expect(page.getByTestId('lash-editor-content')).toContainText('rough copy');
 
   await page.getByTestId('ai-accept-button').click();
   await expect(page.getByTestId('ai-status')).toContainText('AI patch applied');
   await expect(page.getByTestId('lash-editor-content')).toContainText('Polished rough copy');
+  await expect(aiTab).toHaveAccessibleName('AI');
+
+  await selectDiscussionTab(page, 'history');
+  const insertion = page.getByTestId('history-diff-insert');
+  await expect(insertion).toHaveAttribute('data-author-id', 'ai-editor');
+  await expect(insertion).toHaveAttribute('data-intent', 'ai');
+  await expect(insertion).toContainText('Polished');
 });
 
 test('ai-patch-apply preserves the selected repeated occurrence', async ({ page }) => {

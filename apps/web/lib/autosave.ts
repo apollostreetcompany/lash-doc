@@ -73,6 +73,12 @@ export interface ImeAwareTransactionGate {
 
 const DEFAULT_DEBOUNCE_MS = 350;
 
+type SaveTimer = ReturnType<typeof setTimeout>;
+type SaveWork =
+  | { phase: 'idle' }
+  | { phase: 'debouncing'; timer: SaveTimer }
+  | { phase: 'saving'; timer: SaveTimer | null; followUpDue: boolean };
+
 /**
  * Pure scheduler: no React, no editor. Tested under vitest fake timers.
  *
@@ -88,11 +94,23 @@ export function createAutosaveScheduler(opts: AutosaveSchedulerOptions): Autosav
   const debounceMs = opts.debounceMs ?? DEFAULT_DEBOUNCE_MS;
   const now = opts.now ?? (() => new Date());
 
-  let timer: ReturnType<typeof setTimeout> | null = null;
+  let work: SaveWork = { phase: 'idle' };
   let status: AutosaveStatus = 'idle';
   let lastSavedAt: string | null = null;
-  let saving = false;
-  let pendingAfterSave = false;
+
+  const clearTimer = () => {
+    if (work.phase === 'debouncing') {
+      clearTimeout(work.timer);
+      work = { phase: 'idle' };
+      return true;
+    }
+    if (work.phase === 'saving' && work.timer !== null) {
+      clearTimeout(work.timer);
+      work.timer = null;
+      return true;
+    }
+    return false;
+  };
 
   const setStatus = (next: AutosaveStatus) => {
     if (status === next) return;
@@ -101,20 +119,27 @@ export function createAutosaveScheduler(opts: AutosaveSchedulerOptions): Autosav
   };
 
   const performSave = async (): Promise<void> => {
-    saving = true;
-    setStatus('saving');
-    const savedAt = now().toISOString();
-    const docJson = opts.getDocJson ? opts.getDocJson() : {};
+    const inFlight: Extract<SaveWork, { phase: 'saving' }> = {
+      phase: 'saving',
+      timer: null,
+      followUpDue: false,
+    };
+    work = inFlight;
     try {
+      setStatus('saving');
+      const savedAt = now().toISOString();
+      const docJson = opts.getDocJson ? opts.getDocJson() : {};
       await Promise.resolve(opts.onSave({ savedAt, docJson }));
       lastSavedAt = savedAt;
-      setStatus('saved');
+      setStatus(inFlight.timer !== null || inFlight.followUpDue ? 'pending' : 'saved');
     } catch {
       setStatus('error');
     } finally {
-      saving = false;
-      if (pendingAfterSave) {
-        pendingAfterSave = false;
+      work =
+        inFlight.timer === null
+          ? { phase: 'idle' }
+          : { phase: 'debouncing', timer: inFlight.timer };
+      if (inFlight.followUpDue) {
         // Re-arm the debounce so we don't tight-loop on saves.
         notify();
       }
@@ -122,64 +147,59 @@ export function createAutosaveScheduler(opts: AutosaveSchedulerOptions): Autosav
   };
 
   const fire = () => {
-    timer = null;
-    if (saving) {
+    if (work.phase === 'saving') {
       // A save is in-flight; mark that another flush is queued.
-      pendingAfterSave = true;
+      work.timer = null;
+      work.followUpDue = true;
       return;
     }
     void performSave();
   };
 
   const notify = () => {
-    if (timer !== null) {
-      clearTimeout(timer);
-    }
+    clearTimer();
     setStatus('pending');
-    timer = setTimeout(fire, debounceMs);
+    const timer = setTimeout(fire, debounceMs);
+    if (work.phase === 'saving') {
+      work.timer = timer;
+    } else {
+      work = { phase: 'debouncing', timer };
+    }
   };
 
   const cancel = () => {
-    if (timer !== null) {
-      clearTimeout(timer);
-      timer = null;
-    }
-    pendingAfterSave = false;
-    if (!saving && status === 'pending') {
+    clearTimer();
+    if (work.phase === 'saving') {
+      work.followUpDue = false;
+    } else if (status === 'pending') {
       setStatus(lastSavedAt ? 'saved' : 'idle');
     }
   };
 
   const flush = async () => {
-    if (timer !== null) {
-      clearTimeout(timer);
-      timer = null;
-    }
-    if (saving) {
-      pendingAfterSave = true;
+    clearTimer();
+    if (work.phase === 'saving') {
+      work.followUpDue = true;
       return;
     }
     await performSave();
   };
 
   const flushPending = async () => {
-    const hasPendingWork = timer !== null || status === 'pending' || (saving && pendingAfterSave);
+    const hasPendingWork =
+      status === 'pending' ||
+      work.phase === 'debouncing' ||
+      (work.phase === 'saving' && (work.timer !== null || work.followUpDue));
     if (!hasPendingWork) return;
     await flush();
   };
 
   const suspendPending = () => {
-    let transferredDirtyWork = false;
-    if (timer !== null) {
-      clearTimeout(timer);
-      timer = null;
-      transferredDirtyWork = true;
-    }
-    if (pendingAfterSave) {
-      pendingAfterSave = false;
-      transferredDirtyWork = true;
-    }
-    return transferredDirtyWork;
+    const suspendedTimer = clearTimer();
+    if (work.phase !== 'saving') return suspendedTimer;
+    const suspendedFollowUp = work.followUpDue;
+    work.followUpDue = false;
+    return suspendedTimer || suspendedFollowUp;
   };
 
   return {
@@ -196,37 +216,29 @@ export function createAutosaveScheduler(opts: AutosaveSchedulerOptions): Autosav
 export function createImeAwareTransactionGate(
   scheduler: Pick<AutosaveSchedulerHandle, 'notify' | 'suspendPending'>,
 ): ImeAwareTransactionGate {
-  let composing = false;
-  let pendingDuringComposition = false;
+  let composition: { phase: 'idle' } | { phase: 'composing'; dirty: boolean } = { phase: 'idle' };
+  const finishComposition = () => {
+    if (composition.phase === 'idle') return;
+    const { dirty } = composition;
+    composition = { phase: 'idle' };
+    if (dirty) scheduler.notify();
+  };
 
   return {
     notifyTransaction() {
-      if (composing) {
-        pendingDuringComposition = true;
+      if (composition.phase === 'composing') {
+        composition.dirty = true;
         return;
       }
       scheduler.notify();
     },
     compositionStart() {
-      if (composing) return;
-      composing = true;
-      pendingDuringComposition = scheduler.suspendPending();
+      if (composition.phase === 'composing') return;
+      composition = { phase: 'composing', dirty: scheduler.suspendPending() };
     },
-    compositionEnd() {
-      if (!composing) return;
-      composing = false;
-      if (pendingDuringComposition) {
-        pendingDuringComposition = false;
-        scheduler.notify();
-      }
-    },
-    flushPendingForLifecycle() {
-      composing = false;
-      if (!pendingDuringComposition) return;
-      pendingDuringComposition = false;
-      scheduler.notify();
-    },
-    isComposing: () => composing,
+    compositionEnd: finishComposition,
+    flushPendingForLifecycle: finishComposition,
+    isComposing: () => composition.phase === 'composing',
   };
 }
 

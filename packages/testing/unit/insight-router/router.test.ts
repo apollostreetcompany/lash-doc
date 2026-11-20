@@ -12,6 +12,7 @@ import {
   HERMES_UNCONFIGURED,
   PERSEPHONE_UNCONFIGURED,
   type InsightPayload,
+  type WriteResult,
   type WritingPlace,
 } from '@lash/insight-router';
 import { describe, expect, it, vi } from 'vitest';
@@ -129,6 +130,141 @@ describe('InsightRouter routing', () => {
     expect(first.ok && first.idempotent).toBe(false);
     expect(second.ok && second.idempotent).toBe(true);
     expect(insert).toHaveBeenCalledTimes(1);
+  });
+
+  it('reserves the write before a guard can reenter the same route', async () => {
+    const router = new InsightRouter({ now: fixedClock });
+    const insert = vi.fn(() => 'pos:1');
+    let acceptsCalls = 0;
+    let reentrant: Promise<WriteResult> | undefined;
+    router.register({
+      ...createDocumentInsertPlace(insert),
+      accepts() {
+        if (acceptsCalls++ === 0) reentrant = router.route(payload(), 'doc');
+        return true;
+      },
+    });
+
+    expect(await router.route(payload(), 'doc')).toMatchObject({ ok: true, idempotent: false });
+    expect(await reentrant).toMatchObject({ ok: true, idempotent: true, ref: 'pos:1' });
+    expect(acceptsCalls).toBe(1);
+    expect(insert).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    { failure: 'rejected', throws: false },
+    { failure: 'failed', throws: true },
+  ])('releases the reservation after a $failure guard', async ({ failure, throws }) => {
+    const router = new InsightRouter({ now: fixedClock });
+    const insert = vi.fn(() => 'pos:1');
+    let acceptsCalls = 0;
+    let reentrant: Promise<WriteResult> | undefined;
+    router.register({
+      ...createDocumentInsertPlace(insert),
+      accepts() {
+        if (acceptsCalls++ > 0) return true;
+        reentrant = router.route(payload(), 'doc');
+        if (throws) throw new Error('guard failure');
+        return 'guard failure';
+      },
+    });
+
+    const owner = router.route(payload(), 'doc');
+    await expect(owner).resolves.toMatchObject({
+      ok: false,
+      code: failure,
+      error: 'guard failure',
+    });
+    expect(await reentrant).toMatchObject({ ok: true, idempotent: false, ref: 'pos:1' });
+    expect(insert).toHaveBeenCalledTimes(1);
+    expect(router.history().map(({ result }) => result.ok)).toEqual([false, true]);
+  });
+
+  it('shares a pending write only with callers using the same insight and place', async () => {
+    let finish!: (ref: string) => void;
+    const pending = new Promise<string>((resolve) => {
+      finish = resolve;
+    });
+    const insert = vi.fn(() => pending);
+    const collision = vi.fn(() => 'separate ref');
+    const router = new InsightRouter({ now: fixedClock })
+      .register({ ...createDocumentInsertPlace(insert), id: 'a::b' })
+      .register({ ...createDocumentInsertPlace(collision), id: 'b' });
+
+    const owner = router.route(payload({ id: 'insight' }), 'a::b');
+    const waiter = router.route(payload({ id: 'insight' }), 'a::b');
+    expect(await router.route(payload({ id: 'insight::a' }), 'b')).toMatchObject({
+      ok: true,
+      ref: 'separate ref',
+      idempotent: false,
+    });
+    finish('shared ref');
+    await expect(owner).resolves.toMatchObject({ ok: true, ref: 'shared ref', idempotent: false });
+    await expect(waiter).resolves.toMatchObject({ ok: true, ref: 'shared ref', idempotent: true });
+    expect(insert).toHaveBeenCalledTimes(1);
+    expect(collision).toHaveBeenCalledTimes(1);
+    await expect(router.route(payload({ id: 'insight::a' }), 'b')).resolves.toMatchObject({
+      ok: true,
+      ref: 'separate ref',
+      idempotent: true,
+    });
+  });
+
+  it('lets a waiting caller cancel while another retries a failed write with its own signal', async () => {
+    const ownerController = new AbortController();
+    const cancelledController = new AbortController();
+    const nextController = new AbortController();
+    let rejectOwner!: (error: Error) => void;
+    const ownerPending = new Promise<string>((_, reject) => {
+      rejectOwner = reject;
+    });
+    const insert = vi.fn((_payload: InsightPayload, ctx: { signal?: AbortSignal }) =>
+      ctx.signal === ownerController.signal ? ownerPending : 'retry ref',
+    );
+    const router = new InsightRouter({ now: fixedClock }).register(
+      createDocumentInsertPlace(insert),
+    );
+
+    const owner = router.route(payload(), 'doc', { signal: ownerController.signal });
+    const cancelled = router.route(payload(), 'doc', { signal: cancelledController.signal });
+    const next = router.route(payload(), 'doc', { signal: nextController.signal });
+    cancelledController.abort();
+
+    await expect(cancelled).resolves.toMatchObject({ ok: false, code: 'failed' });
+    expect(ownerController.signal.aborted).toBe(false);
+    expect(insert).toHaveBeenCalledTimes(1);
+    rejectOwner(new Error('first write failed'));
+    await expect(owner).resolves.toMatchObject({ ok: false, error: 'first write failed' });
+    await expect(next).resolves.toMatchObject({ ok: true, ref: 'retry ref', idempotent: false });
+    expect(insert).toHaveBeenCalledTimes(2);
+    expect(insert.mock.calls[1][1].signal).toBe(nextController.signal);
+  });
+
+  it('uses the replacement registration when a waiting caller takes over a failed write', async () => {
+    let rejectOwner!: (error: Error) => void;
+    const pending = new Promise<string>((_, reject) => {
+      rejectOwner = reject;
+    });
+    const previous = vi.fn().mockReturnValueOnce(pending).mockReturnValue('previous adapter');
+    const replacement = vi.fn(() => 'replacement adapter');
+    const router = new InsightRouter({ now: fixedClock }).register(
+      createDocumentInsertPlace(previous),
+    );
+
+    const owner = router.route(payload(), 'doc');
+    const waiter = router.route(payload(), 'doc');
+    router.unregister('doc');
+    router.register(createDocumentInsertPlace(replacement));
+    rejectOwner(new Error('original write failed'));
+
+    await expect(owner).resolves.toMatchObject({ ok: false, error: 'original write failed' });
+    await expect(waiter).resolves.toMatchObject({
+      ok: true,
+      idempotent: false,
+      ref: 'replacement adapter',
+    });
+    expect(previous).toHaveBeenCalledTimes(1);
+    expect(replacement).toHaveBeenCalledTimes(1);
   });
 
   it('does not cache failed writes as idempotent successes', async () => {

@@ -169,7 +169,8 @@ export const createInsightPayload = (input: CreateInsightInput): InsightPayload 
   createdAt: input.createdAt ?? new Date().toISOString(),
 });
 
-const idempotencyKey = (payloadId: string, placeId: WritingPlaceId) => `${payloadId}::${placeId}`;
+const idempotencyKey = (payloadId: string, placeId: WritingPlaceId) =>
+  JSON.stringify([payloadId, placeId]);
 
 // ---------------------------------------------------------------------------
 // Router
@@ -186,9 +187,26 @@ export interface PlaceAvailability {
   reason?: string;
 }
 
+type RouteState =
+  | { kind: 'writing'; completion: Promise<void> }
+  | { kind: 'committed'; result: Extract<WriteResult, { ok: true }> };
+
+const waitForWrite = (completion: Promise<void>, signal: AbortSignal | undefined) => {
+  if (!signal) return completion;
+  if (signal.aborted) return Promise.resolve();
+  return new Promise<void>((resolve) => {
+    const done = () => {
+      signal.removeEventListener('abort', done);
+      resolve();
+    };
+    signal.addEventListener('abort', done, { once: true });
+    void completion.then(done);
+  });
+};
+
 export class InsightRouter {
   private readonly registry = new Map<WritingPlaceId, WritingPlace>();
-  private readonly idempotency = new Map<string, Extract<WriteResult, { ok: true }>>();
+  private readonly writes = new Map<string, RouteState>();
   private readonly audit: RouteAuditEntry[] = [];
   private readonly now: () => string;
 
@@ -238,8 +256,7 @@ export class InsightRouter {
     placeId: WritingPlaceId,
     ctx: { signal?: AbortSignal } = {},
   ): Promise<WriteResult> {
-    const place = this.registry.get(placeId);
-    if (!place) {
+    if (!this.registry.has(placeId)) {
       return this.fail(payload, placeId, 'rejected', `unknown writing place "${placeId}"`);
     }
 
@@ -253,46 +270,63 @@ export class InsightRouter {
       );
     }
 
-    // Idempotency: never write the same insight to the same place twice.
     const key = idempotencyKey(payload.id, placeId);
-    const prior = this.idempotency.get(key);
-    if (prior) {
-      const replay: WriteResult = { ...prior, idempotent: true, at: this.now() };
-      this.record(payload, placeId, replay);
-      return replay;
+    const { signal } = ctx;
+    for (;;) {
+      const prior = this.writes.get(key);
+      if (prior?.kind === 'committed') {
+        const replay: WriteResult = { ...prior.result, idempotent: true, at: this.now() };
+        this.record(payload, placeId, replay);
+        return replay;
+      }
+      if (signal?.aborted) return this.fail(payload, placeId, 'failed', 'The write was cancelled.');
+      if (prior?.kind === 'writing') {
+        await waitForWrite(prior.completion, signal);
+        if (signal?.aborted)
+          return this.fail(payload, placeId, 'failed', 'The write was cancelled.');
+        continue;
+      }
+
+      const place = this.registry.get(placeId);
+      if (!place) {
+        return this.fail(payload, placeId, 'rejected', `unknown writing place "${placeId}"`);
+      }
+
+      let finish!: () => void;
+      const completion = new Promise<void>((resolve) => {
+        finish = resolve;
+      });
+      const writing: RouteState = { kind: 'writing', completion };
+      this.writes.set(key, writing);
+      try {
+        // The place supplies its own actionable error when unconfigured.
+        let result: WriteResult;
+        try {
+          const verdict = place.accepts(payload);
+          if (verdict !== true) return this.fail(payload, placeId, 'rejected', verdict);
+          if (signal?.aborted) {
+            return this.fail(payload, placeId, 'failed', 'The write was cancelled.');
+          }
+          result = await place.write(payload, { now: this.now, signal });
+        } catch (error) {
+          result = this.makeFailure(
+            placeId,
+            'failed',
+            error instanceof Error ? error.message : String(error),
+          );
+        }
+        if (result.ok) {
+          result = { ...result, idempotent: false };
+          this.writes.set(key, { kind: 'committed', result });
+        }
+        this.record(payload, placeId, result);
+        return result;
+      } finally {
+        // A failure releases the key. A waiter can claim a fresh attempt.
+        if (this.writes.get(key) === writing) this.writes.delete(key);
+        finish();
+      }
     }
-
-    const verdict = place.accepts(payload);
-    if (verdict !== true) {
-      return this.fail(payload, placeId, 'rejected', verdict);
-    }
-
-    // Note: unconfigured external places are NOT short-circuited here — each place
-    // owns its unconfigured handling in `write` so it can return a specific,
-    // actionable message (see the placeholder adapters). `isConfigured()` is used
-    // by `availabilityFor()` to drive the UI.
-
-    // Isolate the write: a throwing place fails only itself, never the router.
-    let result: WriteResult;
-    try {
-      result = await place.write(payload, { now: this.now, signal: ctx.signal });
-    } catch (err) {
-      result = this.makeFailure(
-        placeId,
-        'failed',
-        err instanceof Error ? err.message : String(err),
-      );
-    }
-
-    if (result.ok) {
-      const normalized: Extract<WriteResult, { ok: true }> = { ...result, idempotent: false };
-      this.idempotency.set(key, normalized);
-      this.record(payload, placeId, normalized);
-      return normalized;
-    }
-
-    this.record(payload, placeId, result);
-    return result;
   }
 
   history(): readonly RouteAuditEntry[] {

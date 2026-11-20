@@ -84,14 +84,14 @@ Each acceptance scenario from `agents.md` is mapped to a concrete test stub. Har
 
 ## D.2 — Version Timeline
 
-- `history-open` → `apps/web/e2e/history/history-open.spec.ts` (Playwright e2e)
-- `history-diff` → `apps/web/e2e/history/history-diff.spec.ts` (Playwright e2e)
+- `history-open` → `apps/web/e2e/history/history-restore.spec.ts` (Playwright e2e)
+- `history-diff` → `apps/web/e2e/history/history-restore.spec.ts` (Playwright e2e)
 - `history-restore` → `apps/web/e2e/history/history-restore.spec.ts` (Playwright e2e)
 
 ## D.3 — Filtered Diffs
 
 - `diff-filter-author` → `apps/web/e2e/diff/diff-filter-author.spec.ts` (Playwright e2e)
-- `diff-filter-time` → `apps/web/e2e/diff/diff-filter-time.spec.ts` (Playwright e2e)
+- `diff-filter-time` → `apps/web/e2e/diff/diff-filter-author.spec.ts` (Playwright e2e)
 - `diff-share-link` → `apps/web/e2e/diff/diff-share-link.spec.ts` (Playwright e2e)
 
 ## D.4 — Diff Determinism
@@ -159,8 +159,8 @@ Each acceptance scenario from `agents.md` is mapped to a concrete test stub. Har
 ## I.1 — AI Patch Flow
 
 - `ai-patch-apply` → `apps/web/e2e/ai/ai-patch-apply.spec.ts` (Playwright e2e)
-- `ai-labeling` → `apps/web/e2e/ai/ai-labeling.spec.ts` (Playwright e2e)
-- `ai-rationale` → `apps/web/e2e/ai/ai-rationale.spec.ts` (Playwright e2e)
+- `ai-labeling` → `apps/web/e2e/ai/ai-patch-apply.spec.ts` (Playwright e2e)
+- `ai-rationale` → `apps/web/e2e/ai/ai-patch-apply.spec.ts` (Playwright e2e)
 
 ## I.2 — AI Guardrails
 
@@ -174,7 +174,7 @@ Each acceptance scenario from `agents.md` is mapped to a concrete test stub. Har
 
 ## I.4 — AI Chat Citations
 
-- `ai-chat-citation` → `apps/web/e2e/ai/ai-chat-citation.spec.ts` (Playwright e2e)
+- `ai-chat-citation` → `apps/web/e2e/ai/ai-citation-jump.spec.ts` (Playwright e2e)
 - `ai-citation-jump` → `apps/web/e2e/ai/ai-citation-jump.spec.ts` (Playwright e2e)
 
 ## J.1 — Cross-Browser
@@ -193,5 +193,5 @@ Each acceptance scenario from `agents.md` is mapped to a concrete test stub. Har
 ## J.3 — Screen Readers
 
 - `sr-headings` → `apps/web/e2e/a11y/sr-headings.spec.ts` (Playwright e2e)
-- `sr-diff-announce` → `apps/web/e2e/a11y/sr-diff-announce.spec.ts` (Playwright e2e)
+- `sr-diff-announce` → `apps/web/e2e/history/history-restore.spec.ts` (Playwright e2e)
 - `sr-thread-nav` → `apps/web/e2e/a11y/sr-thread-nav.spec.ts` (Playwright e2e)

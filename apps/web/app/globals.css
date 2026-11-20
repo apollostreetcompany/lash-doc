@@ -1810,6 +1810,25 @@ main[data-testid='lash-home'] > section {
   border-radius: 0;
 }
 
+.lash-document-history-button {
+  min-height: 28px;
+  padding: 0 var(--space-2);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-paper);
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  font: inherit;
+  font-weight: 600;
+}
+
+.lash-document-history-button[aria-expanded='true'],
+.lash-document-history-button:hover {
+  border-color: var(--color-border-strong);
+  background: var(--color-hover-bg);
+  color: var(--color-text-primary);
+}
+
 .lash-document-status-suggesting {
   display: inline-flex;
   align-items: center;
@@ -4270,6 +4289,17 @@ textarea.history-diff {
     font-size: 1.875rem;
   }
 
+  .lash-document-status,
+  .lash-document-history-button {
+    min-height: 44px;
+  }
+
+  .lash-document-status .lash-autosave-indicator {
+    flex: 1 1 0;
+    min-width: 0;
+    max-width: max-content;
+  }
+
   .lash-share-button-label {
     display: none;
   }
@@ -4524,17 +4554,6 @@ textarea.history-diff {
   }
 }
 
-@keyframes lash-fade-down {
-  from {
-    opacity: 0;
-    transform: translate3d(0, -6px, 0);
-  }
-  to {
-    opacity: 1;
-    transform: translate3d(0, 0, 0);
-  }
-}
-
 @keyframes lash-fade-up {
   from {
     opacity: 0;
@@ -4543,28 +4562,6 @@ textarea.history-diff {
   to {
     opacity: 1;
     transform: translate3d(0, 0, 0);
-  }
-}
-
-@keyframes lash-slide-in-left {
-  from {
-    opacity: 0;
-    transform: translate3d(-12px, 0, 0);
-  }
-  to {
-    opacity: 1;
-    transform: translate3d(0, 0, 0);
-  }
-}
-
-@keyframes lash-paper-rise {
-  from {
-    opacity: 0;
-    transform: translate3d(0, 16px, 0) scale(0.992);
-  }
-  to {
-    opacity: 1;
-    transform: translate3d(0, 0, 0) scale(1);
   }
 }
 
@@ -4616,110 +4613,6 @@ textarea.history-diff {
   to {
     background-position: 260% 0;
   }
-}
-
-/* -- Shell entrance choreography ----------------------------------------- */
-/* Scoped to [data-entrance='true'] so animations only play on first mount,
- * not on every focus-mode toggle or rail close. */
-
-.lash-app[data-entrance='true'] .lash-sidebar {
-  animation: lash-slide-in-left 380ms var(--ease-out-quart) both;
-  animation-delay: 40ms;
-}
-
-.lash-app[data-entrance='true'] .lash-topbar {
-  animation: lash-fade-down 280ms var(--ease-out-quart) both;
-  animation-delay: 80ms;
-}
-
-.lash-app[data-entrance='true'] .lash-toolbar-bar:not([hidden]) {
-  animation: lash-fade-down 280ms var(--ease-out-quart) both;
-  animation-delay: 140ms;
-}
-
-.lash-app[data-entrance='true'] .lash-doc-paper {
-  animation: lash-paper-rise 460ms var(--ease-out-quart) both;
-  animation-delay: 180ms;
-}
-
-.lash-app[data-entrance='true'] .lash-rail {
-  animation: lash-fade-in 160ms var(--ease-out-quart) both;
-}
-
-@media (max-width: 767px) {
-  .lash-app[data-entrance='true'] .lash-sidebar,
-  .lash-app[data-entrance='true'] .lash-rail {
-    animation: none;
-  }
-}
-
-/* Once the entrance settles, drop will-change so we don't keep a layer
- * promoted forever. We use an empty-keyframes animation as a finish hook
- * via `animation-delay` end + `animation-fill-mode: backwards` — but the
- * simpler approach is to just only promote during entrance using a
- * separate transient class. Keeping it static for now since the paper is
- * not animated again. */
-
-/* -- Topbar elements stagger -------------------------------------------- */
-
-.lash-app[data-entrance='true'] .lash-topbar-actions > * {
-  animation: lash-fade-up 280ms var(--ease-out-quart) both;
-}
-
-.lash-app[data-entrance='true'] .lash-topbar-actions > *:nth-child(1) {
-  animation-delay: 220ms;
-}
-.lash-app[data-entrance='true'] .lash-topbar-actions > *:nth-child(2) {
-  animation-delay: 250ms;
-}
-.lash-app[data-entrance='true'] .lash-topbar-actions > *:nth-child(3) {
-  animation-delay: 280ms;
-}
-.lash-app[data-entrance='true'] .lash-topbar-actions > *:nth-child(4) {
-  animation-delay: 310ms;
-}
-.lash-app[data-entrance='true'] .lash-topbar-actions > *:nth-child(5) {
-  animation-delay: 340ms;
-}
-
-/* -- Sidebar nav stagger ------------------------------------------------ */
-
-.lash-app[data-entrance='true'] .lash-sidebar-nav .lash-sidebar-item {
-  animation: lash-fade-up 260ms var(--ease-out-quart) both;
-}
-
-.lash-app[data-entrance='true'] .lash-sidebar-nav > .lash-sidebar-item:nth-child(1) {
-  animation-delay: 180ms;
-}
-.lash-app[data-entrance='true'] .lash-sidebar-nav > .lash-sidebar-item:nth-child(2) {
-  animation-delay: 210ms;
-}
-
-/* -- Rail tab + section entrance ---------------------------------------- */
-
-.lash-app[data-entrance='true'] .lash-rail-tabs .lash-rail-tab {
-  animation: lash-fade-up 260ms var(--ease-out-quart) both;
-}
-
-.lash-app[data-entrance='true'] .lash-rail-tabs .lash-rail-tab:nth-child(1) {
-  animation-delay: 260ms;
-}
-.lash-app[data-entrance='true'] .lash-rail-tabs .lash-rail-tab:nth-child(2) {
-  animation-delay: 285ms;
-}
-.lash-app[data-entrance='true'] .lash-rail-tabs .lash-rail-tab:nth-child(3) {
-  animation-delay: 310ms;
-}
-.lash-app[data-entrance='true'] .lash-rail-tabs .lash-rail-tab:nth-child(4) {
-  animation-delay: 335ms;
-}
-.lash-app[data-entrance='true'] .lash-rail-tabs .lash-rail-tab:nth-child(5) {
-  animation-delay: 360ms;
-}
-
-.lash-app[data-entrance='true'] .lash-rail-section:not([hidden]) {
-  animation: lash-fade-up 320ms var(--ease-out-quart) both;
-  animation-delay: 320ms;
 }
 
 /* -- Active tab indicator: refined slide (FLIP-style via transform) ------ */
@@ -4839,10 +4732,6 @@ textarea.history-diff {
   transition: transform var(--dur-base) var(--ease-out-quart);
 }
 
-.lash-sidebar-item[data-active='true']::before {
-  animation: lash-slide-in-left 320ms var(--ease-out-expo) both;
-}
-
 /* Rail tab labels — smooth color shift on hover */
 .lash-rail-tab {
   transition: color var(--dur-fast) var(--ease-out-quart);
@@ -4932,24 +4821,6 @@ textarea.history-diff {
 
 .mention-chip {
   animation: lash-pop-in 260ms var(--ease-out-quart);
-}
-
-/* Avatars — subtle stack reveal */
-.lash-app[data-entrance='true'] .lash-avatar-stack .lash-avatar {
-  animation: lash-pop-in 320ms var(--ease-out-quart) both;
-}
-
-.lash-app[data-entrance='true'] .lash-avatar-stack .lash-avatar:nth-child(1) {
-  animation-delay: 240ms;
-}
-.lash-app[data-entrance='true'] .lash-avatar-stack .lash-avatar:nth-child(2) {
-  animation-delay: 280ms;
-}
-.lash-app[data-entrance='true'] .lash-avatar-stack .lash-avatar:nth-child(3) {
-  animation-delay: 320ms;
-}
-.lash-app[data-entrance='true'] .lash-avatar-stack .lash-avatar:nth-child(4) {
-  animation-delay: 360ms;
 }
 
 .lash-avatar {
@@ -5113,40 +4984,6 @@ li[data-type='taskItem'] > div p {
   caret-color: var(--color-coral-600);
 }
 
-/* Focus mode transition — chrome glides out, paper expands its breathing room */
-.lash-app[data-focus-mode='true'] .lash-doc-paper {
-  transition: transform var(--dur-slower) var(--ease-out-quart);
-}
-
-.lash-app[data-focus-mode='false'] .lash-doc-paper {
-  transition: transform var(--dur-slower) var(--ease-out-quart);
-}
-
-.lash-toolbar-bar {
-  transition:
-    opacity var(--dur-base) var(--ease-out-quart),
-    transform var(--dur-base) var(--ease-out-quart);
-}
-
-/* Hidden via the HTML `hidden` attribute: collapse layout AND keep the
- * fade-out feel by zeroing height. The grid row above gives the toolbar
- * its track; collapsing height keeps it offscreen for Playwright's
- * isHidden checks while still leaving room for the brief exit fade. */
-.lash-toolbar-bar[hidden] {
-  display: none;
-}
-
-/* Doc title — gentle entry */
-.lash-app[data-entrance='true'] .lash-doc-title {
-  animation: lash-fade-up 360ms var(--ease-out-quart) both;
-  animation-delay: 260ms;
-}
-
-.lash-app[data-entrance='true'] .lash-document-status {
-  animation: lash-fade-up 360ms var(--ease-out-quart) both;
-  animation-delay: 320ms;
-}
-
 /* -- Comment CTAs — coral with refined press feedback -------------------- */
 
 .chat-action-button[data-testid='chat-create-thread'],
@@ -5244,10 +5081,6 @@ li[data-type='taskItem'] > div p {
   transition: background var(--dur-base) var(--ease-out-quart);
 }
 
-/* -- Page-mode: respect reduced motion ---------------------------------
- * The universal selector zeros animation-delay !important, which already
- * neutralizes every :nth-child stagger in the entrance choreography above. */
-
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
@@ -5255,7 +5088,8 @@ li[data-type='taskItem'] > div p {
     animation-duration: 0.01ms !important;
     animation-delay: 0ms !important;
     animation-iteration-count: 1 !important;
-    transition-duration: 0.01ms !important;
+    /* A nonzero duration starts transitions even on elements with the default `all` property. */
+    transition-duration: 0s !important;
     transition-delay: 0ms !important;
     scroll-behavior: auto !important;
   }

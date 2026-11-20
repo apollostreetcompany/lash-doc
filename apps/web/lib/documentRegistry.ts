@@ -30,6 +30,14 @@ export const documentTitleStorageKey = (documentId: string) =>
 
 const normalizeTitle = (title: string | undefined | null) => title?.trim() || DEFAULT_DOC_TITLE;
 
+const readTitleKey = (storage: Storage | undefined, id: string) => {
+  try {
+    return storage?.getItem(documentTitleStorageKey(id)) ?? null;
+  } catch {
+    return null;
+  }
+};
+
 const parseRegistry = (raw: string | null): LashDocumentRecord[] => {
   if (!raw) return [];
   try {
@@ -59,7 +67,7 @@ export const listDocuments = (storage: Storage | undefined): LashDocumentRecord[
   const now = new Date(0).toISOString();
   const demo: LashDocumentRecord = {
     id: DEFAULT_DOCUMENT_ID,
-    title: readDocumentTitle(storage, DEFAULT_DOCUMENT_ID),
+    title: normalizeTitle(readTitleKey(storage, DEFAULT_DOCUMENT_ID)),
     createdAt: now,
     updatedAt: now,
   };
@@ -71,7 +79,7 @@ export const listDocuments = (storage: Storage | undefined): LashDocumentRecord[
   for (const record of parseRegistry(storage.getItem(DOCUMENT_REGISTRY_STORAGE_KEY))) {
     byId.set(record.id, {
       ...record,
-      title: readDocumentTitle(storage, record.id),
+      title: normalizeTitle(readTitleKey(storage, record.id) ?? record.title),
     });
   }
 
@@ -84,11 +92,19 @@ export const listDocuments = (storage: Storage | undefined): LashDocumentRecord[
 
 export const readDocumentTitle = (storage: Storage | undefined, documentId: string) => {
   if (!storage) return DEFAULT_DOC_TITLE;
+  const id = normalizeDocumentId(documentId);
+  const title = readTitleKey(storage, id);
+  if (title !== null) return normalizeTitle(title);
   try {
-    return normalizeTitle(storage.getItem(documentTitleStorageKey(documentId)));
+    // Older drafts may only have their title in the document list.
+    const records = parseRegistry(storage.getItem(DOCUMENT_REGISTRY_STORAGE_KEY));
+    for (let i = records.length - 1; i >= 0; i--) {
+      if (records[i].id === id) return records[i].title;
+    }
   } catch {
-    return DEFAULT_DOC_TITLE;
+    // A new or unavailable library can still open an untitled document.
   }
+  return DEFAULT_DOC_TITLE;
 };
 
 export const saveDocumentTitle = (

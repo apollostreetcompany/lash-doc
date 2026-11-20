@@ -119,9 +119,16 @@ export type AppendResult =
 
 export type HistoryHydrationResult =
   | Readonly<{
-      state: 'ready' | 'empty-baseline';
+      state: 'ready';
       head: string;
       entryCount: number;
+    }>
+  | Readonly<{
+      state: 'empty-baseline';
+      head: string;
+      entryCount: number;
+      /** An empty baseline has an existing verified primary row. */
+      durable?: true;
     }>
   | Readonly<{
       state: 'recovery-available';
@@ -268,10 +275,21 @@ type DocumentHistoryState = Readonly<{
   }>;
 }>;
 
+const describeHistory = (history: DocumentHistoryState): HistoryHydrationResult => {
+  if (history.entries.length) {
+    return { state: 'ready', head: history.head, entryCount: history.entries.length };
+  }
+  return {
+    state: 'empty-baseline',
+    head: history.head,
+    entryCount: 0,
+    ...(history.persistence.raw !== null ? { durable: true } : {}),
+  };
+};
+
 type PersistedHistoryValidation =
   | Readonly<{
       ok: true;
-      envelope: PersistedHistoryEnvelopeV1;
       state: DocumentHistoryState;
     }>
   | Readonly<{
@@ -450,7 +468,7 @@ const validatePersistedHistory = async (
     return { ok: false, kind: 'corrupt', reason: 'History base snapshot is missing.' };
   }
 
-  let currentDoc: unknown = cloneJson(baseDoc);
+  let currentDoc: unknown = baseDoc;
   let currentSha = normalizedPayload.baseSha;
   let totalOps = 0;
   const entries: HistoryEntry[] = [];
@@ -476,7 +494,9 @@ const validatePersistedHistory = async (
       return { ok: false, kind: 'corrupt', reason: 'History acceleration snapshot diverges.' };
     }
     currentSha = entry.resultSha;
-    entries.push(cloneJson(entry) as unknown as HistoryEntry);
+    // The parsed envelope belongs exclusively to this store. Public readers
+    // detach rows before returning them.
+    entries.push(entry as unknown as HistoryEntry);
   }
 
   if (currentSha !== normalizedPayload.head) {
@@ -490,10 +510,8 @@ const validatePersistedHistory = async (
     return { ok: false, kind: 'corrupt', reason: 'History snapshot is not reachable.' };
   }
 
-  const envelope = cloneJson(parsed) as PersistedHistoryEnvelopeV1;
   return {
     ok: true,
-    envelope,
     state: {
       baseSha: normalizedPayload.baseSha,
       head: normalizedPayload.head,
@@ -616,16 +634,20 @@ export const createHistoryStore = (config: CreateHistoryStoreConfig = {}): Histo
     return initial;
   };
 
-  /** Reconstruct the doc state at `sha` by locating the nearest preceding
-   *  snapshot in the entry chain and replaying ops forward. Returns
-   *  `undefined` when `sha` is not a known version for the doc. */
-  const materializeAt = (state: DocumentHistoryState, sha: string): unknown => {
-    const direct = state.snapshots.get(sha);
-    if (direct !== undefined) {
-      return cloneJson(direct);
-    }
+  // Store-owned snapshots and patch subtrees may be shared inside one read.
+  // loadAt detaches the result before exposing it to a caller.
+  const materializeAt = (
+    state: DocumentHistoryState,
+    sha: string,
+    preceding?: { sha: string; doc: unknown },
+  ): unknown => {
+    const known = (version: string) =>
+      version === preceding?.sha ? preceding.doc : state.snapshots.get(version);
+    const direct = known(sha);
+    if (direct !== undefined) return direct;
 
-    const entries = [...state.entries].sort((a, b) => a.seq - b.seq);
+    // Validated and newly appended entries are always in sequence order.
+    const entries = state.entries;
     const targetIndex = entries.findIndex((entry) => entry.resultSha === sha);
     if (targetIndex === -1) {
       return undefined;
@@ -635,9 +657,9 @@ export const createHistoryStore = (config: CreateHistoryStoreConfig = {}): Histo
     let baseDoc: unknown;
     let replayStart = 0;
     for (let i = targetIndex; i >= 0; i -= 1) {
-      const candidate = state.snapshots.get(entries[i].parentSha);
+      const candidate = known(entries[i].parentSha);
       if (candidate !== undefined) {
-        baseDoc = cloneJson(candidate);
+        baseDoc = candidate;
         replayStart = i;
         break;
       }
@@ -892,18 +914,12 @@ export const createHistoryStore = (config: CreateHistoryStoreConfig = {}): Histo
     async hydrate(docId, baseline = EMPTY_HISTORY_DOC) {
       const key = docKey(docId);
       const existing = stateByDoc.get(key);
-      if (existing) {
-        return {
-          state: existing.entries.length ? 'ready' : 'empty-baseline',
-          head: existing.head,
-          entryCount: existing.entries.length,
-        };
-      }
+      if (existing) return describeHistory(existing);
 
       if (!config.persistence) {
         const initial = await createBaselineState(baseline);
         stateByDoc.set(key, initial);
-        return { state: 'empty-baseline', head: initial.head, entryCount: 0 };
+        return describeHistory(initial);
       }
 
       let durable;
@@ -920,11 +936,7 @@ export const createHistoryStore = (config: CreateHistoryStoreConfig = {}): Histo
         const primary = await validatePersistedHistory(durable.primaryRaw, key);
         if (primary.ok) {
           stateByDoc.set(key, primary.state);
-          return {
-            state: primary.state.entries.length ? 'ready' : 'empty-baseline',
-            head: primary.state.head,
-            entryCount: primary.state.entries.length,
-          };
+          return describeHistory(primary.state);
         }
         if (primary.kind === 'unsupported-version') {
           return { state: 'unsupported-version', reason: primary.reason };
@@ -954,7 +966,7 @@ export const createHistoryStore = (config: CreateHistoryStoreConfig = {}): Histo
 
       const initial = await createBaselineState(baseline);
       stateByDoc.set(key, initial);
-      return { state: 'empty-baseline', head: initial.head, entryCount: 0 };
+      return describeHistory(initial);
     },
     append,
     async list(docId, filter = {}) {
@@ -975,15 +987,17 @@ export const createHistoryStore = (config: CreateHistoryStoreConfig = {}): Histo
       if (materialized === undefined) {
         throw new Error(`history.loadAt: unknown version ${sha}`);
       }
-      return materialized;
+      return cloneJson(materialized);
     },
     async diff(docId, fromSha, toSha) {
       const state = await ensureDocState(docKey(docId));
-      return diffStates(
-        fromSha, toSha,
-        materializeAt(state, fromSha), materializeAt(state, toSha),
-        state.entries,
+      const from = materializeAt(state, fromSha);
+      const to = materializeAt(
+        state,
+        toSha,
+        from === undefined ? undefined : { sha: fromSha, doc: from },
       );
+      return diffStates(fromSha, toSha, from, to, state.entries);
     },
     async restore(docId, targetSha, actor, audit, options) {
       const preparedDocId = docId;

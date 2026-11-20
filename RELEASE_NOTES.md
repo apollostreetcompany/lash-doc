@@ -1,5 +1,21 @@
 # Lash v1 Release Notes
 
+## Writing and review
+
+- The page, title and toolbar are readable as soon as the editor renders. On
+  phones, closing History returns focus to its button. Widening the window
+  releases the drawer so you can keep writing.
+- Open **History** beside the document status. A new local draft keeps its
+  first saved version when you immediately leave and reopen it. An older
+  version stays selected while you review it, even as new versions arrive.
+- Search covers every title in a large library, including older titles stored
+  only in the document list. **Show more documents** lets you browse further
+  by keyboard.
+- A verified save and a failure to update the Documents list now have separate
+  messages. You can retry the list update while continuing to write.
+- Comments, suggestions, invitations and AI feedback belong to the document
+  and draft that requested them. Reopening a panel starts a fresh interaction.
+
 ## Collaborative writing candidate
 
 Lash can take a local draft into a shared document. The owner can invite a named

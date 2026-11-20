@@ -24,7 +24,6 @@ const waitForEditor = async (page: Page) => {
     'contenteditable',
     'true',
   );
-  await expect(page.locator('.lash-app')).toHaveAttribute('data-entrance', 'false');
 };
 
 const seedMobileFocusState = async (page: Page): Promise<FocusSnapshot> =>

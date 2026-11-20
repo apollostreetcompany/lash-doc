@@ -89,6 +89,43 @@ function commentButton() {
   return [...paper.querySelectorAll('button')].find((button) => button.textContent === 'Comment');
 }
 
+it('requires fresh model availability when revision becomes eligible again', async () => {
+  vi.stubGlobal('matchMedia', (query: string) => ({
+    matches: query.includes('pointer: fine'),
+    addEventListener: vi.fn(),
+    removeEventListener: vi.fn(),
+  }));
+  let finishProbe!: (result: string) => void;
+  const availability = vi
+    .fn()
+    .mockResolvedValueOnce('available')
+    .mockImplementationOnce(
+      () =>
+        new Promise<string>((resolve) => {
+          finishProbe = resolve;
+        }),
+    );
+  vi.stubGlobal('LanguageModel', { availability });
+  const { onComment, onRevise } = await mountActions(true);
+  await React.act(async () => {
+    editor.commands.setTextSelection({ from: 1, to: 6 });
+  });
+  const text = editor.view.dom.querySelector('p')!.firstChild!;
+  await select(text, 0, text, 5);
+  expect(paper.textContent).toContain('Revise selection');
+  await React.act(async () =>
+    root.render(React.createElement(SelectionActions, { editor, onComment })),
+  );
+  await React.act(async () =>
+    root.render(React.createElement(SelectionActions, { editor, onComment, onRevise })),
+  );
+  expect(availability).toHaveBeenCalledTimes(2);
+  expect(commentButton()).toBeDefined();
+  expect(paper.textContent).not.toContain('Revise selection');
+  await React.act(async () => finishProbe('unavailable'));
+  expect(paper.textContent).not.toContain('Revise selection');
+});
+
 describe('native selection actions', () => {
   it('does not read the browser selection while dispatching an editable cell selection', async () => {
     await mountActions(

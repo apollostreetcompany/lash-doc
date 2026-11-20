@@ -19,12 +19,15 @@ import {
 const formatDate = new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' });
 const searchText = (value: string) => value.trim().replace(/\s+/g, ' ').toLocaleLowerCase();
 const activityTime = (value: string) => Date.parse(value) || 0;
+const PAGE_SIZE = 50;
+type LibraryDocument = LashDocumentRecord & { time: number; searchTitle: string };
 
 export function DocumentsWorkspace({ staticPreview = false }: { staticPreview?: boolean }) {
   const router = useRouter();
   const searchInput = useRef<HTMLInputElement>(null);
-  const [registry, setRegistry] = useState<LashDocumentRecord[] | 'unavailable' | null>(null);
-  const [query, setQuery] = useState('');
+  const [registry, setRegistry] = useState<LibraryDocument[] | 'unavailable' | null>(null);
+  const [{ query, limit }, setSearch] = useState({ query: '', limit: PAGE_SIZE });
+  const nextResultFocus = useRef<string | null>(null);
   const [createError, setCreateError] = useState(false);
   const [navigating, startNavigation] = useTransition();
 
@@ -32,9 +35,13 @@ export function DocumentsWorkspace({ staticPreview = false }: { staticPreview?: 
     const refresh = () => {
       try {
         setRegistry(
-          listDocuments(window.localStorage).sort(
-            (left, right) => activityTime(right.updatedAt) - activityTime(left.updatedAt),
-          ),
+          listDocuments(window.localStorage)
+            .map((record) => ({
+              ...record,
+              time: activityTime(record.updatedAt),
+              searchTitle: searchText(record.title),
+            }))
+            .sort((left, right) => right.time - left.time),
         );
       } catch {
         setRegistry('unavailable');
@@ -51,14 +58,29 @@ export function DocumentsWorkspace({ staticPreview = false }: { staticPreview?: 
       }
     };
 
+    const restore = (event: PageTransitionEvent) => {
+      if (event.persisted) refresh();
+    };
     refresh();
     window.addEventListener('storage', onStorage);
-    window.addEventListener('pageshow', refresh);
+    window.addEventListener('pageshow', restore);
     return () => {
       window.removeEventListener('storage', onStorage);
-      window.removeEventListener('pageshow', refresh);
+      window.removeEventListener('pageshow', restore);
     };
   }, []);
+
+  useEffect(() => {
+    if (nextResultFocus.current) {
+      document.getElementById(nextResultFocus.current)?.focus();
+      nextResultFocus.current = null;
+    }
+  }, [limit]);
+
+  const search = (value: string) => {
+    nextResultFocus.current = null;
+    setSearch({ query: value, limit: PAGE_SIZE });
+  };
 
   const createDocument = () => {
     const id = createNewDocumentId();
@@ -78,9 +100,10 @@ export function DocumentsWorkspace({ staticPreview = false }: { staticPreview?: 
 
   const normalizedQuery = searchText(query);
   const available = Array.isArray(registry);
-  const matches = available
-    ? registry.filter(({ title }) => searchText(title).includes(normalizedQuery))
-    : [];
+  const records = available ? registry : [];
+  const matches = normalizedQuery
+    ? records.filter(({ searchTitle }) => searchTitle.includes(normalizedQuery))
+    : records;
 
   return (
     <div className={styles.workspace}>
@@ -125,7 +148,7 @@ export function DocumentsWorkspace({ staticPreview = false }: { staticPreview?: 
               id="document-search"
               type="search"
               value={query}
-              onChange={(event) => setQuery(event.target.value)}
+              onChange={(event) => search(event.target.value)}
             />
           </div>
         ) : null}
@@ -149,7 +172,7 @@ export function DocumentsWorkspace({ staticPreview = false }: { staticPreview?: 
                 className={styles.clear}
                 type="button"
                 onClick={() => {
-                  setQuery('');
+                  search('');
                   searchInput.current?.focus();
                 }}
               >
@@ -159,11 +182,11 @@ export function DocumentsWorkspace({ staticPreview = false }: { staticPreview?: 
           ) : null}
           {matches.length > 0 ? (
             <ul className={styles.documents} aria-label="Documents, most recent first">
-              {matches.map(({ id, title, updatedAt }) => {
-                const time = activityTime(updatedAt);
+              {matches.slice(0, limit).map(({ id, title, updatedAt, time }) => {
                 return (
                   <li key={id}>
                     <Link
+                      id={`library-link-${id}`}
                       className={styles.document}
                       href={documentWorkspacePath(id, staticPreview) as Route}
                       prefetch={false}
@@ -181,6 +204,18 @@ export function DocumentsWorkspace({ staticPreview = false }: { staticPreview?: 
                 );
               })}
             </ul>
+          ) : null}
+          {matches.length > limit ? (
+            <button
+              className={styles.more}
+              type="button"
+              onClick={() => {
+                nextResultFocus.current = `library-link-${matches[limit].id}`;
+                setSearch({ query, limit: limit + PAGE_SIZE });
+              }}
+            >
+              Show more documents
+            </button>
           ) : null}
         </div>
       </main>

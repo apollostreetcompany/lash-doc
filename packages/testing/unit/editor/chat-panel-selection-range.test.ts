@@ -1,5 +1,6 @@
 /** @vitest-environment jsdom */
 
+import type { ReviewMutation } from '@lash/doc-chat';
 import { createLashEditorExtensions } from '@lash/editor-core';
 import { createDocumentId } from '@lash/types';
 import { Editor, type JSONContent } from '@tiptap/core';
@@ -13,6 +14,7 @@ import {
 } from '../../../../apps/web/components/editor/panels/chatAnchorPositions';
 import {
   ChatPanel,
+  readLocalChatThreadCount,
   type AnchoredCommentRequest,
   type ChatPanelProps,
   type ChatRealtimeStore,
@@ -97,25 +99,54 @@ const mountChat = async (
   return { editor, container, button, render, requestDocumentNavigation };
 };
 
-const fillComment = async (container: HTMLElement, value: string) => {
-  const input = container.querySelector<HTMLTextAreaElement>(
-    '[data-testid="chat-new-thread-textarea"]',
+const fillDiscussionField = async (container: HTMLElement, testId: string, value: string) => {
+  const input = container.querySelector<HTMLInputElement | HTMLTextAreaElement>(
+    `[data-testid="${testId}"]`,
   );
-  if (!input) throw new Error('Missing comment composer');
+  if (!input) throw new Error(`Missing ${testId}`);
   await React.act(async () => {
-    Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set?.call(
-      input,
-      value,
-    );
+    const prototype =
+      input instanceof HTMLTextAreaElement
+        ? HTMLTextAreaElement.prototype
+        : HTMLInputElement.prototype;
+    Object.getOwnPropertyDescriptor(prototype, 'value')?.set?.call(input, value);
     input.dispatchEvent(new Event('input', { bubbles: true }));
   });
   return input;
 };
 
+const fillComment = (container: HTMLElement, value: string) =>
+  fillDiscussionField(container, 'chat-new-thread-textarea', value);
+
 const postComment = async (container: HTMLElement, create: HTMLButtonElement) => {
   await React.act(async () => create.click());
   const input = await fillComment(container, 'Please review this wording.');
   await React.act(async () => input.form?.requestSubmit());
+};
+
+const mountReviewChat = async () => {
+  const editor = openEditor(undefined, openRoom());
+  editor.commands.insertContent('alpha');
+  const send = vi.fn<(_id: string, _mutation: ReviewMutation) => boolean>(() => true);
+  const store = new RealtimeChatStore(send);
+  store.receive({ type: 'review-snapshot', operations: [] });
+  const acknowledge = (sequence: number) =>
+    React.act(async () => {
+      const [operationId, operation] = send.mock.calls[sequence - 1] ?? [];
+      if (!operationId || !operation) throw new Error('Missing sent review');
+      store.receive({
+        type: 'review-operation',
+        operation: {
+          operationId,
+          operation,
+          sequence,
+          actorId: 'reviewer',
+          committedAt: '2026-11-21T00:00:00.000Z',
+        },
+      });
+      store.receive({ type: 'review-ack', operationId, sequence });
+    });
+  return { ...(await mountChat(editor, { from: 1, to: 6 }, store)), send, store, acknowledge };
 };
 
 const captureRequest = (editor: Editor, from: number, to: number): AnchoredCommentRequest =>
@@ -145,6 +176,20 @@ afterEach(async () => {
 });
 
 describe('ChatPanel exact selection anchors', () => {
+  it('counts persisted resolved threads and refuses to assume unreadable inventory is empty', async () => {
+    expect(readLocalChatThreadCount(docId)).toBe(0);
+    const { container, button } = await mountChat(openEditor('<p>alpha</p>'), { from: 1, to: 6 });
+    await postComment(container, button('chat-create-thread'));
+    const key = `lash:chat-threads:${docId}`;
+    const [saved] = JSON.parse(window.localStorage.getItem(key) ?? '[]');
+    window.localStorage.setItem(key, JSON.stringify([{ ...saved, status: 'resolved' }]));
+    expect(readLocalChatThreadCount(docId)).toBe(1);
+    window.localStorage.setItem(key, JSON.stringify([saved, { id: 'corrupt' }]));
+    expect(readLocalChatThreadCount(docId)).toBeNull();
+    window.localStorage.setItem(key, '{');
+    expect(readLocalChatThreadCount(docId)).toBeNull();
+  });
+
   it('opens the contextual request after the panel mounts and posts the captured duplicate', async () => {
     const editor = openEditor('<p>publish the beta or publish the beta</p>');
     const request = captureRequest(editor, 21, 37);
@@ -277,6 +322,115 @@ describe('ChatPanel exact selection anchors', () => {
     expect(send).not.toHaveBeenCalled();
     expect(container.querySelector('[role="alert"]')?.textContent).toContain('Shorten it');
     expect(input.value).toBe(comment);
+  });
+
+  it('does not let a retired review overwrite the next document’s draft', async () => {
+    const editor = openEditor(undefined, openRoom());
+    editor.commands.insertContent('alpha');
+    let finishReview: (result: { ok: true }) => void = () => undefined;
+    const pending = new Promise<{ ok: true }>((resolve) => {
+      finishReview = resolve;
+    });
+    const store = {
+      isReady: () => true,
+      readThreads: () => [],
+      subscribe: () => () => undefined,
+      submit: vi.fn(() => pending),
+    };
+    const { container, button, render } = await mountChat(editor, { from: 1, to: 6 }, store);
+    await React.act(async () => button('chat-create-thread').click());
+    const first = await fillComment(container, 'First document note');
+    await React.act(async () => first.form?.requestSubmit());
+    expect(store.submit).toHaveBeenCalledOnce();
+    expect(button('chat-post-thread').textContent).toBe('Posting…');
+
+    const nextStore = { ...store, submit: vi.fn(async () => ({ ok: true as const })) };
+    await render({ docId: createDocumentId('next-review-document'), realtimeStore: nextStore });
+    await React.act(async () => button('chat-create-thread').click());
+    const second = await fillComment(container, 'Next document note');
+    await React.act(async () => finishReview({ ok: true }));
+    expect(second.isConnected).toBe(true);
+    expect(second.value).toBe('Next document note');
+    expect(container.textContent).not.toContain('Comment posted.');
+    expect(button('chat-post-thread').disabled).toBe(false);
+  });
+
+  it.each([false, true])(
+    'settles an acknowledged comment without restoring old-tab focus (reopened before ack: %s)',
+    async (reopenBeforeAck) => {
+      const { container, button, render, acknowledge, send } = await mountReviewChat();
+      await postComment(container, button('chat-create-thread'));
+      expect(button('chat-post-thread').textContent).toBe('Posting…');
+      expect(send).toHaveBeenCalledOnce();
+      await render({ open: false });
+      expect(container.childElementCount).toBe(0);
+      if (reopenBeforeAck) await render();
+      const currentControl = document.createElement('button');
+      document.body.append(currentControl);
+      currentControl.focus();
+
+      await acknowledge(1);
+      if (!reopenBeforeAck) await render();
+
+      expect(container.querySelector('[data-testid="chat-new-thread-composer"]')).toBeNull();
+      expect(container.querySelector('[data-testid="chat-thread"]')?.textContent).toContain(
+        'Please review this wording.',
+      );
+      expect(container.textContent).not.toContain('Comment posted.');
+      expect(document.activeElement).toBe(currentControl);
+      expect(send).toHaveBeenCalledOnce();
+    },
+  );
+
+  it('clears an acknowledged reply once when Discussion reopens', async () => {
+    const { container, button, render, acknowledge, send } = await mountReviewChat();
+    await postComment(container, button('chat-create-thread'));
+    await acknowledge(1);
+    expect(container.textContent).toContain('Comment posted.');
+    const reply = 'I agree with this point.';
+    await fillDiscussionField(container, 'chat-reply-input', reply);
+    await React.act(async () => button('chat-add-reply').click());
+    expect(send).toHaveBeenCalledTimes(2);
+    expect(send.mock.calls[1]?.[1]).toMatchObject({ type: 'reply', body: reply });
+    await render({ open: false });
+    await acknowledge(2);
+    await render();
+
+    expect(
+      container.querySelector<HTMLInputElement>('[data-testid="chat-reply-input"]')?.value,
+    ).toBe('');
+    expect(container.textContent?.split(reply)).toHaveLength(2);
+    expect(container.textContent).not.toContain('Comment posted.');
+    expect(button('chat-add-reply').disabled).toBe(true);
+    await React.act(async () => button('chat-add-reply').click());
+    expect(send).toHaveBeenCalledTimes(2);
+  });
+
+  it('keeps a failed comment draft available for retry after switching tabs', async () => {
+    const { container, button, render, send, store } = await mountReviewChat();
+    await postComment(container, button('chat-create-thread'));
+    await render({ open: false });
+    await React.act(async () => {
+      store.receive({
+        type: 'review-error',
+        operationId: send.mock.calls[0]?.[0],
+        code: 'unavailable',
+      });
+    });
+    await render();
+
+    const note = container.querySelector<HTMLTextAreaElement>(
+      '[data-testid="chat-new-thread-textarea"]',
+    );
+    expect(note?.value).toBe('Please review this wording.');
+    expect(container.querySelector('[role="alert"]')?.textContent).toBe(
+      'Lash could not save this discussion change. Try again.',
+    );
+    expect(button('chat-post-thread').disabled).toBe(false);
+    await React.act(async () => note?.form?.requestSubmit());
+    expect(send).toHaveBeenCalledTimes(2);
+    expect(send.mock.calls[1]?.[1]).toEqual(send.mock.calls[0]?.[1]);
+    await React.act(async () => store.disconnect());
   });
 
   it('preserves a reviewer draft through a new selection, lost authority and a disconnect race', async () => {

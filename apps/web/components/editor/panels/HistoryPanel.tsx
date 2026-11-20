@@ -32,6 +32,13 @@ type SuggestionResolutionRecord = {
 };
 type SavedHistorySnapshot = { readonly text: string };
 type LoadSavedHistoryPreview = () => Promise<SavedHistorySnapshot | null>;
+type LoadHistoryDiff = (fromSha: string, toSha: string) => Promise<DiffJSON>;
+type HistoryComparison = {
+  load: LoadHistoryDiff;
+  fromSha: string;
+  toSha: string;
+  result: { state: 'ready'; diff: DiffJSON } | { state: 'unavailable' };
+};
 
 export interface HistoryPanelProps {
   editor: Editor | null;
@@ -48,7 +55,7 @@ export interface HistoryPanelProps {
   open?: boolean;
   restoreNotice?: string;
   loadSavedHistoryPreview?: LoadSavedHistoryPreview;
-  loadDiff: (fromSha: string, toSha: string) => Promise<DiffJSON>;
+  loadDiff: LoadHistoryDiff;
   onSelect: (entryId: string) => void;
   onRestore: (entry: HistoryEntry) => void;
   onToggleAuthorship: () => void;
@@ -250,31 +257,49 @@ export function HistoryPanel({
   onAcceptSuggestion,
   onRejectSuggestion,
 }: HistoryPanelProps) {
-  const [loaded, setLoaded] = useState<{ entryId: string; diff: DiffJSON | null } | null>(null);
-  const historyVerified = availability === 'ready' || availability === 'empty-baseline' ||
+  const [loaded, setLoaded] = useState<HistoryComparison | null>(null);
+  const historyVerified =
+    availability === 'ready' ||
+    availability === 'empty-baseline' ||
     availability === 'capacity-reached';
-  const authorIds = Array.from(new Set(entries.map((entry) => entry.actor.id))).sort();
-  const visibleEntries = entries.filter((entry) => {
-    if (authorFilter && entry.actor.id !== authorFilter) return false;
-    return matchesTimeFilter(entry, timeFilter);
-  });
+  const visibleEntries =
+    open && historyVerified
+      ? entries.filter((entry) => {
+          if (authorFilter && entry.actor.id !== authorFilter) return false;
+          return matchesTimeFilter(entry, timeFilter);
+        })
+      : [];
   const selectedEntry =
     visibleEntries.find((entry) => entry.id === selectedEntryId) ?? visibleEntries.at(-1) ?? null;
-  const entryId = selectedEntry?.id;
-  const parentSha = selectedEntry?.parentSha;
-  const resultSha = selectedEntry?.resultSha;
+  const fromSha = selectedEntry?.parentSha;
+  const toSha = selectedEntry?.resultSha;
   useEffect(() => {
-    if (!open || !entryId || !parentSha || !resultSha) return;
+    if (!fromSha || !toSha) return;
     let active = true;
-    void loadDiff(parentSha, resultSha).then(
-      (diff) => { if (active) setLoaded({ entryId, diff }); },
-      () => { if (active) setLoaded({ entryId, diff: null }); },
-    );
-    return () => { active = false; };
-  }, [entryId, loadDiff, open, parentSha, resultSha]);
+    const publish = (result: HistoryComparison['result']) => {
+      if (active) setLoaded({ load: loadDiff, fromSha, toSha, result });
+    };
+    const compare = async () => {
+      try {
+        publish({ state: 'ready', diff: await loadDiff(fromSha, toSha) });
+      } catch {
+        publish({ state: 'unavailable' });
+      }
+    };
+    void compare();
+    return () => {
+      active = false;
+    };
+  }, [fromSha, loadDiff, toSha]);
   if (!open) return null;
-  const selectedDiff = loaded?.entryId === entryId ? loaded : null;
-  const diff = selectedDiff?.diff;
+  const authorIds = historyVerified
+    ? Array.from(new Set(entries.map((entry) => entry.actor.id))).sort()
+    : [];
+  const comparison =
+    loaded?.load === loadDiff && loaded.fromSha === fromSha && loaded.toSha === toSha
+      ? loaded.result
+      : null;
+  const diff = comparison?.state === 'ready' ? comparison.diff : null;
   const canRestoreSelected = selectedEntry ? entryHasHistoryBody(selectedEntry) : false;
   const hasActiveFilters = Boolean(authorFilter || timeFilter);
   const selectedSuggestionAccepted = selectedEntry
@@ -456,11 +481,11 @@ export function HistoryPanel({
         </ol>
       ) : availability === 'empty-baseline' ? (
         <p className="history-empty" data-testid="history-empty">
-          No durable versions yet. History starts with your next saved edit.
+          No versions yet. History records saved edits after a short pause.
         </p>
       ) : null}
 
-      {historyVerified && selectedEntry && selectedDiff && !diff ? (
+      {historyVerified && selectedEntry && comparison?.state === 'unavailable' ? (
         <p role="status">This version comparison is unavailable.</p>
       ) : null}
 

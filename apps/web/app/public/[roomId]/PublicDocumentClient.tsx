@@ -7,7 +7,7 @@ import type {
   PublicDocumentAccessModeV1,
 } from '@lash/types';
 import * as React from 'react';
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 import styles from './page.module.css';
 import {
@@ -101,6 +101,13 @@ type AuthoringState =
   | Readonly<{ phase: 'idle' | 'checking' | 'anonymous' }>
   | Readonly<{ phase: 'authenticated'; csrfProof: string }>
   | Readonly<{ phase: 'error'; message: string }>;
+
+type CommentSubmission = { phase: 'idle' | 'posting' } | { phase: 'notice'; message: string };
+type PublicCommentAttempt = {
+  authorization: PublicCommentAuthorizationV1;
+  body: string;
+  mutationId: string;
+};
 
 const PUBLIC_COMMENT_DRAFT_MAX_AGE_MS = 30 * 60 * 1_000;
 
@@ -256,9 +263,19 @@ export function PublicDocumentClient({
   const [commentState, setCommentState] = useState<CommentState>({ phase: 'idle' });
   const [authoringState, setAuthoringState] = useState<AuthoringState>({ phase: 'idle' });
   const [draft, setDraft] = useState('');
-  const [commentStatus, setCommentStatus] = useState('');
-  const [posting, setPosting] = useState(false);
+  const [submission, setSubmission] = useState<CommentSubmission>({ phase: 'idle' });
+  const postRequest = useRef<AbortController | null>(null);
+  const postAttempt = useRef<PublicCommentAttempt | null>(null);
+  const posting = submission.phase === 'posting';
   const draftKey = `lash:public-comment-draft:v1:${roomId}`;
+
+  const retirePost = useCallback(() => {
+    postRequest.current?.abort();
+    postRequest.current = null;
+    setSubmission({ phase: 'idle' });
+  }, []);
+
+  const showCommentNotice = (message: string) => setSubmission({ phase: 'notice', message });
 
   useEffect(() => {
     setDraft(readDraft(draftKey));
@@ -282,6 +299,7 @@ export function PublicDocumentClient({
       provider = dependencies.createProvider(result.session);
       unsubscribe = provider.subscribe((snapshot) => {
         if (controller.signal.aborted) return;
+        if (snapshot.phase !== 'ready' || snapshot.mode !== 'comment') retirePost();
         if (snapshot.phase === 'ready') {
           setState({
             phase: 'ready',
@@ -303,10 +321,12 @@ export function PublicDocumentClient({
     })();
     return () => {
       controller.abort();
+      postRequest.current?.abort();
+      postRequest.current = null;
       unsubscribe?.();
       provider?.destroy();
     };
-  }, [dependencies, refreshKey, roomId]);
+  }, [dependencies, refreshKey, retirePost, roomId]);
 
   const readyAuthorization = state.phase === 'ready' ? state.authorization : null;
   const readyMode = state.phase === 'ready' ? state.mode : null;
@@ -315,7 +335,7 @@ export function PublicDocumentClient({
     if (!readyAuthorization || readyMode !== 'comment') {
       setCommentState({ phase: 'idle' });
       setAuthoringState({ phase: 'idle' });
-      setCommentStatus('');
+      retirePost();
       return;
     }
 
@@ -344,6 +364,7 @@ export function PublicDocumentClient({
         result.error === 'public-access-changed' ||
         result.error === 'document-unavailable'
       ) {
+        retirePost();
         setState({ phase: 'unavailable' });
       } else {
         setCommentState({ phase: 'error', message: 'Comments are temporarily unavailable.' });
@@ -353,6 +374,7 @@ export function PublicDocumentClient({
     void requestAuthoringSession({ roomId, signal: controller.signal }).then((result) => {
       if (controller.signal.aborted) return;
       if (result.ok) {
+        if (!result.authenticated) postAttempt.current = null;
         setAuthoringState(
           result.authenticated
             ? { phase: 'authenticated', csrfProof: result.csrfProof }
@@ -362,8 +384,10 @@ export function PublicDocumentClient({
         result.error === 'public-access-changed' ||
         result.error === 'document-unavailable'
       ) {
+        retirePost();
         setState({ phase: 'unavailable' });
       } else if (result.error === 'authentication-required') {
+        postAttempt.current = null;
         setAuthoringState({ phase: 'anonymous' });
       } else {
         setAuthoringState({
@@ -374,9 +398,12 @@ export function PublicDocumentClient({
     });
 
     return () => controller.abort();
-  }, [dependencies, readyAuthorization, readyMode, roomId]);
+  }, [dependencies, readyAuthorization, readyMode, retirePost, roomId]);
 
   const rememberDraft = (value: string) => {
+    if (postAttempt.current && canonicalizePublicCommentBody(value) !== postAttempt.current.body) {
+      postAttempt.current = null;
+    }
     setDraft(value);
     try {
       if (value) {
@@ -396,33 +423,63 @@ export function PublicDocumentClient({
   };
 
   const retry = () => {
+    retirePost();
     setState({ phase: 'authorizing' });
     setCommentState({ phase: 'idle' });
     setAuthoringState({ phase: 'idle' });
-    setCommentStatus('');
     setRefreshKey((value) => value + 1);
   };
 
   const postComment = async () => {
     const body = canonicalizePublicCommentBody(draft);
     if (!body) {
-      setCommentStatus('Write a comment before posting.');
+      showCommentNotice('Write a comment before posting.');
       return;
     }
-    if (authoringState.phase !== 'authenticated' || commentState.phase !== 'ready') return;
+    if (
+      postRequest.current ||
+      readyMode !== 'comment' ||
+      authoringState.phase !== 'authenticated' ||
+      commentState.phase !== 'ready'
+    )
+      return;
 
-    setPosting(true);
-    setCommentStatus('');
+    const request = new AbortController();
+    postRequest.current = request;
+    setSubmission({ phase: 'posting' });
+    const authorization = commentState.authorization;
+    const previous = postAttempt.current;
+    const sameAttempt =
+      previous?.body === body &&
+      previous.authorization.roomId === roomId &&
+      previous.authorization.policyVersion === authorization.policyVersion &&
+      previous.authorization.cutoffGeneration === authorization.cutoffGeneration;
+    const attempt = sameAttempt
+      ? previous
+      : { authorization, body, mutationId: crypto.randomUUID() };
+    postAttempt.current = attempt;
     const createComment = dependencies.createComment ?? defaultDependencies.createComment!;
-    const result = await createComment({
-      roomId,
-      mutationId: crypto.randomUUID(),
-      expectedPolicyVersion: commentState.authorization.policyVersion,
-      expectedCutoffGeneration: commentState.authorization.cutoffGeneration,
-      body,
-      csrfProof: authoringState.csrfProof,
-    });
-    setPosting(false);
+    let result: PublicCommentCreateBrowserResult;
+    try {
+      result = await createComment({
+        roomId,
+        mutationId: attempt.mutationId,
+        expectedPolicyVersion: authorization.policyVersion,
+        expectedCutoffGeneration: authorization.cutoffGeneration,
+        body,
+        csrfProof: authoringState.csrfProof,
+        signal: request.signal,
+      });
+    } catch {
+      if (postRequest.current === request) {
+        postRequest.current = null;
+        showCommentNotice('Commenting is temporarily unavailable.');
+      }
+      return;
+    }
+    if (postRequest.current !== request || request.signal.aborted) return;
+    postRequest.current = null;
+    if (result.ok || !result.retryable) postAttempt.current = null;
 
     if (result.ok) {
       setCommentState((current) => {
@@ -439,21 +496,22 @@ export function PublicDocumentClient({
         };
       });
       rememberDraft('');
-      setCommentStatus('Comment posted.');
+      showCommentNotice('Comment posted.');
     } else if (result.error === 'authentication-required') {
       setAuthoringState({ phase: 'anonymous' });
-      setCommentStatus('Sign in to post this comment.');
+      showCommentNotice('Sign in to post this comment.');
     } else if (
       result.error === 'public-access-changed' ||
       result.error === 'document-unavailable'
     ) {
+      retirePost();
       setState({ phase: 'unavailable' });
     } else if (result.error === 'rate-limited') {
-      setCommentStatus('You’re commenting quickly. Please try again shortly.');
+      showCommentNotice('You’re commenting quickly. Please try again shortly.');
     } else if (result.error === 'comment-conflict') {
-      setCommentStatus('This comment could not be posted. Please try again.');
+      showCommentNotice('This comment could not be posted. Please try again.');
     } else {
-      setCommentStatus('Commenting is temporarily unavailable.');
+      showCommentNotice('Commenting is temporarily unavailable.');
     }
   };
 
@@ -550,7 +608,7 @@ export function PublicDocumentClient({
               {authoringState.phase === 'authenticated' ? (
                 <button
                   className={styles.primaryButton}
-                  disabled={posting}
+                  disabled={posting || commentState.phase !== 'ready'}
                   onClick={() => void postComment()}
                   type="button"
                 >
@@ -569,9 +627,9 @@ export function PublicDocumentClient({
               ) : (
                 <span className={styles.commentMuted}>Checking sign-in…</span>
               )}
-              {commentStatus ? (
+              {submission.phase === 'notice' ? (
                 <p aria-live="polite" className={styles.commentStatus} role="status">
-                  {commentStatus}
+                  {submission.message}
                 </p>
               ) : null}
             </div>

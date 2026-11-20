@@ -61,8 +61,9 @@ const installDesktopViewport = () => {
 };
 
 const ShellHarness = () => {
-  const [sidebarOpen, setSidebarOpen] = React.useState(false);
-  const [railOpen, setRailOpen] = React.useState(false);
+  const [drawer, setDrawer] = React.useState<'sidebar' | 'rail' | null>(null);
+  const sidebarOpen = drawer === 'sidebar';
+  const railOpen = drawer === 'rail';
   const [railSection, setRailSection] = React.useState<'share' | 'discussion'>('share');
   const [mobileRailFocusOrigin, setMobileRailFocusOrigin] =
     React.useState<HTMLButtonElement | null>(null);
@@ -78,11 +79,11 @@ const ShellHarness = () => {
   }, [railOpen, showPending]);
 
   const closeSidebar = React.useCallback(() => {
-    setSidebarOpen(false);
+    setDrawer(null);
   }, []);
   const closeRail = React.useCallback(() => {
     setRestoreMobileRailFocus(true);
-    setRailOpen(false);
+    setDrawer(null);
   }, []);
 
   const openRail = React.useCallback(
@@ -90,7 +91,7 @@ const ShellHarness = () => {
       setMobileRailFocusOrigin(event.currentTarget);
       setRestoreMobileRailFocus(true);
       setRailSection(section);
-      setRailOpen(true);
+      setDrawer('rail');
     },
     [],
   );
@@ -106,7 +107,7 @@ const ShellHarness = () => {
         'aria-label': 'Open navigation menu',
         'aria-controls': 'lash-sidebar',
         'aria-expanded': sidebarOpen ? 'true' : 'false',
-        onClick: () => setSidebarOpen(true),
+        onClick: () => setDrawer('sidebar'),
       },
       'Menu',
     ),
@@ -181,7 +182,7 @@ const ShellHarness = () => {
         onClick: () => {
           setRestoreMobileRailFocus(false);
           setShowPending(true);
-          setRailOpen(false);
+          setDrawer(null);
         },
       },
       'Show in document',
@@ -202,14 +203,14 @@ const ShellHarness = () => {
       focusMode: false,
       railOpen: true,
       sidebarCollapsed: false,
-      mobileSidebarOpen: sidebarOpen,
-      mobileRailOpen: railOpen,
-      mobileRailFocusRequest: {
-        trigger: mobileRailFocusOrigin,
-        restoreFocus: restoreMobileRailFocus,
-      },
-      onMobileSidebarClose: closeSidebar,
-      onMobileRailClose: closeRail,
+      mobileViewport: true,
+      mobileDrawer: sidebarOpen
+        ? { kind: 'sidebar' }
+        : railOpen
+          ? { kind: 'rail', trigger: mobileRailFocusOrigin }
+          : null,
+      restoreMobileDrawerFocus: restoreMobileRailFocus,
+      onMobileDrawerClose: sidebarOpen ? closeSidebar : closeRail,
     },
     React.createElement('button', { type: 'button', 'data-testid': 'editor-action' }, 'Edit'),
   );
@@ -529,6 +530,26 @@ describe('mobile shell accessibility state machine', () => {
       window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', shiftKey: true }));
     });
     expect(close).toBe(document.activeElement);
+  });
+
+  it('transfers a replaced drawer to its own focus and return target', async () => {
+    const host = await renderHarness();
+    const menu = host.querySelector<HTMLButtonElement>('[data-testid="topbar-mobile-menu"]');
+    const discussion = host.querySelector<HTMLButtonElement>(
+      '[data-testid="topbar-discussion-button"]',
+    );
+
+    await React.act(async () => menu?.click());
+    await React.act(async () => discussion?.click());
+    expect(document.activeElement).toBe(host.querySelector('#lash-rail [aria-current="true"]'));
+    expect(host.querySelector('#lash-sidebar')?.hasAttribute('inert')).toBe(true);
+    expect(host.querySelector('.lash-canvas')?.hasAttribute('inert')).toBe(true);
+
+    await React.act(async () => {
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
+    });
+    expect(discussion).toBe(document.activeElement);
+    expect(host.querySelector('.lash-canvas')?.hasAttribute('inert')).toBe(false);
   });
 
   it('restores the actual Discussion trigger after Escape', async () => {

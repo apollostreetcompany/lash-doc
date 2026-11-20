@@ -195,4 +195,73 @@ describe('autosave-latency', () => {
     expect(scheduler.getStatus()).toBe('error');
     expect(scheduler.getLastSavedAt()).toBe('2026-07-18T00:00:00.000Z');
   });
+
+  test('a failed snapshot reaches error and a subsequent edit can save', async () => {
+    const getDocJson = vi
+      .fn()
+      .mockImplementationOnce(() => {
+        throw new Error('editor snapshot unavailable');
+      })
+      .mockReturnValue({ type: 'doc', content: [] });
+    const onSave = vi.fn();
+    const scheduler = createAutosaveScheduler({ getDocJson, onSave });
+
+    scheduler.notify();
+    await expect(scheduler.flushPending()).resolves.toBeUndefined();
+    expect(scheduler.getStatus()).toBe('error');
+    expect(scheduler.getLastSavedAt()).toBeNull();
+    expect(onSave).not.toHaveBeenCalled();
+
+    scheduler.notify();
+    await vi.advanceTimersByTimeAsync(350);
+    expect(onSave).toHaveBeenCalledTimes(1);
+    expect(scheduler.getStatus()).toBe('saved');
+  });
+
+  test('a dirty timer that expires during a save is rearmed after that save', async () => {
+    let finishFirstSave!: () => void;
+    const firstSave = new Promise<void>((resolve) => {
+      finishFirstSave = resolve;
+    });
+    const onSave = vi.fn().mockReturnValueOnce(firstSave);
+    const onStatusChange = vi.fn();
+    const scheduler = createAutosaveScheduler({ onSave, onStatusChange });
+
+    scheduler.notify();
+    await vi.advanceTimersByTimeAsync(350);
+    expect(scheduler.getStatus()).toBe('saving');
+    scheduler.notify();
+    await vi.advanceTimersByTimeAsync(350);
+    expect(onSave).toHaveBeenCalledTimes(1);
+
+    finishFirstSave();
+    await vi.advanceTimersByTimeAsync(349);
+    expect(scheduler.getStatus()).toBe('pending');
+    expect(onSave).toHaveBeenCalledTimes(1);
+    expect(onStatusChange.mock.calls.map(([status]) => status)).not.toContain('saved');
+    await vi.advanceTimersByTimeAsync(1);
+    expect(onSave).toHaveBeenCalledTimes(2);
+    expect(scheduler.getStatus()).toBe('saved');
+  });
+
+  test('finishing an older save keeps newer scheduled changes visibly unsaved', async () => {
+    let finishFirstSave!: () => void;
+    const firstSave = new Promise<void>((resolve) => {
+      finishFirstSave = resolve;
+    });
+    const onSave = vi.fn().mockReturnValueOnce(firstSave);
+    const scheduler = createAutosaveScheduler({ onSave });
+
+    scheduler.notify();
+    await vi.advanceTimersByTimeAsync(350);
+    scheduler.notify();
+    finishFirstSave();
+    await vi.advanceTimersByTimeAsync(349);
+    expect(scheduler.getStatus()).toBe('pending');
+    expect(onSave).toHaveBeenCalledTimes(1);
+
+    await vi.advanceTimersByTimeAsync(1);
+    expect(onSave).toHaveBeenCalledTimes(2);
+    expect(scheduler.getStatus()).toBe('saved');
+  });
 });

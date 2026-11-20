@@ -128,6 +128,95 @@ const envelope = (
 });
 
 describe('local document body persistence', () => {
+  it('keeps the initial History marker through verified pending saves and clears it on a later save', () => {
+    const storage = new MemoryStorage();
+    const documentId = 'pending-first-history';
+    const key = localDocumentBodyKey(documentId);
+    const options = { storage, documentId, validateSchema };
+    storage.failures.set(key, new DOMException('Quota', 'QuotaExceededError'));
+    expect(() =>
+      saveLocalDocumentBody({
+        ...options,
+        doc: paragraphDoc('Unverified first edit'),
+        expected: null,
+        firstHistoryPending: true,
+      }),
+    ).toThrow(expect.objectContaining({ code: 'quota' }));
+    expect(loadLocalDocumentBody(options)).toEqual({ state: 'empty', expected: null });
+    storage.failures.delete(key);
+
+    const first = saveLocalDocumentBody({
+      ...options,
+      doc: paragraphDoc('First edit'),
+      expected: null,
+      firstHistoryPending: true,
+    });
+    const latest = saveLocalDocumentBody({
+      ...options,
+      doc: paragraphDoc('Completed first edit'),
+      expected: first,
+    });
+    expect(loadLocalDocumentBody(options)).toMatchObject({
+      state: 'ready',
+      envelope: { firstHistoryPending: true, doc: paragraphDoc('Completed first edit') },
+    });
+    const afterCheckpoint = saveLocalDocumentBody({
+      ...options,
+      doc: paragraphDoc('Later edit after the checkpoint'),
+      expected: latest,
+      firstHistoryPending: false,
+    });
+    expect(afterCheckpoint).not.toHaveProperty('firstHistoryPending');
+
+    storage.removeItem(key);
+    const recovery = loadLocalDocumentBody(options);
+    if (recovery.state !== 'recovered-awaiting-confirmation') throw new Error('Missing backup');
+    expect(recovery.envelope.firstHistoryPending).toBe(true);
+    const promoted = promoteRecoveredLocalDocumentBody({
+      ...options,
+      recovered: recovery.envelope,
+      recoveryToken: recovery.recoveryToken,
+    });
+    expect(promoted.doc).toEqual(paragraphDoc('Completed first edit'));
+    expect(promoted).not.toHaveProperty('firstHistoryPending');
+  });
+
+  it('does not treat malformed metadata, existing legacy drafts, or an unresolved divergence as initial saves', () => {
+    const storage = new MemoryStorage();
+    const documentId = 'unverified-first-history';
+    const key = localDocumentBodyKey(documentId);
+    const options = { storage, documentId, validateSchema };
+    const initial = saveLocalDocumentBody({
+      ...options,
+      doc: paragraphDoc('Legacy'),
+      expected: null,
+    });
+    const malformed = JSON.stringify({ ...initial, firstHistoryPending: 'true' });
+    storage.setItem(key, malformed);
+    const loaded = loadLocalDocumentBody(options);
+    expect(loaded.state).toBe('ready');
+    if (loaded.state !== 'ready') throw new Error('Missing verified primary');
+    expect(loaded.envelope).not.toHaveProperty('firstHistoryPending');
+    expect(storage.getItem(key)).toBe(malformed);
+
+    const legacySave = saveLocalDocumentBody({
+      ...options,
+      doc: paragraphDoc('Legacy continued'),
+      expected: initial,
+      firstHistoryPending: true,
+    });
+    expect(legacySave).not.toHaveProperty('firstHistoryPending');
+
+    storage.setItem(
+      key,
+      JSON.stringify({ ...legacySave, divergentHistoryHead: null, firstHistoryPending: true }),
+    );
+    const diverged = loadLocalDocumentBody(options);
+    if (diverged.state !== 'ready') throw new Error('Missing verified divergent primary');
+    expect(diverged.envelope.divergentHistoryHead).toBeNull();
+    expect(diverged.envelope).not.toHaveProperty('firstHistoryPending');
+  });
+
   it('commits divergence with the body and carries it through later saves and backup recovery', () => {
     const storage = new MemoryStorage();
     const documentId = 'history-divergence';

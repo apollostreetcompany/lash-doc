@@ -7,8 +7,9 @@ import {
   type HistoryPersistenceAdapter,
   type HistoryPersistenceCommitInput,
   type HistoryPersistenceCommitResult,
+  type PersistedHistoryEnvelopeV1,
 } from '@lash/history';
-import { createDocumentId } from '@lash/types';
+import { canonicalize, createDocumentId, hashCanonical } from '@lash/types';
 import { describe, expect, it, vi } from 'vitest';
 
 import { imageWithCaption } from '../../fixtures/image-with-caption';
@@ -69,6 +70,40 @@ const appendText = async (
   );
 
 describe('durable local history projection', () => {
+  it('distinguishes missing History from a verified persisted empty baseline', async () => {
+    const persistence = new MemoryHistoryPersistence();
+    const docId = createDocumentId('durable-empty-history');
+    const options = { persistence, snapshotInterval: 48 };
+    const store = createHistoryStore(options);
+    const missing = await store.hydrate(docId);
+    expect(missing).toMatchObject({ state: 'empty-baseline' });
+    expect(missing).not.toHaveProperty('durable');
+    if (missing.state !== 'empty-baseline') throw new Error('Expected missing baseline');
+    const created = await appendText(store, docId, missing.head, '', 'An initial edit');
+    expect(created.ok).toBe(true);
+
+    const raw = persistence.primary.get(String(docId));
+    if (!raw) throw new Error('Expected an envelope fixture');
+    const { payload, integrity } = JSON.parse(raw) as PersistedHistoryEnvelopeV1;
+    const emptyPayload = { ...payload, entries: [], head: payload.baseSha };
+    const emptyRaw = canonicalize({
+      payload: emptyPayload,
+      integrity: { ...integrity, payloadSha: await hashCanonical(emptyPayload) },
+    });
+    persistence.primary.set(String(docId), emptyRaw);
+    const reopened = createHistoryStore(options);
+    const empty = { state: 'empty-baseline', head: missing.head, entryCount: 0, durable: true };
+    await expect(reopened.hydrate(docId)).resolves.toEqual(empty);
+    await expect(reopened.hydrate(docId)).resolves.toEqual(empty);
+
+    persistence.primary.delete(String(docId));
+    persistence.backup.set(String(docId), emptyRaw);
+    await expect(createHistoryStore(options).hydrate(docId)).resolves.toEqual({
+      state: 'recovery-available',
+      entryCount: 0,
+    });
+  });
+
   it('keeps structured versions with embedded image bytes through 101 edits, reload, and restore', async () => {
     const persistence = new MemoryHistoryPersistence();
     const documentId = createDocumentId('history-rich-media');
@@ -147,6 +182,9 @@ describe('durable local history projection', () => {
       entryCount: 101,
       head: current,
     });
+    const returned = (await reopened.loadAt(documentId, historical)) as ReturnType<typeof snapshot>;
+    const returnedContent = returned.body?.content as Array<Record<string, unknown>>;
+    returnedContent[1].attrs = { src: 'caller changed the returned snapshot' };
     await expect(reopened.loadAt(documentId, historical)).resolves.toEqual(snapshot(5));
     await expect(reopened.diff(documentId, historical, current)).resolves.toMatchObject({
       spans: expect.arrayContaining([expect.objectContaining({ kind: 'inserted', text: '101' })]),

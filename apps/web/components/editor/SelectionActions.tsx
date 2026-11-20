@@ -191,7 +191,10 @@ export function SelectionActions({ editor, onComment, onRevise }: SelectionActio
   }, []);
 
   useEffect(() => {
-    if (!desktop || !revisionEnabled) return;
+    if (!desktop || !revisionEnabled) {
+      setModelAvailable(false);
+      return;
+    }
     let active = true;
     void getWritingModelAvailability().then((outcome) => {
       if (active) {

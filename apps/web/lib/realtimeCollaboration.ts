@@ -1088,6 +1088,7 @@ export class LashRealtimeYjsProvider {
   private recoverySeal: RealtimeRecoverySeal | null = null;
   private sealedInventory: RealtimeUnsyncedRecoverySnapshot | null = null;
   private socketEpoch = 0;
+  private notificationSequence = 0;
   private connectionAttempt = 0;
   private suppressAutoReconnect = false;
   private networkEventTarget: Window | null = null;
@@ -1802,11 +1803,10 @@ export class LashRealtimeYjsProvider {
       this.doc.on('update', this.handleLocalUpdate);
       this.localListenerAttached = true;
     }
-    this.setConnectionState('connected');
+    this.status = 'connected';
+    this.flushQueuedUpdates();
+    this.emit();
     if (this.hasSharedHistory()) this.sharedHistory.refresh();
-    for (const queued of this.queuedUpdates.splice(0)) {
-      this.sendUpdatePayload(queued.update, queued.updateId);
-    }
     this.sendAwareness();
     if (firstHydration) {
       const resolve = this.resolveStart;
@@ -1831,41 +1831,46 @@ export class LashRealtimeYjsProvider {
     ) {
       return;
     }
-    const updateId = this.nextUpdateId();
-    const socket = this.socket;
-    if (!this.hydrated || !socket || socket.readyState !== SOCKET_OPEN) {
-      this.queuedUpdates.push({ update, updateId });
-      this.emit();
-      return;
-    }
-    this.sendUpdatePayload(update, updateId);
+    this.queuedUpdates.push({ update, updateId: this.nextUpdateId() });
+    this.flushQueuedUpdates();
+    this.emit();
   }
 
-  private sendUpdatePayload(update: Uint8Array, updateId: string) {
+  private flushQueuedUpdates() {
+    const socket = this.socket;
     if (
       this.lifecycleState !== 'active' ||
-      !update.length ||
       !this.canWrite ||
+      !this.hydrated ||
+      !socket ||
+      socket.readyState !== SOCKET_OPEN ||
       (this.authority && !this.authority.getSnapshot().bodyWrite)
     ) {
       return;
     }
-    const socket = this.socket;
-    if (!this.hydrated || !socket || socket.readyState !== SOCKET_OPEN) {
-      this.queuedUpdates.push({ update, updateId });
-      this.emit();
-      return;
+
+    // Publish after the batch has moved from the queue to pending. A subscriber
+    // can synchronously seal the provider and needs a complete recovery inventory.
+    let sent = 0;
+    for (const { update, updateId } of this.queuedUpdates) {
+      if (socket.readyState !== SOCKET_OPEN) break;
+      try {
+        socket.send(
+          JSON.stringify({
+            type: 'yjs-update',
+            updateId,
+            update: bytesToBase64(update),
+            ...(this.historyGeneration === null ? {} : { historyGeneration: this.historyGeneration }),
+          }),
+        );
+      } catch {
+        // Keep this update and the later updates queued for the next send or reconnect.
+        break;
+      }
+      this.pendingUpdates.set(updateId, update);
+      sent += 1;
     }
-    this.pendingUpdates.set(updateId, update);
-    socket.send(
-      JSON.stringify({
-        type: 'yjs-update',
-        updateId,
-        update: bytesToBase64(update),
-        ...(this.historyGeneration === null ? {} : { historyGeneration: this.historyGeneration }),
-      }),
-    );
-    this.emit();
+    if (sent > 0) this.queuedUpdates.splice(0, sent);
   }
 
   private sendAwareness() {
@@ -2162,8 +2167,11 @@ export class LashRealtimeYjsProvider {
   }
 
   private emit() {
+    const sequence = ++this.notificationSequence;
     const snapshot = this.getSnapshot();
     for (const listener of this.listeners) {
+      // A reentrant transition has already delivered the newer snapshot.
+      if (sequence !== this.notificationSequence) break;
       try {
         listener(snapshot);
       } catch {

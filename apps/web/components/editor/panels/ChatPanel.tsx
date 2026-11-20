@@ -16,7 +16,15 @@ import {
 } from '@lash/doc-chat';
 import type { DocumentId } from '@lash/types';
 import type { Editor } from '@tiptap/core';
-import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  type ReactNode,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 
 import {
   captureChatAnchorRange,
@@ -85,6 +93,9 @@ type EmailDraftCopy = { draft: NewThreadDraft } & (
   | { mode: 'offered' | 'manual' }
   | { mode: 'copied'; body: string }
 );
+type DiscussionAction =
+  | { phase: 'idle' | 'sending' | 'posted' }
+  | { phase: 'failed'; message: string };
 
 const emailDraftBody = (quote: string, comment: string) => {
   const quoted = quote
@@ -223,6 +234,20 @@ const readThreadsFromStorage = (docId: DocumentId) => {
   }
 };
 
+export const readLocalChatThreadCount = (docId: DocumentId): number | null => {
+  if (typeof window === 'undefined') return null;
+  try {
+    const raw = window.localStorage.getItem(threadStorageKey(docId));
+    if (raw === null) return 0;
+    const entries: unknown = JSON.parse(raw);
+    if (!Array.isArray(entries)) return null;
+    const threads = parseChatThreads(raw, docId);
+    return threads.length === entries.length ? threads.length : null;
+  } catch {
+    return null;
+  }
+};
+
 const writeThreadsToStorage = (docId: DocumentId, threads: LocalThread[]) => {
   if (typeof window === 'undefined') return false;
   try {
@@ -258,10 +283,8 @@ export function ChatPanel({
   const [replyDrafts, setReplyDrafts] = useState<Record<string, string>>({});
   const [activeThreadId, setActiveThreadId] = useState<string | null>(null);
   const [anchorJumpStatus, setAnchorJumpStatus] = useState('');
-  const [postStatus, setPostStatus] = useState('');
-  const [postError, setPostError] = useState('');
+  const [discussionAction, setDiscussionAction] = useState<DiscussionAction>({ phase: 'idle' });
   const [reviewReady, setReviewReady] = useState(false);
-  const [sendingReview, setSendingReview] = useState(false);
   const [newThreadDraft, setNewThreadDraft] = useState<NewThreadDraft | null>(null);
   const [newThreadBody, setNewThreadBody] = useState('');
   const [emailDraftCopy, setEmailDraftCopy] = useState<EmailDraftCopy | null>(null);
@@ -272,7 +295,35 @@ export function ChatPanel({
   const handledCommentRequestRef = useRef<AnchoredCommentRequest | null>(null);
   const pendingThreadFocusRef = useRef<string | null>(null);
   const pendingThreadIdRef = useRef<string | null>(null);
-  const reviewInFlightRef = useRef(false);
+  const reviewScope = useRef<{ pending: boolean } | null>(null);
+  const visibleReviewVisit = useRef<object | null>(null);
+
+  const setPostError = useCallback((message: string) => {
+    setDiscussionAction(message ? { phase: 'failed', message } : { phase: 'idle' });
+  }, []);
+
+  useLayoutEffect(() => {
+    const scope = { pending: false };
+    reviewScope.current = scope;
+    setDiscussionAction({ phase: 'idle' });
+    return () => {
+      reviewScope.current = null;
+      pendingThreadFocusRef.current = null;
+    };
+  }, [actorId, docId, editor, mutationEnabled, realtimeStore]);
+
+  // Review requests can settle on another tab. Focus and announcements belong to one visit.
+  useLayoutEffect(() => {
+    if (!open) {
+      setDiscussionAction((action) => (action.phase === 'posted' ? { phase: 'idle' } : action));
+      return;
+    }
+    visibleReviewVisit.current = {};
+    return () => {
+      visibleReviewVisit.current = null;
+      pendingThreadFocusRef.current = null;
+    };
+  }, [open]);
 
   const publishThreads = useCallback((nextThreads: LocalThread[]) => {
     threadsRef.current = nextThreads;
@@ -314,21 +365,27 @@ export function ChatPanel({
   };
 
   const submitReview = async (mutation: ReviewMutation) => {
-    if (!realtimeStore || !mutationEnabled || reviewInFlightRef.current) return false;
-    reviewInFlightRef.current = true;
-    setSendingReview(true);
-    setPostError('');
+    const scope = reviewScope.current;
+    if (!realtimeStore?.isReady() || !mutationEnabled || !scope || scope.pending) return false;
+    scope.pending = true;
+    setDiscussionAction({ phase: 'sending' });
     try {
       const result = await realtimeStore.submit(mutation);
-      if (!result.ok) setPostError(result.message);
+      if (reviewScope.current !== scope) return false;
+      setPostError(result.ok ? '' : result.message);
       return result.ok;
+    } catch {
+      if (reviewScope.current === scope) {
+        setPostError('Lash could not save this discussion change. Try again.');
+      }
+      return false;
     } finally {
-      reviewInFlightRef.current = false;
-      setSendingReview(false);
+      scope.pending = false;
     }
   };
 
   const canMutateThreads = mutationEnabled && (!realtimeStore || reviewReady);
+  const sendingReview = discussionAction.phase === 'sending';
   const chatActionsDisabled = !canMutateThreads || sendingReview;
   const selectionText = selectedText(editor);
   const showSelectionGuide =
@@ -377,8 +434,6 @@ export function ChatPanel({
     setNewThreadDraft(null);
     setNewThreadBody('');
     setEmailDraftCopy(null);
-    setPostStatus('');
-    setPostError('');
     setReplyDrafts({});
     pendingThreadFocusRef.current = null;
     pendingThreadIdRef.current = null;
@@ -449,13 +504,14 @@ export function ChatPanel({
   );
 
   useEffect(() => {
+    if (!open) return;
     const threadId = pendingThreadFocusRef.current;
     if (!threadId) return;
     const thread = document.getElementById(`chat-thread-${domId(threadId)}`);
     if (!thread) return;
     pendingThreadFocusRef.current = null;
     thread.focus();
-  }, [activeThreadId, threadViews]);
+  }, [activeThreadId, open, threadViews]);
 
   const openThreadDraft = useCallback(
     (range: { from: number; to: number }, exact = false) => {
@@ -463,7 +519,7 @@ export function ChatPanel({
         !editor ||
         editor.isDestroyed ||
         !mutationEnabled ||
-        reviewInFlightRef.current ||
+        reviewScope.current?.pending ||
         (realtimeStore ? !realtimeStore.isReady() : !baseVersion)
       ) {
         setPostError('Commenting is unavailable right now.');
@@ -502,9 +558,8 @@ export function ChatPanel({
       setNewThreadBody('');
       setEmailDraftCopy(null);
       setPostError('');
-      setPostStatus('');
     },
-    [baseVersion, docId, editor, mutationEnabled, realtimeStore],
+    [baseVersion, docId, editor, mutationEnabled, realtimeStore, setPostError],
   );
 
   useEffect(() => {
@@ -512,6 +567,10 @@ export function ChatPanel({
     if (!open || !request || handledCommentRequestRef.current === request) return;
     handledCommentRequestRef.current = request;
 
+    if (reviewScope.current?.pending) {
+      onAnchoredCommentRequestHandled?.(request);
+      return;
+    }
     if (newThreadDraft) {
       setPostError('Finish or cancel this comment before starting another.');
       newThreadTextareaRef.current?.focus();
@@ -535,6 +594,7 @@ export function ChatPanel({
     onAnchoredCommentRequestHandled,
     open,
     openThreadDraft,
+    setPostError,
   ]);
 
   if (!open) return null;
@@ -563,7 +623,7 @@ export function ChatPanel({
 
   const getDeliverableDraft = () => {
     const draft = newThreadDraft;
-    if (!draft || !newThreadBody.trim() || chatActionsDisabled || reviewInFlightRef.current) {
+    if (!draft || !newThreadBody.trim() || chatActionsDisabled || reviewScope.current?.pending) {
       return null;
     }
     if (realtimeStore && !realtimeStore.isReady()) {
@@ -630,6 +690,8 @@ export function ChatPanel({
   const createThread = async () => {
     const draft = getDeliverableDraft();
     if (!draft) return;
+    const scope = reviewScope.current;
+    const visit = visibleReviewVisit.current;
     const body = newThreadBody.trim();
     const id =
       pendingThreadIdRef.current ?? (realtimeStore ? crypto.randomUUID() : createLocalId('thread'));
@@ -666,11 +728,13 @@ export function ChatPanel({
           body,
         })
       : updateLocalThreads(createLocalThread);
-    if (!created) return;
-    pendingThreadFocusRef.current = id;
+    if (!created || reviewScope.current !== scope) return;
+    if (visit && visibleReviewVisit.current === visit) {
+      pendingThreadFocusRef.current = id;
+      setDiscussionAction({ phase: 'posted' });
+    }
     setActiveThreadId(id);
     setFilter('all');
-    setPostStatus('Comment posted.');
     setNewThreadDraft(null);
     setNewThreadBody('');
     setEmailDraftCopy(null);
@@ -709,10 +773,13 @@ export function ChatPanel({
       threadsRef.current.find(({ id }) => id === threadId)?.detached
     )
       return;
+    const scope = reviewScope.current;
     const added = realtimeStore
       ? await submitReview({ type: 'reply', threadId, body })
       : addLocalReply(threadId, LOCAL_USER, body);
-    if (added) setReplyDrafts((drafts) => ({ ...drafts, [threadId]: '' }));
+    if (added && reviewScope.current === scope) {
+      setReplyDrafts((drafts) => ({ ...drafts, [threadId]: '' }));
+    }
   };
 
   const addAiReply = (threadId: string) => {
@@ -983,16 +1050,16 @@ export function ChatPanel({
         </form>
       ) : null}
       {suggestionComposer}
-      {postError ? (
+      {discussionAction.phase === 'failed' ? (
         <p role="alert" data-testid="chat-post-error">
-          {postError}
+          {discussionAction.message}
         </p>
       ) : null}
       <p className="sr-only" aria-live="polite" data-testid="chat-anchor-jump-status">
         {anchorJumpStatus}
       </p>
       <p className="sr-only" role="status" aria-live="polite" data-testid="chat-post-status">
-        {postStatus}
+        {discussionAction.phase === 'posted' ? 'Comment posted.' : ''}
       </p>
 
       {threadViews.length ? (

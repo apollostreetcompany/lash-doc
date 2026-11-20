@@ -50,7 +50,13 @@ export interface DocumentSettingsDialogProps {
   signInHref?: string;
 }
 
-type Phase = 'local' | 'loading' | 'ready' | 'saving' | 'error' | 'access-changed';
+type AccessSettings =
+  | { phase: 'local' | 'loading' | 'load-error' | 'access-changed' }
+  | {
+      phase: 'ready' | 'saving' | 'save-unconfirmed';
+      authoritative: PublicAccessStateV1;
+      selected: PublicAccessMode;
+    };
 
 type ModerationState =
   | Readonly<{ phase: 'idle' | 'loading' }>
@@ -75,46 +81,56 @@ const publicRoomIdFromUrl = (publicUrl: string | null): string | null => {
   }
 };
 
-export function DocumentSettingsDialog({
+export function DocumentSettingsDialog({ open, ...props }: DocumentSettingsDialogProps) {
+  if (!open) return null;
+  return (
+    <OpenDocumentSettingsDialog key={`${props.localDocumentId}:${props.ownerBacked}`} {...props} />
+  );
+}
+
+function OpenDocumentSettingsDialog({
   localDocumentId,
   onClose,
   onUpdated,
-  open,
   ownerBacked,
   returnFocusTo,
   signInHref,
-}: DocumentSettingsDialogProps) {
+}: Omit<DocumentSettingsDialogProps, 'open'>) {
   const dialogRef = useRef<HTMLDialogElement | null>(null);
   const selectedRadioRef = useRef<HTMLInputElement | null>(null);
-  const [phase, setPhase] = useState<Phase>(ownerBacked ? 'loading' : 'local');
-  const [authoritative, setAuthoritative] = useState<PublicAccessStateV1 | null>(null);
-  const [selected, setSelected] = useState<PublicAccessMode>('restricted');
+  const [access, setAccess] = useState<AccessSettings>({
+    phase: ownerBacked ? 'loading' : 'local',
+  });
+  const [loadAttempt, retryLoad] = useState(0);
   const [moderation, setModeration] = useState<ModerationState>({ phase: 'idle' });
-  const [moderatingCommentId, setModeratingCommentId] = useState<string | null>(null);
-  const [moderationStatus, setModerationStatus] = useState('');
+  const [moderationAction, setModerationAction] = useState<
+    | { phase: 'idle' }
+    | { phase: 'removing'; commentId: string }
+    | { phase: 'reported'; message: string }
+  >({ phase: 'idle' });
+  const scope = useRef<{ controller: AbortController; busy: boolean } | null>(null);
   const groupId = useId();
+  const { phase } = access;
+  const authoritative = 'authoritative' in access ? access.authoritative : null;
+  const selected = 'selected' in access ? access.selected : 'restricted';
   const pending = phase === 'saving';
 
   useEffect(() => {
     const dialog = dialogRef.current;
-    if (!dialog || !open) return;
+    if (!dialog) return;
+    const controller = new AbortController();
+    scope.current = { controller, busy: false };
     if (!dialog.open) dialog.showModal();
     return () => {
+      controller.abort();
       if (dialog.open) dialog.close();
     };
-  }, [open]);
+  }, []);
 
   useEffect(() => {
-    if (!open) return;
-    if (!ownerBacked) {
-      setPhase('local');
-      setAuthoritative(null);
-      setSelected('restricted');
-      return;
-    }
+    if (!ownerBacked) return;
     const abort = new AbortController();
-    setPhase('loading');
-    setAuthoritative(null);
+    setAccess({ phase: 'loading' });
     void readPublicAccessState({
       localDocumentId,
       expectedOrigin: window.location.origin,
@@ -122,28 +138,26 @@ export function DocumentSettingsDialog({
     }).then((result) => {
       if (abort.signal.aborted) return;
       if (result.ok) {
-        setAuthoritative(result.state);
-        setSelected(selectedPublicMode(result.state));
-        setPhase('ready');
-        return;
+        setAccess({
+          phase: 'ready',
+          authoritative: result.state,
+          selected: selectedPublicMode(result.state),
+        });
+      } else {
+        setAccess({ phase: result.error === 'unauthenticated' ? 'access-changed' : 'load-error' });
       }
-      if (result.error === 'unauthenticated') {
-        setPhase('access-changed');
-        return;
-      }
-      setPhase('error');
     });
     return () => abort.abort();
-  }, [localDocumentId, open, ownerBacked]);
+  }, [loadAttempt, localDocumentId, ownerBacked]);
 
   useEffect(() => {
     const roomId =
       phase === 'ready' && authoritative?.mode === 'comment'
         ? publicRoomIdFromUrl(authoritative.publicUrl)
         : null;
-    if (!open || !roomId || !authoritative) {
+    if (!roomId || !authoritative) {
       setModeration({ phase: 'idle' });
-      setModerationStatus('');
+      setModerationAction({ phase: 'idle' });
       return;
     }
     const abort = new AbortController();
@@ -167,17 +181,15 @@ export function DocumentSettingsDialog({
       }
     });
     return () => abort.abort();
-  }, [authoritative, open, phase]);
+  }, [authoritative, phase]);
 
   useEffect(() => {
-    if (!open || phase !== 'ready') return;
+    if (phase !== 'ready') return;
     const frame = window.requestAnimationFrame(() =>
       selectedRadioRef.current?.focus({ preventScroll: true }),
     );
     return () => window.cancelAnimationFrame(frame);
-  }, [open, phase]);
-
-  if (!open) return null;
+  }, [phase]);
 
   const close = () => {
     if (pending) return;
@@ -186,61 +198,85 @@ export function DocumentSettingsDialog({
   };
 
   const save = async () => {
+    const owner = scope.current;
     if (
+      !owner ||
+      owner.busy ||
+      owner.controller.signal.aborted ||
       !authoritative ||
       selected === authoritative.mode ||
       pending ||
       (authoritative.publicProjectionBlocked && selected !== 'restricted')
     )
       return;
-    setPhase('saving');
+    owner.busy = true;
+    const { signal } = owner.controller;
+    setAccess({ phase: 'saving', authoritative, selected });
     const result = await updatePublicAccessState({
       localDocumentId,
       mode: selected,
       expectedPolicyVersion: authoritative.policyVersion,
       mutationId: window.crypto.randomUUID(),
       expectedOrigin: window.location.origin,
+      signal,
     });
+    if (signal.aborted) return;
     if (result.ok) {
-      setAuthoritative(result.state);
-      setSelected(selectedPublicMode(result.state));
+      owner.busy = false;
+      setAccess({
+        phase: 'ready',
+        authoritative: result.state,
+        selected: selectedPublicMode(result.state),
+      });
       onUpdated(result.state);
       onClose();
       window.requestAnimationFrame(() => returnFocusTo?.focus({ preventScroll: true }));
       return;
     }
-    if (result.state) {
-      setAuthoritative(result.state);
-      setSelected(selectedPublicMode(result.state));
-    } else {
+    if (result.error === 'unauthenticated') {
+      owner.busy = false;
+      setAccess({ phase: 'access-changed' });
+      return;
+    }
+    let current = result.state;
+    if (!current) {
       const refreshed = await readPublicAccessState({
         localDocumentId,
         expectedOrigin: window.location.origin,
+        signal,
       });
-      if (refreshed.ok) {
-        setAuthoritative(refreshed.state);
-        setSelected(selectedPublicMode(refreshed.state));
-      }
+      if (signal.aborted) return;
+      if (refreshed.ok) current = refreshed.state;
     }
-    if (result.error === 'public-projection-blocked') {
-      setPhase('ready');
-      return;
-    }
-    setPhase(result.error === 'unauthenticated' ? 'access-changed' : 'error');
+    owner.busy = false;
+    setAccess(
+      current
+        ? {
+            phase: result.error === 'public-projection-blocked' ? 'ready' : 'save-unconfirmed',
+            authoritative: current,
+            selected: selectedPublicMode(current),
+          }
+        : { phase: 'load-error' },
+    );
   };
 
   const removePublicComment = async (commentId: string) => {
-    if (moderation.phase !== 'ready' || moderatingCommentId) return;
-    setModeratingCommentId(commentId);
-    setModerationStatus('');
+    const owner = scope.current;
+    if (!owner || owner.busy || owner.controller.signal.aborted || moderation.phase !== 'ready')
+      return;
+    owner.busy = true;
+    const { signal } = owner.controller;
+    setModerationAction({ phase: 'removing', commentId });
     const result = await hidePublicComment({
       localDocumentId,
       commentId,
       mutationId: window.crypto.randomUUID(),
       expectedPolicyVersion: moderation.authorization.policyVersion,
       expectedCutoffGeneration: moderation.authorization.cutoffGeneration,
+      signal,
     });
-    setModeratingCommentId(null);
+    if (signal.aborted) return;
+    owner.busy = false;
     if (result.ok) {
       setModeration((current) =>
         current.phase === 'ready'
@@ -255,13 +291,15 @@ export function DocumentSettingsDialog({
             }
           : current,
       );
-      setModerationStatus('Comment removed.');
+      setModerationAction({ phase: 'reported', message: 'Comment removed.' });
     } else {
-      setModerationStatus(
-        result.error === 'moderation-conflict'
-          ? 'This comment already changed. Reopen settings to refresh.'
-          : 'Couldn’t remove this comment. Try again.',
-      );
+      setModerationAction({
+        phase: 'reported',
+        message:
+          result.error === 'moderation-conflict'
+            ? 'This comment already changed. Reopen settings to refresh.'
+            : 'Couldn’t remove this comment. Try again.',
+      });
     }
   };
 
@@ -315,6 +353,17 @@ export function DocumentSettingsDialog({
               <p role="status">Loading public access…</p>
             ) : phase === 'access-changed' ? (
               <p role="alert">Your access changed. Sign in again to manage this document.</p>
+            ) : phase === 'load-error' ? (
+              <div>
+                <p role="alert">Couldn’t verify public access.</p>
+                <button
+                  className="lash-document-settings-secondary"
+                  type="button"
+                  onClick={() => retryLoad((attempt) => attempt + 1)}
+                >
+                  Try again
+                </button>
+              </div>
             ) : (
               <fieldset
                 aria-describedby={`${groupId}-public-helper`}
@@ -333,7 +382,13 @@ export function DocumentSettingsDialog({
                         authoritative?.publicProjectionBlocked && option.mode !== 'restricted'
                       }
                       name={`${groupId}-public-access`}
-                      onChange={() => setSelected(option.mode)}
+                      onChange={() =>
+                        setAccess((current) =>
+                          'selected' in current && current.phase !== 'saving'
+                            ? { ...current, selected: option.mode }
+                            : current,
+                        )
+                      }
                       ref={selected === option.mode ? selectedRadioRef : undefined}
                       type="radio"
                       value={option.mode}
@@ -364,9 +419,9 @@ export function DocumentSettingsDialog({
               </p>
             ) : null}
 
-            {phase === 'error' ? (
+            {phase === 'save-unconfirmed' ? (
               <p className="lash-document-settings-error" role="alert">
-                Couldn&apos;t update public access. Nothing changed. Try again.
+                Couldn&apos;t confirm the requested change. Check the current setting and try again.
               </p>
             ) : null}
           </section>
@@ -401,19 +456,22 @@ export function DocumentSettingsDialog({
                       </div>
                       <button
                         className="lash-document-settings-secondary"
-                        disabled={moderatingCommentId !== null}
+                        disabled={moderationAction.phase === 'removing'}
                         onClick={() => void removePublicComment(comment.id)}
                         type="button"
                       >
-                        {moderatingCommentId === comment.id ? 'Removing…' : 'Remove'}
+                        {moderationAction.phase === 'removing' &&
+                        moderationAction.commentId === comment.id
+                          ? 'Removing…'
+                          : 'Remove'}
                       </button>
                     </li>
                   ))}
                 </ul>
               ) : null}
-              {moderationStatus ? (
+              {moderationAction.phase === 'reported' ? (
                 <p aria-live="polite" className="lash-document-settings-helper" role="status">
-                  {moderationStatus}
+                  {moderationAction.message}
                 </p>
               ) : null}
             </section>
@@ -439,6 +497,7 @@ export function DocumentSettingsDialog({
                 className="lash-document-settings-primary"
                 disabled={
                   pending ||
+                  moderationAction.phase === 'removing' ||
                   phase === 'loading' ||
                   !authoritative ||
                   selected === authoritative.mode ||

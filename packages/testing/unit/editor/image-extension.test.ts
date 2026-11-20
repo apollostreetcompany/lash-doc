@@ -108,6 +108,47 @@ describe('Lash image extension', () => {
     editor.destroy();
   });
 
+  it('starts one retry and ignores progress from the failed attempt', async () => {
+    let failedProgress: (progress: number) => void = () => {};
+    let progressAfterLateCallback: number | undefined;
+    let attempts = 0;
+    const uploader: LashImageUploader = {
+      async upload(_file, onProgress) {
+        attempts += 1;
+        if (attempts === 1) {
+          failedProgress = onProgress;
+          throw new Error('network down');
+        }
+        failedProgress(0.99);
+        progressAfterLateCallback = editor.state.doc.firstChild?.attrs.progress;
+        onProgress(0.25);
+        return { src: PNG_SOURCE, width: 12 };
+      },
+    };
+    const editor = new Editor({
+      extensions: createLashEditorExtensions({ image: { uploader } }),
+      content: '<p></p>',
+    });
+
+    try {
+      editor.commands.insertImagePlaceholder(pngFile());
+      await flushMicrotasks();
+      const uploadId = editor.state.doc.firstChild?.attrs.uploadId as string;
+      editor.commands.retryImageUpload(uploadId);
+      editor.commands.retryImageUpload(uploadId);
+      await flushMicrotasks();
+
+      expect(attempts).toBe(2);
+      expect(progressAfterLateCallback).toBe(0);
+      expect(editor.state.doc.firstChild?.attrs).toMatchObject({
+        src: PNG_SOURCE,
+        status: 'idle',
+      });
+    } finally {
+      editor.destroy();
+    }
+  });
+
   it('preserves a user-selected width when upload completion reports dimensions later', async () => {
     let finishUpload!: (value: { src: string; width: number }) => void;
     const uploader: LashImageUploader = {

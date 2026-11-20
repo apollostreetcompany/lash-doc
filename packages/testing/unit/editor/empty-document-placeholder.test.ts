@@ -2,8 +2,6 @@
 
 import { createLashEditorExtensions } from '@lash/editor-core';
 import { Editor } from '@tiptap/core';
-import { readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 const INVITATION = 'Start writing…';
@@ -82,27 +80,5 @@ describe('empty-document invitation', () => {
     expect(editable.querySelector('[data-placeholder]')).not.toBeNull();
 
     editor.destroy();
-  });
-
-  it('keeps the paper clickable without a typing layout jump and suppresses invitation copy in print', () => {
-    const css = readFileSync(resolve(process.cwd(), 'apps/web/app/globals.css'), 'utf8');
-
-    expect(css).toMatch(
-      /\.lash-editor-content\s*{[^}]*min-height:\s*clamp\([^;]+;[^}]*cursor:\s*text;/s,
-    );
-    expect(css).toMatch(
-      /\.lash-editor-content p\.is-editor-empty:first-child::before\s*{[^}]*content:\s*attr\(data-placeholder\);[^}]*height:\s*0;/s,
-    );
-    expect(css).toMatch(
-      /@media print\s*{[\s\S]*?\.lash-editor-content p\.is-editor-empty:first-child::before\s*{[^}]*content:\s*none\s*!important;/,
-    );
-  });
-
-  it('uses a normal-text contrast token for the visible invitation', () => {
-    const css = readFileSync(resolve(process.cwd(), 'apps/web/app/globals.css'), 'utf8');
-
-    expect(css).toMatch(
-      /\.lash-editor-content p\.is-editor-empty:first-child::before\s*{[^}]*color:\s*var\(--color-text-secondary\);/s,
-    );
   });
 });

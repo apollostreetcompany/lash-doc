@@ -1,6 +1,7 @@
 import { createAnchor, parseReviewMutation, type CommentReviewThread, type ReviewMutation } from '@lash/doc-chat';
 import { createDocumentId } from '@lash/types';
 import { describe, expect, it, vi } from 'vitest';
+import { applyUpdate } from 'yjs';
 
 import { createDocumentMutationAuthority } from '../../../../apps/web/lib/documentMutationAuthority';
 import * as realtimeMetadata from '../../../../apps/web/lib/realtimeCollaboration';
@@ -1196,6 +1197,68 @@ describe('authorized realtime provider lifecycle', () => {
       queuedUpdateCount: 0,
       syncState: 'syncing',
     });
+  });
+
+  it('keeps all queued edits recoverable if the document closes as reconnect starts replaying', async () => {
+    vi.useFakeTimers();
+    const first = new FakeSocket();
+    const reconnected = new FakeSocket();
+    const doc = createRealtimeDocument();
+    const reconstructed = createRealtimeDocument();
+    const createSocket = vi.fn(() => reconnected).mockReturnValueOnce(first);
+    const provider = new LashRealtimeYjsProvider({
+      createSocket,
+      doc,
+      refreshOwnerSession: async () => namedSession('recovery-renewed'),
+      session: namedSession('recovery-started'),
+    });
+    const captureRecovery = vi.fn(() => provider.sealForRecovery('lifecycle'));
+    const unsubscribe = provider.subscribe(({ hydrated, pendingUpdateCount }) => {
+      if (hydrated && pendingUpdateCount > 0) captureRecovery();
+    });
+    const observer = vi.fn();
+    const stopObserving = provider.subscribe(observer);
+
+    try {
+      const starting = provider.start();
+      hydrateSocket(first, namedRoomId, 5);
+      await starting;
+      provider.disconnectForTest();
+      const body = doc.getText('body');
+      for (const text of ['First ', 'second ', 'third edit.']) {
+        body.insert(body.length, text);
+      }
+      expect(provider.getSnapshot()).toMatchObject({
+        queuedUpdateCount: 3,
+        pendingUpdateCount: 0,
+      });
+
+      provider.reconnectForTest();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(createSocket).toHaveBeenCalledTimes(2);
+      hydrateSocket(reconnected, namedRoomId, 5);
+
+      expect(captureRecovery).toHaveBeenCalledTimes(1);
+      const seal = captureRecovery.mock.results[0]?.value;
+      expect(seal?.snapshot.updates).toHaveLength(3);
+      for (const { bytes } of seal.snapshot.updates) applyUpdate(reconstructed, bytes);
+      expect(reconstructed.getText('body').toString()).toBe('First second third edit.');
+      expect(observer).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          connectionState: 'offline',
+          hydrated: false,
+          pendingUpdateCount: 0,
+          queuedUpdateCount: 3,
+        }),
+      );
+    } finally {
+      unsubscribe();
+      stopObserving();
+      provider.destroy();
+      doc.destroy();
+      reconstructed.destroy();
+      vi.useRealTimers();
+    }
   });
 
   it('rearms the hydration fence before publishing reconnect edits or awareness', async () => {

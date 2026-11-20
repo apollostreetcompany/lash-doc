@@ -36,7 +36,6 @@ test('opens revision instructions from the exact selection and applies without r
   await page.goto('/');
   const draft = page.getByRole('textbox', { name: 'Document editor' });
   await expect(draft).toHaveAttribute('contenteditable', 'true', { timeout: 15_000 });
-  await expect(page.locator('.lash-app')).not.toHaveAttribute('data-entrance', 'true');
   await draft.fill('Keep the rough plan. Review the rough plan.');
   await expect(page.getByTestId('autosave-indicator')).toHaveAttribute('data-status', 'saved');
 

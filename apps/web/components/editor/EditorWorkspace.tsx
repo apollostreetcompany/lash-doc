@@ -64,6 +64,7 @@ import {
   useEffect,
   useLayoutEffect,
   useMemo,
+  useReducer,
   useRef,
   useState,
 } from 'react';
@@ -73,7 +74,11 @@ import { DocumentReferencePicker } from './DocumentReferencePicker';
 import { AIPanel } from './panels/AIPanel';
 import { AutosaveIndicator } from './panels/AutosaveIndicator';
 import { captureChatAnchorRange, projectChatDocumentText } from './panels/chatAnchorPositions';
-import { ChatPanel, type AnchoredCommentRequest } from './panels/ChatPanel';
+import {
+  ChatPanel,
+  readLocalChatThreadCount,
+  type AnchoredCommentRequest,
+} from './panels/ChatPanel';
 import { DocumentSettingsDialog } from './panels/DocumentSettingsDialog';
 import { EditorToolbar, type ToolbarMeta } from './panels/EditorToolbar';
 import {
@@ -94,6 +99,12 @@ import { SharePanel } from './panels/SharePanel';
 import { SuggestionCard, SuggestionComposer } from './panels/SuggestionControls';
 import { TableCellPanel, type ActiveCell } from './panels/TableCellPanel';
 import { SelectionActions } from './SelectionActions';
+import {
+  initialWorkspaceChrome,
+  MOBILE_WORKSPACE_QUERY,
+  transitionWorkspaceChrome,
+  type WorkspaceViewport,
+} from './workspaceChrome';
 import { prepareAiReplacement, type AiSelection } from '../../lib/aiSelection';
 import type { AutosaveFlushController, AutosaveSaveContext } from '../../lib/autosave';
 import { createBrowserImageUploader } from '../../lib/createBrowserImageUploader';
@@ -103,6 +114,7 @@ import {
   type DocumentAccessController,
   type DocumentAccessResolution,
   type DocumentAccessSnapshot,
+  type OwnerCutoverResult,
 } from '../../lib/documentAccess';
 import { allowsDocumentBodyTransaction } from '../../lib/documentMutationAuthority';
 import { documentWorkspacePath, matchPreviewDocumentUrl } from '../../lib/documentNavigation';
@@ -176,7 +188,7 @@ import {
   type RealtimeSuggestionResolutionRecord,
   type RealtimeSnapshot,
 } from '../../lib/realtimeCollaboration';
-import { AppShell, type MobileRailFocusRequest } from '../shell/AppShell';
+import { AppShell } from '../shell/AppShell';
 import { Icon } from '../shell/Icon';
 import { RightRail, type RailTab, type RailTabConfig } from '../shell/RightRail';
 import { Sidebar } from '../shell/Sidebar';
@@ -214,6 +226,43 @@ type SuggestionDraft = {
   before: string;
   anchor: ReviewProposal['anchor'] | null;
 };
+type SuggestionAuthoring =
+  | { kind: 'idle' }
+  | { kind: 'draft'; draft: SuggestionDraft }
+  | { kind: 'notice'; message: string };
+
+type ShareAdjuncts = Readonly<{ comments: number; suggestions: number }>;
+
+type OwnerShareState =
+  | { phase: 'closed' | 'checking-account' | 'ready' | 'signed-out' | 'saved' }
+  | { phase: 'saving'; request: object }
+  | { phase: 'retryable' | 'unavailable'; detail?: string }
+  | { phase: 'blocked'; adjuncts: ShareAdjuncts };
+
+type OwnerShareAttempt = {
+  attempt: BrowserDocumentPromotionAttempt;
+  body: EditorNode;
+  title: string;
+  retryDetail?: string;
+};
+
+const NO_SHARE_ADJUNCTS: ShareAdjuncts = { comments: 0, suggestions: 0 };
+
+type LocalBodyState =
+  | { kind: 'loading' }
+  | { kind: 'ready'; notice?: Extract<LocalBodyNotice, { kind: 'save-error' }> }
+  | {
+      kind: 'recovered-awaiting-confirmation';
+      notice: Extract<LocalBodyNotice, { kind: 'recovered' | 'recovery-error' | 'conflict' }>;
+    }
+  | Extract<LocalBodyNotice, { kind: 'unavailable' | 'failed' | 'conflict' }>;
+
+function getWorkspaceViewport(): WorkspaceViewport {
+  return typeof window !== 'undefined' && window.matchMedia(MOBILE_WORKSPACE_QUERY).matches
+    ? 'mobile'
+    : 'desktop';
+}
+
 const HISTORY_AUDIT = { ua: 'lash-web/local-history' } as const;
 const HISTORY_RECORD_DEBOUNCE_MS = 1800;
 const AI_AUDIT = { ua: 'lash-local-ai-editor' };
@@ -251,8 +300,17 @@ function LiveEditorText({
   editor: Editor | null;
   children: (currentText: string) => ReactNode;
 }) {
-  // Selection-only transactions must also update comment and AI controls.
-  useEditorState({ editor, selector: ({ transactionNumber }) => transactionNumber });
+  // Comment and AI controls need live content and selection, but focus or
+  // metadata-only transactions do not change either input.
+  useEditorState({
+    editor,
+    selector: () => editor?.state ?? null,
+    equalityFn: (next, previous) =>
+      next === previous ||
+      Boolean(
+        next && previous && next.doc === previous.doc && next.selection.eq(previous.selection),
+      ),
+  });
   const doc = editor?.state.doc;
   const currentText = useMemo(() => (editor && doc ? editorText(editor) : ''), [editor, doc]);
   return children(currentText);
@@ -506,6 +564,7 @@ export function EditorWorkspace({
   if (resolvedForRoute) {
     return (
       <ResolvedDocumentWorkspace
+        key={activeDocumentId}
         accessSnapshot={accessSnapshot}
         documentId={activeDocumentId}
         inviteIssuanceAuthority={controllerRef.current!}
@@ -732,50 +791,55 @@ function ResolvedDocumentWorkspace({
   const historyDocumentId = useMemo(() => createDocumentId(activeDocumentId), [activeDocumentId]);
   const [isMounted, setIsMounted] = useState(false);
   const [outlineItems, setOutlineItems] = useState<OutlineItem[]>([]);
-  const [isFocusMode, setIsFocusMode] = useState(false);
+  const [chrome, dispatchChrome] = useReducer(transitionWorkspaceChrome, initialWorkspaceChrome);
+  const { activeTab, focusMode: isFocusMode, railFocus: mobileRailFocusRequest } = chrome;
+  const mobileSidebarOpen = chrome.drawer === 'sidebar';
+  const mobileRailOpen = chrome.drawer === 'rail';
+  const railOpen = chrome.viewport === 'mobile' ? mobileRailOpen : chrome.desktopRailOpen;
+  const railVisible = railOpen && !isFocusMode;
+  const chatVisible = railVisible && activeTab === 'chat';
+  const aiVisible = railVisible && activeTab === 'ai';
+  const historyVisible = railVisible && activeTab === 'history';
   const [anchoredCommentRequest, setAnchoredCommentRequest] =
     useState<AnchoredCommentRequest | null>(null);
-  const [suggestionDraft, setSuggestionDraft] = useState<SuggestionDraft | null>(null);
-  const [suggestionNotice, setSuggestionNotice] = useState('');
+  const [suggestionAuthoring, setSuggestionAuthoring] = useState<SuggestionAuthoring>({
+    kind: 'idle',
+  });
   const [localSuggestions, setLocalSuggestions] = useState<LocalSuggestion[]>([]);
   const localSuggestionsRef = useRef<LocalSuggestion[]>([]);
   const [docTitle, setDocTitle] = useState(DEFAULT_DOC_TITLE);
   const [documents, setDocuments] = useState<LashDocumentRecord[]>([]);
+  const [documentIndexNeedsRetry, setDocumentIndexNeedsRetry] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(true);
-  const [railOpen, setRailOpen] = useState(false);
-  const [activeTab, setActiveTab] = useState<RailTab>('chat');
-  const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
-  const [mobileRailOpen, setMobileRailOpen] = useState(false);
-  const [mobileRailFocusRequest, setMobileRailFocusRequest] = useState<MobileRailFocusRequest>({
-    trigger: null,
-    restoreFocus: true,
-  });
-  const [isMobileRailViewport, setIsMobileRailViewport] = useState(false);
   const [activeTableCell, setActiveTableCell] = useState<ActiveCell | null>(null);
   const [historyEntries, setHistoryEntries] = useState<HistoryEntry[]>([]);
   const [historyAvailability, setHistoryAvailability] =
     useState<HistoryAvailabilityState>('loading');
   const [divergentHistoryHead, setDivergentHistoryHead] = useState<string | null>(null);
-  const [selectedHistoryEntryId, setSelectedHistoryEntryId] = useState<string | null>(null);
+  // A writer inspecting a version keeps that selection as autosave appends new entries.
+  // Null follows the history head until the writer chooses a version explicitly.
+  const [inspectedHistoryEntryId, setInspectedHistoryEntryId] = useState<string | null>(null);
+  const selectedHistoryEntryId = inspectedHistoryEntryId ?? historyEntries.at(-1)?.id ?? null;
   const [historyAuthorFilter, setHistoryAuthorFilter] = useState<string | null>(null);
   const [historyTimeFilter, setHistoryTimeFilter] = useState<HistoryTimeFilter>(null);
   const [showAuthorship, setShowAuthorship] = useState(false);
-  const [acceptedSuggestionIds, setAcceptedSuggestionIds] = useState<string[]>([]);
   const [suggestionResolutions, setSuggestionResolutions] = useState<SuggestionResolutionRecord[]>(
     [],
   );
+  const acceptedSuggestionIds = useMemo(
+    () => acceptedIdsFromResolutions(suggestionResolutions),
+    [suggestionResolutions],
+  );
   const [legacySuggestionError, setLegacySuggestionError] = useState('');
-  const [commentThreadCount, setCommentThreadCount] = useState(0);
-  const [shareDialogOpen, setShareDialogOpen] = useState(false);
+  const [ownerShare, setOwnerShare] = useState<OwnerShareState>({ phase: 'closed' });
+  const shareDialogOpen = ownerShare.phase !== 'closed';
   const [documentSettingsOpen, setDocumentSettingsOpen] = useState(false);
   const [publicAccessState, setPublicAccessState] = useState<PublicAccessStateV1 | null>(null);
   const [documentSettingsAnnouncement, setDocumentSettingsAnnouncement] = useState('');
-  const [ownerSharePhase, setOwnerSharePhase] = useState<OwnerShareDialogPhase>(
-    staticPreview ? 'unavailable' : 'checking-account',
-  );
-  const [ownerShareDetail, setOwnerShareDetail] = useState('');
-  const [blameLines, setBlameLines] = useState<Array<{ line: number; authorId: string | null }>>(
-    [],
+  const [blameText, setBlameText] = useState<string | null>(null);
+  const blameLines = useMemo(
+    () => (showAuthorship && blameText !== null ? blameFor(historyEntries, blameText) : []),
+    [blameText, historyEntries, showAuthorship],
   );
   // History head is mirrored: ref for synchronous access inside async
   // closures, state so React knows to re-render dependents (ChatPanel,
@@ -792,7 +856,7 @@ function ResolvedDocumentWorkspace({
   const outlineItemsRef = useRef<OutlineItem[]>([]);
   const outlineFrameRef = useRef<number | null>(null);
   const outlineIdleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const historyStoreRef = useRef(
+  const [historyStore] = useState(() =>
     createHistoryStore({
       snapshotInterval: 48,
       persistence: createLocalDocumentHistoryPersistence(),
@@ -802,6 +866,9 @@ function ResolvedDocumentWorkspace({
   const historyTextRef = useRef('');
   const historyBodyRef = useRef<LocalBodyDocJson | null>(null);
   const historyCapacityReachedRef = useRef(false);
+  const firstHistoryCheckpointRef = useRef<'none' | 'initially-empty' | 'pending' | 'recorded'>(
+    'none',
+  );
   const historyQueueRef = useRef<Promise<unknown>>(Promise.resolve());
   const historyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const recordSavedLocalHistoryRef = useRef<((saved: LocalBodyEnvelope) => void) | null>(null);
@@ -811,16 +878,14 @@ function ResolvedDocumentWorkspace({
   const applyingAiPatchRef = useRef(false);
   const suggestionResolutionsRef = useRef<SuggestionResolutionRecord[]>([]);
   const activeTableCellRef = useRef<ActiveCell | null>(null);
-  // Refs to the buttons that opened the mobile drawers, so focus can
-  // return to them on close (a11y requirement: focus must not be lost).
-  const mobileSidebarTriggerRef = useRef<HTMLElement | null>(null);
-  const mobileRailActionCoordinatorRef = useRef(createMobileRailActionCoordinator());
+  const [mobileRailActionCoordinator] = useState(createMobileRailActionCoordinator);
   const mobileRailAvailabilityObserverRef = useRef<MutationObserver | null>(null);
   const railJumpSequenceRef = useRef(0);
   const activityRailTriggerRef = useRef<HTMLElement | null>(null);
   const shareTriggerRef = useRef<HTMLElement | null>(null);
   const documentSettingsTriggerRef = useRef<HTMLElement | null>(null);
-  const promotionAttemptRef = useRef<BrowserDocumentPromotionAttempt | null>(null);
+  const promotionAttemptRef = useRef<OwnerShareAttempt | null>(null);
+  const promotionInFlightRef = useRef<object | null>(null);
   const [railJumpRequest, setRailJumpRequest] = useState<{
     id: RailTab;
     requestId: number;
@@ -832,8 +897,8 @@ function ResolvedDocumentWorkspace({
   }, []);
 
   const loadHistoryDiff = useCallback(
-    (from: string, to: string) => historyStoreRef.current.diff(historyDocumentId, from, to),
-    [historyDocumentId],
+    (from: string, to: string) => historyStore.diff(historyDocumentId, from, to),
+    [historyDocumentId, historyStore],
   );
 
   const refreshDocuments = useCallback(() => {
@@ -874,10 +939,14 @@ function ResolvedDocumentWorkspace({
     NAMED_EDIT_ROOM_ID.test(activeDocumentId) &&
     !accessSnapshot.authoritativeOwner;
   const namedComment = namedMember && accessSnapshot.scope === 'comment';
-  const [localBodyState, setLocalBodyState] = useState<
-    'loading' | 'ready' | 'recovered-awaiting-confirmation' | 'conflict' | 'unavailable' | 'failed'
-  >('loading');
-  const [localBodyNotice, setLocalBodyNotice] = useState<LocalBodyNotice | null>(null);
+  const [localBody, setLocalBody] = useState<LocalBodyState>({ kind: 'loading' });
+  const localBodyState = localBody.kind;
+  const localBodyNotice =
+    localBody.kind === 'loading'
+      ? undefined
+      : localBody.kind === 'ready' || localBody.kind === 'recovered-awaiting-confirmation'
+        ? localBody.notice
+        : localBody;
   const localBodyExpectedRef = useRef<LocalBodyExpectedRevision | null>(null);
   const divergentHistoryMarkerRef = useRef<LocalBodyEnvelope['divergentHistoryHead']>(undefined);
   const recoveredLocalBodyRef = useRef<{
@@ -1095,8 +1164,10 @@ function ResolvedDocumentWorkspace({
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
-    const query = window.matchMedia('(max-width: 767px)');
-    const syncViewport = () => setIsMobileRailViewport(query.matches);
+    const query = window.matchMedia(MOBILE_WORKSPACE_QUERY);
+    const syncViewport = () => {
+      dispatchChrome({ type: 'viewport', viewport: query.matches ? 'mobile' : 'desktop' });
+    };
     syncViewport();
     query.addEventListener('change', syncViewport);
     return () => query.removeEventListener('change', syncViewport);
@@ -1106,10 +1177,9 @@ function ResolvedDocumentWorkspace({
   // alone does not stop iOS rubber-band scroll on the document body — the
   // proven trick is to position-fix the body at a negative top offset
   // equal to the prior scroll position, then restore on close.
+  const drawerOpen = chrome.drawer !== null;
   useEffect(() => {
-    if (typeof window === 'undefined') return;
-    const drawerOpen = mobileSidebarOpen || mobileRailOpen;
-    if (!drawerOpen) return;
+    if (typeof window === 'undefined' || !drawerOpen) return;
     const scrollY = window.scrollY;
     const body = document.body;
     const prev = {
@@ -1126,21 +1196,21 @@ function ResolvedDocumentWorkspace({
       body.style.width = prev.width;
       window.scrollTo(0, scrollY);
     };
-  }, [mobileSidebarOpen, mobileRailOpen]);
+  }, [drawerOpen]);
 
   const cancelPendingMobileRailAction = useCallback(() => {
     mobileRailAvailabilityObserverRef.current?.disconnect();
     mobileRailAvailabilityObserverRef.current = null;
-    mobileRailActionCoordinatorRef.current.cancel();
-  }, []);
+    mobileRailActionCoordinator.cancel();
+  }, [mobileRailActionCoordinator]);
 
   const queueMobileRailAfterClose = useCallback(
     (run: () => void, cancel: () => void = () => undefined) => {
       cancelPendingMobileRailAction();
-      mobileRailActionCoordinatorRef.current.queue({ documentId: activeDocumentId, run, cancel });
-      setMobileRailOpen(false);
+      mobileRailActionCoordinator.queue({ documentId: activeDocumentId, run, cancel });
+      dispatchChrome({ type: 'close-rail', restoreFocus: false });
     },
-    [activeDocumentId, cancelPendingMobileRailAction],
+    [activeDocumentId, cancelPendingMobileRailAction, mobileRailActionCoordinator],
   );
 
   // A mobile rail is modal: AppShell keeps the canvas inert while it is open,
@@ -1151,24 +1221,24 @@ function ResolvedDocumentWorkspace({
   // delay. The document-id/unmount cleanup prevents a stale target jump.
   useEffect(() => {
     if (mobileRailOpen || typeof document === 'undefined') return;
-    if (!mobileRailActionCoordinatorRef.current.hasPending()) return;
+    if (!mobileRailActionCoordinator.hasPending()) return;
 
     const consumeWhenAvailable = () => {
       const canvas = document.querySelector<HTMLElement>('.lash-canvas');
       const bodyScrollLocked = document.body.style.position === 'fixed';
-      mobileRailActionCoordinatorRef.current.notifyRelease({
+      mobileRailActionCoordinator.notifyRelease({
         documentId: activeDocumentId,
         canvasAvailable: Boolean(canvas && !canvas.hasAttribute('inert')),
         bodyScrollLocked,
       });
-      if (!mobileRailActionCoordinatorRef.current.hasPending()) {
+      if (!mobileRailActionCoordinator.hasPending()) {
         mobileRailAvailabilityObserverRef.current?.disconnect();
         mobileRailAvailabilityObserverRef.current = null;
       }
     };
 
     consumeWhenAvailable();
-    if (!mobileRailActionCoordinatorRef.current.hasPending()) return;
+    if (!mobileRailActionCoordinator.hasPending()) return;
 
     const observer = new MutationObserver(consumeWhenAvailable);
     mobileRailAvailabilityObserverRef.current = observer;
@@ -1184,7 +1254,7 @@ function ResolvedDocumentWorkspace({
         mobileRailAvailabilityObserverRef.current = null;
       }
     };
-  }, [activeDocumentId, cancelPendingMobileRailAction, mobileRailOpen]);
+  }, [activeDocumentId, mobileRailActionCoordinator, mobileRailOpen]);
 
   useEffect(
     () => () => {
@@ -1193,62 +1263,46 @@ function ResolvedDocumentWorkspace({
     [activeDocumentId, cancelPendingMobileRailAction],
   );
 
-  const closeMobileRail = useCallback(() => {
-    cancelPendingMobileRailAction();
-    setMobileRailFocusRequest((request) => ({ ...request, restoreFocus: true }));
-    setMobileRailOpen(false);
-  }, [cancelPendingMobileRailAction]);
-
   const closeActivityRail = useCallback(() => {
+    cancelPendingMobileRailAction();
+    dispatchChrome({ type: 'close-rail', restoreFocus: true });
+    if (getWorkspaceViewport() === 'mobile') return;
     const trigger = activityRailTriggerRef.current;
-    const closesMobileDrawer =
-      typeof window !== 'undefined' && window.matchMedia('(max-width: 767px)').matches;
-    setRailOpen(false);
-    closeMobileRail();
-    if (closesMobileDrawer) return;
     activityRailTriggerRef.current = null;
     window.requestAnimationFrame(() => trigger?.focus({ preventScroll: true }));
-  }, [closeMobileRail]);
+  }, [cancelPendingMobileRailAction]);
 
   const handleChatDocumentNavigation = useCallback(
     (navigateToTarget: () => void) => {
-      const mobileDrawerOpen =
-        mobileRailOpen &&
-        typeof window !== 'undefined' &&
-        window.matchMedia('(max-width: 767px)').matches;
-      if (!mobileDrawerOpen) {
+      if (mobileRailOpen && getWorkspaceViewport() === 'mobile') {
+        // The document target owns focus once the modal and scroll lock are gone.
+        queueMobileRailAfterClose(navigateToTarget);
+      } else {
         navigateToTarget();
-        return;
       }
-
-      // Show owns the next focus target. Keep the true origin recorded for
-      // auditability, but explicitly suppress normal drawer restoration.
-      setMobileRailFocusRequest((request) => ({ ...request, restoreFocus: false }));
-      queueMobileRailAfterClose(navigateToTarget);
     },
     [mobileRailOpen, queueMobileRailAfterClose],
   );
 
-  const openDiscussionPanel = useCallback(
-    (trigger: HTMLElement, tab: 'chat' | 'ai' = 'chat') => {
+  const openActivityPanel = useCallback(
+    (tab: RailTab, trigger: HTMLElement | null) => {
       cancelPendingMobileRailAction();
       activityRailTriggerRef.current = trigger;
-      setMobileRailFocusRequest({ trigger, restoreFocus: true });
-      setIsFocusMode(false);
-      setActiveTab(tab);
-      setRailOpen(true);
+      dispatchChrome({ type: 'open-rail', viewport: getWorkspaceViewport(), tab, trigger });
       railJumpSequenceRef.current += 1;
       setRailJumpRequest({ id: tab, requestId: railJumpSequenceRef.current });
-      const opensMobileDrawer =
-        typeof window !== 'undefined' && window.matchMedia('(max-width: 767px)').matches;
-      if (opensMobileDrawer) {
-        setMobileRailOpen(true);
-      } else {
-        setMobileRailOpen(false);
-      }
     },
     [cancelPendingMobileRailAction],
   );
+
+  const openDiscussionPanel = useCallback(
+    (trigger: HTMLElement, tab: 'chat' | 'ai' = 'chat') => openActivityPanel(tab, trigger),
+    [openActivityPanel],
+  );
+
+  const selectRailTab = useCallback((tab: RailTab) => {
+    dispatchChrome({ type: 'select-tab', tab });
+  }, []);
 
   const handleDiscussionClick = useCallback(
     (event: ReactMouseEvent<HTMLButtonElement>) => {
@@ -1397,16 +1451,15 @@ function ResolvedDocumentWorkspace({
     hydratedLocalEditorRef.current = editor;
     localBodyExpectedRef.current = null;
     divergentHistoryMarkerRef.current = undefined;
+    firstHistoryCheckpointRef.current = 'none';
     localSuggestionsRef.current = [];
     setLocalSuggestions([]);
     recoveredLocalBodyRef.current = null;
     localBodyMutationsAllowedRef.current = realtimeEnabled;
-    setLocalBodyNotice(null);
-
     if (realtimeEnabled) {
       // Yjs and the Durable Object are the sole body authority in realtime
       // mode. Do not even read the local body keys here.
-      setLocalBodyState('ready');
+      setLocalBody({ kind: 'ready' });
       return;
     }
 
@@ -1416,12 +1469,11 @@ function ResolvedDocumentWorkspace({
     editor.setEditable(false);
     const storage = browserLocalStorage();
     if (!storage) {
-      setLocalBodyNotice({
+      localBodyMutationsAllowedRef.current = true;
+      setLocalBody({
         kind: 'unavailable',
         detail: 'Browser local storage could not be acquired.',
       });
-      localBodyMutationsAllowedRef.current = true;
-      setLocalBodyState('unavailable');
       return;
     }
     const result = loadLocalDocumentBody({
@@ -1438,12 +1490,18 @@ function ResolvedDocumentWorkspace({
         setLocalSuggestions(localSuggestionsRef.current);
         localBodyExpectedRef.current = result.expected;
         divergentHistoryMarkerRef.current = result.envelope.divergentHistoryHead;
-        setLocalBodyState('ready');
+        if (result.envelope.firstHistoryPending) firstHistoryCheckpointRef.current = 'pending';
+        setLocalBody({ kind: 'ready' });
         return;
       }
       if (result.state === 'empty') {
+        // A fresh body can later reconstruct its first checkpoint from this
+        // exact schema baseline. Existing unmarked drafts retain their history.
+        const emptyDocument = editor.schema.topNodeType.createAndFill();
+        if (emptyDocument?.eq(editor.state.doc))
+          firstHistoryCheckpointRef.current = 'initially-empty';
         localBodyMutationsAllowedRef.current = true;
-        setLocalBodyState('ready');
+        setLocalBody({ kind: 'ready' });
         return;
       }
       if (result.state === 'recovered-awaiting-confirmation') {
@@ -1456,36 +1514,31 @@ function ResolvedDocumentWorkspace({
           envelope: result.envelope,
           recoveryToken: result.recoveryToken,
         };
-        setLocalBodyNotice({ kind: 'recovered' });
-        setLocalBodyState('recovered-awaiting-confirmation');
+        setLocalBody({ kind: 'recovered-awaiting-confirmation', notice: { kind: 'recovered' } });
         return;
       }
       if (result.state === 'unavailable') {
-        setLocalBodyNotice({ kind: 'unavailable', detail: result.error.message });
         localBodyMutationsAllowedRef.current = true;
-        setLocalBodyState('unavailable');
+        setLocalBody({ kind: 'unavailable', detail: result.error.message });
         return;
       }
-      setLocalBodyNotice({
+      localBodyMutationsAllowedRef.current = true;
+      setLocalBody({
         kind: 'failed',
         detail: result.primaryError?.message ?? result.backupError?.message,
       });
-      localBodyMutationsAllowedRef.current = true;
-      setLocalBodyState('failed');
     } catch (error) {
       // Active-schema validation already succeeded. A setContent failure is
       // nevertheless fail-closed and must never enable autosave.
-      setLocalBodyNotice({
+      localBodyMutationsAllowedRef.current = true;
+      setLocalBody({
         kind: 'failed',
         detail: error instanceof Error ? error.message : String(error),
       });
-      localBodyMutationsAllowedRef.current = true;
-      setLocalBodyState('failed');
     }
   }, [activeDocumentId, editor, realtimeEnabled, validateLocalBodySchema]);
 
   const inviteScope = accessSnapshot.scope;
-  const documentSurfaceReady = true;
   useEffect(() => {
     if (!editor || editor.isDestroyed) return;
     editor.setEditable(!documentMutationLocked);
@@ -1521,19 +1574,16 @@ function ResolvedDocumentWorkspace({
       realtimeProvider.setLocalSelection({ from, to });
     };
     publishSelection();
-    editor.on('selectionUpdate', publishSelection);
     editor.on('transaction', publishSelection);
     return () => {
-      editor.off('selectionUpdate', publishSelection);
       editor.off('transaction', publishSelection);
       realtimeProvider.setLocalSelection(null);
     };
   }, [editor, realtimeProvider]);
 
   const localBodyConsumersReady =
-    documentSurfaceReady &&
-    (realtimeEnabled ||
-      (localBodyState !== 'loading' && localBodyState !== 'recovered-awaiting-confirmation'));
+    realtimeEnabled ||
+    (localBodyState !== 'loading' && localBodyState !== 'recovered-awaiting-confirmation');
 
   useLayoutEffect(() => {
     if (!editor || realtimeEnabled || !localBodyConsumersReady) return;
@@ -1548,7 +1598,11 @@ function ResolvedDocumentWorkspace({
       const next = mapLocalSuggestions(current, transaction);
       if (next === current) return;
       localSuggestionsRef.current = next;
-      setLocalSuggestions(next);
+      // Persistence and decisions use the mapped positions. Cards only need
+      // an update when a target becomes stale.
+      if (next.some((item, index) => (item.range === null) !== (current[index].range === null))) {
+        setLocalSuggestions(next);
+      }
     };
     editor.on('transaction', mapSuggestions);
     return () => {
@@ -1624,9 +1678,8 @@ function ResolvedDocumentWorkspace({
     if (!editor || !localBodyConsumersReady) {
       setHistoryEntries([]);
       setHistoryAvailability('loading');
-      setSelectedHistoryEntryId(null);
-      setAcceptedSuggestionIds(acceptedIdsFromResolutions(suggestionResolutionsRef.current));
-      setBlameLines([]);
+      setInspectedHistoryEntryId(null);
+      setBlameText(null);
       commitHistoryHead(null);
       historyTextRef.current = '';
       historyBodyRef.current = null;
@@ -1643,9 +1696,8 @@ function ResolvedDocumentWorkspace({
           ? 'body-saving-unavailable'
           : 'loading',
     );
-    setSelectedHistoryEntryId(null);
-    setAcceptedSuggestionIds(acceptedIdsFromResolutions(suggestionResolutionsRef.current));
-    setBlameLines([]);
+    setInspectedHistoryEntryId(null);
+    setBlameText(null);
     commitHistoryHead(null);
     historyTextRef.current = editorText(editor);
     historyBodyRef.current = null;
@@ -1660,6 +1712,14 @@ function ResolvedDocumentWorkspace({
       };
     }
 
+    const bodyKey = localDocumentBodyKey(activeDocumentId);
+    const readPrimaryBodyBytes = () => {
+      try {
+        return browserLocalStorage()?.getItem(bodyKey) ?? null;
+      } catch {
+        return null;
+      }
+    };
     const recordHistory = (saved: LocalBodyEnvelope) => {
       if (
         saved.documentId !== activeDocumentId ||
@@ -1687,7 +1747,6 @@ function ResolvedDocumentWorkspace({
               return;
             // The body writer verified these exact JSON bytes before handing over this receipt.
             const expectedRaw = JSON.stringify(saved);
-            const bodyKey = localDocumentBodyKey(activeDocumentId);
             const canCommit = () => {
               const expected = localBodyExpectedRef.current;
               if (
@@ -1699,11 +1758,7 @@ function ResolvedDocumentWorkspace({
               ) {
                 return false;
               }
-              try {
-                return browserLocalStorage()?.getItem(bodyKey) === expectedRaw;
-              } catch {
-                return false;
-              }
+              return readPrimaryBodyBytes() === expectedRaw;
             };
             if (!canCommit()) return;
             const doc = editor.schema.nodeFromJSON(saved.doc);
@@ -1725,7 +1780,6 @@ function ResolvedDocumentWorkspace({
                 canonicalize(historyBodyRef.current) === canonicalize(body))
             )
               return;
-            const historyStore = historyStoreRef.current;
             const result = await historyStore.append(
               {
                 docId: historyDocumentId,
@@ -1761,6 +1815,7 @@ function ResolvedDocumentWorkspace({
               return;
             }
             if (disposed || !mutationAuthority.allowsBodyMutation(ticket)) return;
+            firstHistoryCheckpointRef.current = 'recorded';
             historyTextRef.current = after;
             historyBodyRef.current = body;
             commitHistoryHead(result.entry.resultSha);
@@ -1768,23 +1823,22 @@ function ResolvedDocumentWorkspace({
             if (disposed || !mutationAuthority.allowsBodyMutation(ticket)) return;
             setHistoryAvailability('ready');
             setHistoryEntries(entries);
-            setSelectedHistoryEntryId(result.entry.id);
-            setBlameLines(blameFor(entries, after));
+            setBlameText(after);
           });
       }, HISTORY_RECORD_DEBOUNCE_MS);
     };
 
-    const document = editor.state.doc;
-    const currentBody = captureHistoryBody(document);
+    const currentBody = captureHistoryBody(editor.state.doc);
     const liveText = editorText(editor);
     const expectedBody = localBodyExpectedRef.current;
+    const hasPendingFirstCheckpoint = firstHistoryCheckpointRef.current === 'pending';
+    const pendingBodyBytes = hasPendingFirstCheckpoint ? readPrimaryBodyBytes() : null;
     const ticket = mutationAuthority.capture();
     const readVerifiedCurrentBody = () => {
       const storage = browserLocalStorage();
       if (
         disposed ||
         editor.isDestroyed ||
-        editor.state.doc !== document ||
         !storage ||
         !expectedBody ||
         !mutationAuthority.allowsBodyMutation(ticket)
@@ -1799,11 +1853,12 @@ function ResolvedDocumentWorkspace({
       return persisted.state === 'ready' &&
         persisted.expected.revision === expectedBody.revision &&
         persisted.expected.writeId === expectedBody.writeId &&
-        canonicalize(persisted.envelope.doc) === canonicalize(currentBody)
+        canonicalize(persisted.envelope.doc) === canonicalize(currentBody) &&
+        (!hasPendingFirstCheckpoint ||
+          (pendingBodyBytes !== null && readPrimaryBodyBytes() === pendingBodyBytes))
         ? persisted.envelope
         : null;
     };
-    const historyStore = historyStoreRef.current;
     const existingDivergence = divergentHistoryMarkerRef.current;
     if (existingDivergence !== undefined) {
       const verified = readVerifiedCurrentBody();
@@ -1831,11 +1886,13 @@ function ResolvedDocumentWorkspace({
       };
     }
 
-    const initialHistory: HistoryDocumentState = {
-      type: 'doc',
-      text: liveText,
-      body: currentBody,
-    };
+    const pendingInitialDocument =
+      hasPendingFirstCheckpoint && readVerifiedCurrentBody()?.firstHistoryPending
+        ? editor.schema.topNodeType.createAndFill()
+        : null;
+    const initialHistory: HistoryDocumentState = pendingInitialDocument
+      ? { type: 'doc', text: '', body: captureHistoryBody(pendingInitialDocument) }
+      : { type: 'doc', text: liveText, body: currentBody };
     void historyStore
       .hydrate(historyDocumentId, initialHistory)
       .then(async (hydration) => {
@@ -1858,10 +1915,17 @@ function ResolvedDocumentWorkspace({
           (headDocument.body && canonicalize(headDocument.body) !== canonicalize(currentBody));
         if (bodyDiffersFromHistory) {
           const historicalTimestamp = entries.at(-1)?.ts;
+          const pendingFirstCheckpoint =
+            pendingInitialDocument !== null &&
+            hydration.state === 'empty-baseline' &&
+            !hydration.durable &&
+            entries.length === 0;
           const isNewerThanHistory = (verified: LocalBodyEnvelope | null) =>
             verified !== null &&
-            historicalTimestamp !== undefined &&
-            Date.parse(verified.savedAt) > Date.parse(historicalTimestamp);
+            (pendingFirstCheckpoint
+              ? verified.firstHistoryPending === true
+              : historicalTimestamp !== undefined &&
+                Date.parse(verified.savedAt) > Date.parse(historicalTimestamp));
           const verified = readVerifiedCurrentBody();
           if (!verified) {
             setHistoryAvailability('corrupt');
@@ -1903,12 +1967,12 @@ function ResolvedDocumentWorkspace({
           }
         }
 
+        if (entries.length > 0) firstHistoryCheckpointRef.current = 'recorded';
         historyTextRef.current = headDocument.text;
         historyBodyRef.current = headDocument.body ?? null;
         commitHistoryHead(head);
         setHistoryEntries(entries);
-        setSelectedHistoryEntryId(entries.at(-1)?.id ?? null);
-        setBlameLines(capacityReached ? [] : blameFor(entries, headDocument.text));
+        setBlameText(capacityReached ? null : headDocument.text);
         setHistoryAvailability(
           capacityReached ? 'capacity-reached' : entries.length > 0 ? 'ready' : 'empty-baseline',
         );
@@ -1934,6 +1998,7 @@ function ResolvedDocumentWorkspace({
     activeDocumentId,
     editor,
     historyDocumentId,
+    historyStore,
     commitHistoryHead,
     localBodyConsumersReady,
     localBodySavingUnavailable,
@@ -1966,10 +2031,6 @@ function ResolvedDocumentWorkspace({
     mutationAuthority,
     realtimeEnabled,
   ]);
-
-  useEffect(() => {
-    setAcceptedSuggestionIds(acceptedIdsFromResolutions(suggestionResolutions));
-  }, [suggestionResolutions]);
 
   useEffect(() => {
     if (!editor) {
@@ -2005,10 +2066,8 @@ function ResolvedDocumentWorkspace({
     };
 
     update();
-    editor.on('selectionUpdate', update);
     editor.on('transaction', update);
     return () => {
-      editor.off('selectionUpdate', update);
       editor.off('transaction', update);
     };
   }, [editor]);
@@ -2045,7 +2104,7 @@ function ResolvedDocumentWorkspace({
     process.env.NODE_ENV !== 'production' || process.env.NEXT_PUBLIC_LASH_TEST_HOOKS === 'true';
 
   useEffect(() => {
-    if (typeof window === 'undefined' || !exposeTestHooks || !documentSurfaceReady) return;
+    if (typeof window === 'undefined' || !exposeTestHooks) return;
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (window as any).__lashOutlineItems = outlineItems;
     return () => {
@@ -2053,7 +2112,7 @@ function ResolvedDocumentWorkspace({
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       delete (window as any).__lashOutlineItems;
     };
-  }, [documentSurfaceReady, outlineItems, exposeTestHooks]);
+  }, [outlineItems, exposeTestHooks]);
 
   useEffect(() => {
     if (typeof window === 'undefined' || !editor || !exposeTestHooks || !localBodyConsumersReady) {
@@ -2141,13 +2200,7 @@ function ResolvedDocumentWorkspace({
   ]);
 
   useEffect(() => {
-    if (
-      typeof window === 'undefined' ||
-      !editor ||
-      !exposeTestHooks ||
-      !documentSurfaceReady ||
-      !localBodyMutationLocked
-    ) {
+    if (typeof window === 'undefined' || !editor || !exposeTestHooks || !localBodyMutationLocked) {
       return;
     }
     const win = window as Window & {
@@ -2165,7 +2218,7 @@ function ResolvedDocumentWorkspace({
     return () => {
       if (win.__lashRecoveryProbe === probe) delete win.__lashRecoveryProbe;
     };
-  }, [documentSurfaceReady, editor, exposeTestHooks, localBodyMutationLocked]);
+  }, [editor, exposeTestHooks, localBodyMutationLocked]);
 
   const isEditorReady = Boolean(editor && (realtimeEnabled || localBodyState !== 'loading'));
   const canImportMarkdown = isEditorReady && localBodyState !== 'recovered-awaiting-confirmation';
@@ -2214,7 +2267,8 @@ function ResolvedDocumentWorkspace({
     const canvasScrollTop = canvas?.scrollTop ?? 0;
     const windowScrollY = typeof window === 'undefined' ? 0 : window.scrollY;
 
-    setIsFocusMode((value) => !value);
+    cancelPendingMobileRailAction();
+    dispatchChrome({ type: 'focus' });
 
     if (typeof window === 'undefined') return;
     window.requestAnimationFrame(() => {
@@ -2223,11 +2277,11 @@ function ResolvedDocumentWorkspace({
         window.scrollTo({ top: windowScrollY, behavior: 'auto' });
       });
     });
-  }, []);
+  }, [cancelPendingMobileRailAction]);
 
   const handleSelectHistoryEntry = useCallback((entryId: string) => {
     setLegacySuggestionError('');
-    setSelectedHistoryEntryId(entryId);
+    setInspectedHistoryEntryId(entryId);
   }, []);
 
   const handleToggleAuthorship = useCallback(() => {
@@ -2238,7 +2292,7 @@ function ResolvedDocumentWorkspace({
           : document.querySelector<HTMLElement>('[data-testid="topbar-discussion-button"]');
       if (stableReturnTarget) {
         activityRailTriggerRef.current = stableReturnTarget;
-        setMobileRailFocusRequest({ trigger: stableReturnTarget, restoreFocus: true });
+        dispatchChrome({ type: 'rail-return-target', trigger: stableReturnTarget });
       }
     }
     setShowAuthorship((visible) => !visible);
@@ -2246,20 +2300,10 @@ function ResolvedDocumentWorkspace({
 
   const handleBlameLineClick = useCallback(
     (authorId: string | null, trigger: HTMLButtonElement) => {
-      cancelPendingMobileRailAction();
-      activityRailTriggerRef.current = trigger;
-      setMobileRailFocusRequest({ trigger, restoreFocus: true });
       setHistoryAuthorFilter(authorId);
-      setIsFocusMode(false);
-      setActiveTab('history');
-      setRailOpen(true);
-      railJumpSequenceRef.current += 1;
-      setRailJumpRequest({ id: 'history', requestId: railJumpSequenceRef.current });
-      setMobileRailOpen(
-        typeof window !== 'undefined' && window.matchMedia('(max-width: 767px)').matches,
-      );
+      openActivityPanel('history', trigger);
     },
-    [cancelPendingMobileRailAction],
+    [openActivityPanel],
   );
 
   const handleCopyHistoryFilterLink = useCallback(() => {
@@ -2295,11 +2339,13 @@ function ResolvedDocumentWorkspace({
     const time = params.get('historyTime') === 'last-7-days' ? 'last-7-days' : null;
     setHistoryAuthorFilter(author);
     setHistoryTimeFilter(time);
-    if (author || time) {
-      setActiveTab('history');
-      setRailOpen(true);
+    if ((author || time) && !namedComment) {
+      const trigger = document.querySelector<HTMLElement>(
+        '[data-testid="topbar-discussion-button"]',
+      );
+      openActivityPanel('history', trigger);
     }
-  }, [activeDocumentId]);
+  }, [activeDocumentId, namedComment, openActivityPanel]);
 
   const recordSuggestionResolution = useCallback(
     (entry: HistoryEntry, action: SuggestionResolutionAction) => {
@@ -2330,7 +2376,7 @@ function ResolvedDocumentWorkspace({
       return;
     setLegacySuggestionError('');
     const originalDoc = editor.state.doc;
-    const history = historyStoreRef.current;
+    const history = historyStore;
     const unsafe =
       'This older suggestion can no longer be matched to the current document. Its version is available above.';
     try {
@@ -2463,7 +2509,7 @@ function ResolvedDocumentWorkspace({
         editor.state.doc === originalDocument &&
         historyHeadRef.current === expectedHead &&
         currentBodyMatchesStorage();
-      const history = historyStoreRef.current;
+      const history = historyStore;
       restoringLocalHistoryRef.current = true;
       editor.setEditable(false, false);
       setHistoryRestoreNotice('');
@@ -2538,8 +2584,8 @@ function ResolvedDocumentWorkspace({
         const entries = await history.list(historyDocumentId);
         if (!stillAuthorized()) return;
         setHistoryEntries(entries);
-        setSelectedHistoryEntryId(result.entry.id);
-        setBlameLines(blameFor(entries, target.text));
+        setInspectedHistoryEntryId(null);
+        setBlameText(target.text);
         setHistoryRestoreNotice('Version restored. The previous version is still in History.');
         keepEditingLocked = false;
       } catch {
@@ -2556,6 +2602,7 @@ function ResolvedDocumentWorkspace({
       documentMutationLocked,
       editor,
       historyDocumentId,
+      historyStore,
       mutationAuthority,
       realtimeEnabled,
       validateLocalBodySchema,
@@ -2611,7 +2658,6 @@ function ResolvedDocumentWorkspace({
       editor.setEditable(false, false);
       let restoreEditing = true;
       try {
-        const historyStore = historyStoreRef.current;
         const result = await historyStore.append(
           {
             docId: historyDocumentId,
@@ -2663,8 +2709,7 @@ function ResolvedDocumentWorkspace({
           return { ok: false, reason: 'Document access changed.' };
         }
         setHistoryEntries(entries);
-        setSelectedHistoryEntryId(result.entry.id);
-        setBlameLines(blameFor(entries, prepared.after));
+        setBlameText(prepared.after);
         return { ok: true };
       } finally {
         applyingAiPatchRef.current = false;
@@ -2683,6 +2728,7 @@ function ResolvedDocumentWorkspace({
       documentMutationLocked,
       editor,
       historyDocumentId,
+      historyStore,
       mutationAuthority,
       realtimeEnabled,
     ],
@@ -2696,7 +2742,7 @@ function ResolvedDocumentWorkspace({
     if (window.matchMedia?.('(pointer: coarse)').matches) return;
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.isComposing || event.keyCode === 229) return;
-      if (event.repeat) return;
+      if (event.repeat || drawerOpen) return;
       if (!event.shiftKey) return;
       const isModifier = event.metaKey || event.ctrlKey;
       if (!isModifier) return;
@@ -2706,22 +2752,24 @@ function ResolvedDocumentWorkspace({
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [handleFocusModeToggle]);
+  }, [drawerOpen, handleFocusModeToggle]);
 
-  // Cmd/Ctrl+/ toggles right rail
+  // Cmd/Ctrl+/ toggles the activity surface for the current viewport.
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.isComposing || event.keyCode === 229) return;
-      if (event.repeat) return;
-      const isModifier = event.metaKey || event.ctrlKey;
-      if (!isModifier) return;
-      if (event.key !== '/') return;
+      if (event.isComposing || event.keyCode === 229 || event.repeat) return;
+      if (!(event.metaKey || event.ctrlKey) || event.key !== '/' || mobileSidebarOpen) return;
       event.preventDefault();
-      setRailOpen((value) => !value);
+      if (railVisible) {
+        closeActivityRail();
+      } else {
+        const trigger = document.activeElement;
+        openActivityPanel(activeTab, trigger instanceof HTMLElement ? trigger : null);
+      }
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, []);
+  }, [activeTab, closeActivityRail, mobileSidebarOpen, openActivityPanel, railVisible]);
 
   const hasVerifiedLocalMarkdownSourceReceipt = useCallback(() => {
     if (realtimeEnabled || localBodyState !== 'ready' || !editor) return false;
@@ -3055,13 +3103,14 @@ function ResolvedDocumentWorkspace({
   const handleStartSuggestion = (trigger: HTMLButtonElement) => {
     if (!editor || editor.isDestroyed || !canStartSuggestion) return;
     openDiscussionPanel(trigger);
-    setSuggestionNotice('');
     const { from, to } = editor.state.selection;
     const range = { from, to };
     const target = readSuggestionRange(editor.state.doc, range);
     if (!target || target.text.length > MAX_SUGGESTION_TEXT || target.before.length > 5_000) {
-      setSuggestionDraft(null);
-      setSuggestionNotice('Select the words you want to replace, then choose Suggest wording.');
+      setSuggestionAuthoring({
+        kind: 'notice',
+        message: 'Select the words you want to replace, then choose Suggest wording.',
+      });
       return;
     }
     let anchor: ReviewProposal['anchor'] | null = null;
@@ -3075,8 +3124,10 @@ function ResolvedDocumentWorkspace({
         !hasSuggestionEdges(relativeRange) ||
         documentText.text.slice(textRange.from, textRange.to) !== target.text
       ) {
-        setSuggestionDraft(null);
-        setSuggestionNotice('Select words within one paragraph or heading to start a suggestion.');
+        setSuggestionAuthoring({
+          kind: 'notice',
+          message: 'Select words within one paragraph or heading to start a suggestion.',
+        });
         return;
       }
       anchor = {
@@ -3084,15 +3135,32 @@ function ResolvedDocumentWorkspace({
         relativeRange,
       };
     }
-    setSuggestionDraft({
-      id: crypto.randomUUID(),
-      document: editor.state.doc,
-      range,
-      quote: target.text,
-      before: target.before,
-      anchor,
+    setSuggestionAuthoring({
+      kind: 'draft',
+      draft: {
+        id: crypto.randomUUID(),
+        document: editor.state.doc,
+        range,
+        quote: target.text,
+        before: target.before,
+        anchor,
+      },
     });
   };
+
+  const firstHistoryPendingForLocalSave = useCallback(() => {
+    if (firstHistoryCheckpointRef.current === 'recorded') return false;
+    if (firstHistoryCheckpointRef.current === 'initially-empty' && !localBodyExpectedRef.current)
+      return true;
+    return undefined;
+  }, []);
+
+  const publishVerifiedLocalBody = useCallback((envelope: LocalBodyEnvelope) => {
+    localBodyExpectedRef.current = localBodyExpectedRevision(envelope);
+    if (envelope.firstHistoryPending) firstHistoryCheckpointRef.current = 'pending';
+    recordSavedLocalHistoryRef.current?.(envelope);
+    setLocalBody((body) => (body.kind === 'ready' && body.notice ? { kind: 'ready' } : body));
+  }, []);
 
   const persistLocalSuggestion = (doc: EditorNode, next: LocalSuggestion[]) => {
     const storage = browserLocalStorage();
@@ -3106,19 +3174,17 @@ function ResolvedDocumentWorkspace({
       suggestions: next,
       divergentHistoryHead: divergentHistoryMarkerRef.current,
       expected: localBodyExpectedRef.current,
+      firstHistoryPending: firstHistoryPendingForLocalSave(),
       validateSchema: validateLocalBodySchema,
     });
-    localBodyExpectedRef.current = localBodyExpectedRevision(envelope);
-    recordSavedLocalHistoryRef.current?.(envelope);
+    publishVerifiedLocalBody(envelope);
     localSuggestionsRef.current = next;
     setLocalSuggestions(next);
-    setLocalBodyNotice(null);
   };
 
   const localSuggestionError = (error: unknown) => {
     if (error instanceof LocalBodyPersistenceError && error.code === 'conflict') {
-      setLocalBodyState('conflict');
-      setLocalBodyNotice({ kind: 'conflict', detail: error.message });
+      setLocalBody({ kind: 'conflict', detail: error.message });
       return {
         ok: false as const,
         message: 'This draft changed in another tab. Reopen it before making a decision.',
@@ -3128,7 +3194,7 @@ function ResolvedDocumentWorkspace({
   };
 
   const postSuggestion = async (replacement: string, note: string) => {
-    const draft = suggestionDraft;
+    const draft = suggestionAuthoring.kind === 'draft' ? suggestionAuthoring.draft : null;
     if (
       !draft ||
       !editor ||
@@ -3184,8 +3250,11 @@ function ResolvedDocumentWorkspace({
         return localSuggestionError(error);
       }
     }
-    setSuggestionDraft((current) => (current?.id === draft.id ? null : current));
-    setSuggestionNotice('Suggestion posted.');
+    setSuggestionAuthoring((current) =>
+      current.kind === 'draft' && current.draft === draft
+        ? { kind: 'notice', message: 'Suggestion posted.' }
+        : current,
+    );
     return { ok: true as const };
   };
 
@@ -3270,6 +3339,11 @@ function ResolvedDocumentWorkspace({
     accessSnapshot.phase === 'remote-ready' &&
     accessSnapshot.authoritativeOwner &&
     accessSnapshot.hydrated;
+  const promotionBaselineReady =
+    localBodyState === 'ready' &&
+    (historyAvailability === 'ready' ||
+      historyAvailability === 'empty-baseline' ||
+      historyAvailability === 'capacity-reached');
 
   useEffect(() => {
     if (!ownerBacked || !shareDialogOpen) {
@@ -3288,123 +3362,185 @@ function ResolvedDocumentWorkspace({
   }, [activeDocumentId, ownerBacked, shareDialogOpen]);
 
   useEffect(() => {
-    if (!shareDialogOpen || staticPreview) return;
-    if (ownerBacked) {
-      setOwnerSharePhase('saved');
-      setOwnerShareDetail('');
-      return;
-    }
+    if (ownerShare.phase !== 'checking-account') return;
+    const abort = new AbortController();
+    const complete = (next: OwnerShareState) => {
+      if (abort.signal.aborted) return;
+      setOwnerShare((current) => (current === ownerShare ? next : current));
+    };
 
-    const abortController = new AbortController();
-    setOwnerSharePhase('checking-account');
-    setOwnerShareDetail('');
     void fetch('/api/account/session', {
       cache: 'no-store',
       credentials: 'same-origin',
       headers: { accept: 'application/json' },
-      signal: abortController.signal,
+      signal: abort.signal,
     })
       .then((response) => {
-        if (abortController.signal.aborted) return;
         if (
           response.status === 204 &&
           response.headers.get('x-lash-account-status') === 'authenticated'
         ) {
-          setOwnerSharePhase('ready');
-          return;
+          const retryDetail = promotionAttemptRef.current?.retryDetail;
+          complete(retryDetail ? { phase: 'retryable', detail: retryDetail } : { phase: 'ready' });
+        } else {
+          complete({ phase: response.status === 401 ? 'signed-out' : 'unavailable' });
         }
-        if (response.status === 401) {
-          setOwnerSharePhase('signed-out');
-          return;
-        }
-        setOwnerSharePhase('unavailable');
       })
-      .catch((error: unknown) => {
-        if (
-          abortController.signal.aborted ||
-          (error instanceof DOMException && error.name === 'AbortError')
-        ) {
-          return;
-        }
-        setOwnerSharePhase('unavailable');
-      });
-    return () => abortController.abort();
-  }, [ownerBacked, shareDialogOpen, staticPreview]);
+      .catch(() => complete({ phase: 'unavailable' }));
+    return () => abort.abort();
+  }, [ownerShare]);
 
   const closeOwnerShareDialog = useCallback(() => {
-    if (ownerSharePhase === 'saving') return;
-    setShareDialogOpen(false);
-    if (ownerSharePhase !== 'retryable') promotionAttemptRef.current = null;
+    if (promotionInFlightRef.current) return;
+    setOwnerShare({ phase: 'closed' });
     const trigger = shareTriggerRef.current;
     window.requestAnimationFrame(() => trigger?.focus({ preventScroll: true }));
-  }, [ownerSharePhase]);
+  }, []);
 
   const handleOwnerPromotion = useCallback(async () => {
-    if (staticPreview || !editor || ownerSharePhase === 'saving' || ownerBacked) return;
+    if (
+      staticPreview ||
+      !editor ||
+      editor.isDestroyed ||
+      ownerBacked ||
+      !promotionBaselineReady ||
+      promotionInFlightRef.current ||
+      (ownerShare.phase !== 'ready' && ownerShare.phase !== 'retryable')
+    ) {
+      return;
+    }
     if (typeof window === 'undefined' || !window.crypto?.subtle) {
-      setOwnerSharePhase('unavailable');
-      setOwnerShareDetail(
-        'Secure account saving is unavailable in this browser. Your document is still on this device.',
-      );
+      setOwnerShare({
+        phase: 'unavailable',
+        detail:
+          'Secure account saving is unavailable in this browser. Your document is still on this device.',
+      });
       return;
     }
 
-    promotionAttemptRef.current ??= createBrowserDocumentPromotionAttempt(
-      {
-        adjuncts: {
-          comments: commentThreadCount,
-          suggestions: unresolvedSuggestionCount,
-        },
-        body: editor.getJSON(),
-        localDocumentId: activeDocumentId,
+    // The activity rail can be closed or unmounted. The persisted discussion,
+    // including resolved threads and edits from other tabs, decides promotion.
+    const comments = readLocalChatThreadCount(historyDocumentId);
+    if (comments === null) {
+      setOwnerShare({
+        phase: 'unavailable',
+        detail:
+          'Lash couldn’t verify the comments saved on this device. Your document is still here. Reopen Share to try again.',
+      });
+      return;
+    }
+    const adjuncts = { comments, suggestions: unresolvedSuggestionCount };
+    if (adjuncts.comments > 0 || adjuncts.suggestions > 0) {
+      setOwnerShare({ phase: 'blocked', adjuncts });
+      return;
+    }
+
+    const body = editor.state.doc;
+    let submission = promotionAttemptRef.current;
+    if (submission && (submission.title !== docTitle || !submission.body.eq(body))) {
+      setOwnerShare({
+        phase: 'unavailable',
+        detail:
+          'An account copy may already exist from the previous attempt. To share the text of this draft, export it as Markdown before leaving, then import and share the file as a new document.',
+      });
+      return;
+    }
+    if (!submission) {
+      submission = {
+        attempt: createBrowserDocumentPromotionAttempt(
+          {
+            adjuncts,
+            body: editor.getJSON(),
+            localDocumentId: activeDocumentId,
+            title: docTitle,
+          },
+          window.crypto,
+        ),
+        body,
         title: docTitle,
-      },
-      window.crypto,
-    );
-    const attempt = promotionAttemptRef.current;
-    setOwnerSharePhase('saving');
-    setOwnerShareDetail('');
-    const result = await inviteIssuanceAuthority.promoteOwnerDocument(attempt);
+      };
+    }
+    const request = {};
+    promotionInFlightRef.current = request;
+    setOwnerShare({ phase: 'saving', request });
+
+    const complete = (next: OwnerShareState) => {
+      setOwnerShare((current) =>
+        current.phase === 'saving' && current.request === request ? next : current,
+      );
+    };
+    let result: OwnerCutoverResult;
+    try {
+      result = await inviteIssuanceAuthority.promoteOwnerDocument(submission.attempt);
+    } catch {
+      // A failed response can follow a successful server write. Keep the
+      // exact attempt available for a same-snapshot retry.
+      const detail = 'Lash couldn’t confirm account saving. Try again to check the account copy.';
+      promotionAttemptRef.current = { ...submission, retryDetail: detail };
+      complete({ phase: 'retryable', detail });
+      return;
+    } finally {
+      if (promotionInFlightRef.current === request) promotionInFlightRef.current = null;
+    }
     if (result.ok) {
       promotionAttemptRef.current = null;
-      setOwnerSharePhase('saved');
+      complete({ phase: 'saved' });
       return;
     }
     if (result.reason === 'promotion-failed') {
       const promotion = result.promotion;
       if (promotion.reason === 'adjuncts-present') {
         promotionAttemptRef.current = null;
-        setOwnerSharePhase('blocked');
+        complete({ phase: 'blocked', adjuncts: promotion.adjuncts });
         return;
       }
       if (promotion.reason === 'server-rejected' && promotion.error === 'unauthorized') {
         promotionAttemptRef.current = null;
-        setOwnerSharePhase('signed-out');
+        complete({ phase: 'signed-out' });
         return;
       }
     }
     if (result.retryable) {
-      setOwnerShareDetail(
+      const detail =
         result.reason === 'promotion-failed'
           ? 'Lash could not reach account storage. Your document is still on this device.'
-          : 'Your document was saved, but Lash could not reconnect to it. Try again to finish opening the account copy.',
-      );
-      setOwnerSharePhase('retryable');
+          : 'Your document was saved, but Lash could not reconnect to it. Try again to finish opening the account copy.';
+      promotionAttemptRef.current = { ...submission, retryDetail: detail };
+      complete({ phase: 'retryable', detail });
       return;
     }
     promotionAttemptRef.current = null;
-    setOwnerSharePhase('unavailable');
+    complete({ phase: 'unavailable' });
   }, [
     activeDocumentId,
-    commentThreadCount,
     docTitle,
     editor,
+    historyDocumentId,
     inviteIssuanceAuthority,
     ownerBacked,
-    ownerSharePhase,
+    ownerShare.phase,
+    promotionBaselineReady,
     staticPreview,
     unresolvedSuggestionCount,
   ]);
+  let ownerSharePhase: OwnerShareDialogPhase =
+    ownerShare.phase === 'closed' ? 'checking-account' : ownerShare.phase;
+  let ownerShareDetail = 'detail' in ownerShare ? ownerShare.detail : undefined;
+  if (ownerBacked) {
+    ownerSharePhase = 'saved';
+  } else if (
+    !promotionBaselineReady &&
+    (ownerSharePhase === 'ready' || ownerSharePhase === 'retryable')
+  ) {
+    if (localBodyState === 'loading' || historyAvailability === 'loading') {
+      ownerSharePhase = 'checking-account';
+      ownerShareDetail = 'Checking saved versions…';
+    } else {
+      ownerSharePhase = 'unavailable';
+      ownerShareDetail =
+        'Lash couldn’t verify this device’s saved draft and versions. Export a copy before leaving, or reopen the draft to retry.';
+    }
+  }
   const syntheticMentionFixtureEnabled =
     typeof window !== 'undefined' &&
     canMountSyntheticMentionFixture({
@@ -3421,9 +3557,9 @@ function ResolvedDocumentWorkspace({
 
   useEffect(() => {
     if (!syntheticMentionFixtureEnabled && activeTab === 'activity') {
-      setActiveTab('chat');
+      selectRailTab('chat');
     }
-  }, [activeTab, syntheticMentionFixtureEnabled]);
+  }, [activeTab, selectRailTab, syntheticMentionFixtureEnabled]);
 
   const syntheticAiFixtureEnabled =
     process.env.NEXT_PUBLIC_LASH_TEST_HOOKS === 'true' &&
@@ -3436,7 +3572,7 @@ function ResolvedDocumentWorkspace({
       label: 'Chat',
       icon: 'message',
       content: (
-        <LiveEditorText editor={activeTab === 'chat' ? editor : null}>
+        <LiveEditorText editor={chatVisible ? editor : null}>
           {(currentText) => (
             <ChatPanel
               editor={editor}
@@ -3445,7 +3581,7 @@ function ResolvedDocumentWorkspace({
               onAnchoredCommentRequestHandled={handleCommentRequestHandled}
               baseVersion={realtimeEnabled ? null : historyHead}
               currentText={currentText}
-              open={activeTab === 'chat'}
+              open={chatVisible}
               showTestAiReply={!namedComment && syntheticAiFixtureEnabled}
               mutationEnabled={namedComment || !documentMutationLocked}
               statusChangesEnabled={!namedComment}
@@ -3458,18 +3594,16 @@ function ResolvedDocumentWorkspace({
               actorId={realtimeEnabled ? realtimeSnapshot.actorId : undefined}
               runDocumentMutation={runDocumentMetadataMutation}
               requestDocumentNavigation={handleChatDocumentNavigation}
-              onThreadCountChange={setCommentThreadCount}
               suggestionComposer={
                 <>
-                  {suggestionNotice ? <p role="status">{suggestionNotice}</p> : null}
-                  {suggestionDraft ? (
+                  {suggestionAuthoring.kind === 'notice' ? (
+                    <p role="status">{suggestionAuthoring.message}</p>
+                  ) : null}
+                  {suggestionAuthoring.kind === 'draft' ? (
                     <SuggestionComposer
-                      key={suggestionDraft.id}
-                      quote={suggestionDraft.quote}
-                      onCancel={() => {
-                        setSuggestionDraft(null);
-                        setSuggestionNotice('');
-                      }}
+                      key={suggestionAuthoring.draft.id}
+                      quote={suggestionAuthoring.draft.quote}
+                      onCancel={() => setSuggestionAuthoring({ kind: 'idle' })}
                       onSubmit={postSuggestion}
                     />
                   ) : null}
@@ -3530,7 +3664,7 @@ function ResolvedDocumentWorkspace({
       content: realtimeProvider?.hasSharedHistory() ? (
         <SharedHistoryPanel
           client={realtimeProvider.sharedHistory}
-          open={activeTab === 'history'}
+          open={historyVisible}
           connected={realtimeSnapshot.hydrated && realtimeSnapshot.connectionState === 'connected'}
           canSendRestore={
             ownerBacked && !documentMutationLocked && realtimeSnapshot.syncState === 'saved'
@@ -3540,7 +3674,7 @@ function ResolvedDocumentWorkspace({
         <HistoryPanel
           editor={historyPanelEditor}
           entries={historyEntries}
-          open={activeTab === 'history'}
+          open={historyVisible}
           selectedEntryId={selectedHistoryEntryId}
           authorFilter={historyAuthorFilter}
           timeFilter={historyTimeFilter}
@@ -3596,7 +3730,7 @@ function ResolvedDocumentWorkspace({
       label: 'AI',
       icon: 'sparkles',
       content: (
-        <LiveEditorText editor={activeTab === 'ai' ? editor : null}>
+        <LiveEditorText editor={aiVisible && !documentMutationLocked ? editor : null}>
           {(currentText) => (
             <AIPanel
               editor={documentMutationLocked ? null : editor}
@@ -3604,7 +3738,7 @@ function ResolvedDocumentWorkspace({
               baseVersion={historyHead}
               currentText={currentText}
               schemaVersion={HISTORY_SCHEMA_VERSION}
-              open={activeTab === 'ai'}
+              open={aiVisible}
               revisionFocusRequest={
                 railJumpRequest?.id === 'ai' ? railJumpRequest.requestId : undefined
               }
@@ -3656,7 +3790,13 @@ function ResolvedDocumentWorkspace({
               >
                 <p>Test fixture: synthetic mention identities, not real collaborators.</p>
                 <Suspense fallback={<p>Loading mention fixture…</p>}>
-                  <LiveEditorText editor={documentMutationLocked ? null : editor}>
+                  <LiveEditorText
+                    editor={
+                      railVisible && activeTab === 'activity' && !documentMutationLocked
+                        ? editor
+                        : null
+                    }
+                  >
                     {(currentText) => (
                       <SyntheticMentionPanel
                         editor={documentMutationLocked ? null : editor}
@@ -3738,25 +3878,21 @@ function ResolvedDocumentWorkspace({
       cancelPendingMobileRailAction();
       if (runtimeMode !== 'development-loopback') {
         shareTriggerRef.current = trigger ?? null;
-        setShareDialogOpen(true);
+        setOwnerShare((current) => {
+          if (current.phase !== 'closed') return current;
+          if (ownerBacked) return { phase: 'saved' };
+          return staticPreview
+            ? {
+                phase: 'unavailable',
+                detail: 'Account saving and sharing aren’t available in this preview.',
+              }
+            : { phase: 'checking-account' };
+        });
         return;
       }
-      activityRailTriggerRef.current = trigger ?? null;
-      if (trigger) {
-        setMobileRailFocusRequest({ trigger, restoreFocus: true });
-      }
-      setActiveTab('share');
-      setRailOpen(true);
-      railJumpSequenceRef.current += 1;
-      setRailJumpRequest({ id: 'share', requestId: railJumpSequenceRef.current });
-      // On narrow widths the rail is a slide-in drawer.
-      if (typeof window !== 'undefined' && window.matchMedia('(max-width: 767px)').matches) {
-        setMobileRailOpen(true);
-      } else {
-        setMobileRailOpen(false);
-      }
+      openActivityPanel('share', trigger ?? null);
     },
-    [cancelPendingMobileRailAction, runtimeMode],
+    [cancelPendingMobileRailAction, openActivityPanel, ownerBacked, runtimeMode, staticPreview],
   );
 
   const handleShareClick = useCallback(
@@ -3787,7 +3923,12 @@ function ResolvedDocumentWorkspace({
     realtimeClaimsReady &&
     accessSnapshot.canIssueInvites &&
     accessSnapshot.authoritativeOwner;
-  const remotePeers = realtimeClaimsReady ? realtimeSnapshot.peers : [];
+  const remotePeers = realtimeClaimsReady ? realtimeSnapshot.peers : null;
+  const canOpenHistory =
+    !namedComment &&
+    (realtimeEnabled
+      ? realtimeClaimsReady && realtimeProvider?.hasSharedHistory()
+      : canEditDocument);
   const realtimeLabel = realtimeSyncLabelForAccess({
     canWrite: canEditDocument,
     scope: inviteScope,
@@ -3867,6 +4008,18 @@ function ResolvedDocumentWorkspace({
           ) : null}
         </>
       )}
+      {canOpenHistory ? (
+        <button
+          type="button"
+          className="lash-document-history-button lash-document-status-item"
+          data-testid="document-history-button"
+          aria-expanded={historyVisible}
+          aria-controls={railOpen ? 'lash-rail' : undefined}
+          onClick={(event) => openActivityPanel('history', event.currentTarget)}
+        >
+          History
+        </button>
+      ) : null}
       {showRealtimeRetry ? (
         <button
           type="button"
@@ -3888,12 +4041,12 @@ function ResolvedDocumentWorkspace({
           Invite
         </button>
       ) : null}
-      {remotePeers.length ? (
+      {Boolean(remotePeers?.length) ? (
         <div
           className="lash-realtime-peers lash-document-status-item"
           aria-label="Collaborators online"
         >
-          {remotePeers.map((peer) => (
+          {remotePeers?.map((peer) => (
             <span
               key={peer.actorId}
               className="lash-realtime-peer"
@@ -3910,40 +4063,38 @@ function ResolvedDocumentWorkspace({
     </div>
   );
 
-  const remoteCursorMarkers = remotePeers.map((peer) => {
-    const cursorText = peer.selection
-      ? peer.selection.from === peer.selection.to
-        ? `cursor ${peer.selection.from}`
-        : `selection ${peer.selection.from}-${peer.selection.to}`
-      : 'online';
-    return (
-      <span
-        key={peer.actorId}
-        className="lash-remote-cursor-marker"
-        data-testid="remote-cursor-marker"
-        data-actor-id={peer.actorId}
-        style={{ '--presence-color': peer.color } as CSSProperties}
-      >
-        {peer.label}: {cursorText}
-      </span>
-    );
-  });
-
-  const handleOpenMobileSidebar = useCallback(
-    (event: ReactMouseEvent<HTMLButtonElement>) => {
-      cancelPendingMobileRailAction();
-      mobileSidebarTriggerRef.current = event.currentTarget;
-      setMobileSidebarOpen(true);
-    },
-    [cancelPendingMobileRailAction],
+  const remoteCursorMarkers = useMemo(
+    () =>
+      remotePeers?.map((peer) => {
+        const cursorText = peer.selection
+          ? peer.selection.from === peer.selection.to
+            ? `cursor ${peer.selection.from}`
+            : `selection ${peer.selection.from}-${peer.selection.to}`
+          : 'online';
+        return (
+          <span
+            key={peer.actorId}
+            className="lash-remote-cursor-marker"
+            data-testid="remote-cursor-marker"
+            data-actor-id={peer.actorId}
+            style={{ '--presence-color': peer.color } as CSSProperties}
+          >
+            {peer.label}: {cursorText}
+          </span>
+        );
+      }),
+    [remotePeers],
   );
 
+  const handleOpenMobileSidebar = useCallback(() => {
+    cancelPendingMobileRailAction();
+    dispatchChrome({ type: 'open-sidebar' });
+  }, [cancelPendingMobileRailAction]);
+
   const closeMobileSidebar = useCallback(() => {
-    setMobileSidebarOpen(false);
-    // Return focus to the trigger so AT users don't get dumped at the
-    // document root after the drawer closes.
-    mobileSidebarTriggerRef.current?.focus();
+    dispatchChrome({ type: 'close-sidebar' });
   }, []);
+
   const handleDocTitleChange = useCallback(
     (event: ChangeEvent<HTMLInputElement>) => {
       if (documentMutationLocked) return;
@@ -4002,20 +4153,39 @@ function ResolvedDocumentWorkspace({
     runDocumentMetadataMutation,
   ]);
 
+  const updateLocalDocumentIndex = useCallback(
+    (storage: Storage | undefined) => {
+      if (!storage) return;
+      try {
+        setDocuments(
+          upsertDocument(storage, {
+            id: activeDocumentId,
+            title: docTitle.trim() || DEFAULT_DOC_TITLE,
+          }),
+        );
+        setDocumentIndexNeedsRetry(false);
+      } catch {
+        setDocumentIndexNeedsRetry(true);
+      }
+    },
+    [activeDocumentId, docTitle],
+  );
+
   const handleLocalBodySave = useCallback(
     ({ docJson, savedAt }: AutosaveSaveContext) => {
       if (realtimeEnabled) {
         throw new Error('Local body persistence cannot run while realtime is authoritative.');
       }
+      const storage = browserLocalStorage();
+      let envelope: LocalBodyEnvelope;
       try {
-        const storage = browserLocalStorage();
         if (!storage) {
           throw new LocalBodyPersistenceError(
             'storage-unavailable',
             'Browser local storage could not be acquired.',
           );
         }
-        const envelope = saveLocalDocumentBody({
+        envelope = saveLocalDocumentBody({
           storage,
           documentId: activeDocumentId,
           doc: docJson,
@@ -4023,31 +4193,39 @@ function ResolvedDocumentWorkspace({
           savedAt,
           suggestions: localSuggestionsRef.current,
           divergentHistoryHead: divergentHistoryMarkerRef.current,
+          firstHistoryPending: firstHistoryPendingForLocalSave(),
           validateSchema: validateLocalBodySchema,
         });
-        localBodyExpectedRef.current = localBodyExpectedRevision(envelope);
-        recordSavedLocalHistoryRef.current?.(envelope);
-        setDocuments(
-          upsertDocument(storage, {
-            id: activeDocumentId,
-            title: docTitle.trim() || DEFAULT_DOC_TITLE,
-          }),
-        );
-        setLocalBodyNotice(null);
       } catch (error) {
         if (error instanceof LocalBodyPersistenceError && error.code === 'conflict') {
-          setLocalBodyState('conflict');
-          setLocalBodyNotice({ kind: 'conflict', detail: error.message });
+          setLocalBody({ kind: 'conflict', detail: error.message });
         } else {
-          setLocalBodyNotice({
-            kind: 'save-error',
-            detail: error instanceof Error ? error.message : String(error),
-          });
+          setLocalBody((body) =>
+            body.kind === 'ready'
+              ? {
+                  kind: 'ready',
+                  notice: {
+                    kind: 'save-error',
+                    detail: error instanceof Error ? error.message : String(error),
+                  },
+                }
+              : body,
+          );
         }
         throw error;
       }
+
+      publishVerifiedLocalBody(envelope);
+      updateLocalDocumentIndex(storage);
     },
-    [activeDocumentId, docTitle, realtimeEnabled, validateLocalBodySchema],
+    [
+      activeDocumentId,
+      firstHistoryPendingForLocalSave,
+      publishVerifiedLocalBody,
+      realtimeEnabled,
+      updateLocalDocumentIndex,
+      validateLocalBodySchema,
+    ],
   );
 
   const handleKeepRecoveredCopy = useCallback(() => {
@@ -4077,44 +4255,35 @@ function ResolvedDocumentWorkspace({
       recoveredLocalBodyRef.current = null;
       localBodyMutationsAllowedRef.current = true;
       if (canEditDocument) localRecoveryFocusDocumentRef.current = activeDocumentId;
-      setLocalBodyState('ready');
-      setLocalBodyNotice(null);
-      try {
-        setDocuments(
-          upsertDocument(storage, {
-            id: activeDocumentId,
-            title: docTitle.trim() || DEFAULT_DOC_TITLE,
-          }),
-        );
-      } catch (error) {
-        setLocalBodyNotice({
-          kind: 'save-error',
-          detail: error instanceof Error ? error.message : String(error),
-        });
-      }
+      setLocalBody({ kind: 'ready' });
+      updateLocalDocumentIndex(storage);
     } catch (error) {
       if (error instanceof LocalBodyPersistenceError && error.code === 'conflict') {
         // A newer primary appeared while the recovered backup was awaiting
         // confirmation. Keep this recovery draft transaction-locked and offer
         // reload; do not advertise an editable state while the guard is closed.
-        setLocalBodyState('recovered-awaiting-confirmation');
-        setLocalBodyNotice({ kind: 'conflict', detail: error.message });
+        setLocalBody({
+          kind: 'recovered-awaiting-confirmation',
+          notice: { kind: 'conflict', detail: error.message },
+        });
         return;
       }
       localBodyMutationsAllowedRef.current = false;
       editor.setEditable(false);
-      setLocalBodyState('recovered-awaiting-confirmation');
-      setLocalBodyNotice({
-        kind: 'recovery-error',
-        detail: error instanceof Error ? error.message : String(error),
+      setLocalBody({
+        kind: 'recovered-awaiting-confirmation',
+        notice: {
+          kind: 'recovery-error',
+          detail: error instanceof Error ? error.message : String(error),
+        },
       });
     }
   }, [
     activeDocumentId,
     canEditDocument,
-    docTitle,
     editor,
     realtimeEnabled,
+    updateLocalDocumentIndex,
     validateLocalBodySchema,
   ]);
 
@@ -4125,8 +4294,7 @@ function ResolvedDocumentWorkspace({
       if (event.key !== primaryKey) return;
       const storage = browserLocalStorage();
       if (!storage) {
-        setLocalBodyState('unavailable');
-        setLocalBodyNotice({ kind: 'unavailable' });
+        setLocalBody({ kind: 'unavailable' });
         return;
       }
       const next = loadLocalDocumentBody({
@@ -4142,8 +4310,7 @@ function ResolvedDocumentWorkspace({
         next.expected.writeId === expected.writeId;
       const stillEmpty = next.state === 'empty' && expected === null;
       if (stillCurrent || stillEmpty) return;
-      setLocalBodyState('conflict');
-      setLocalBodyNotice({ kind: 'conflict' });
+      setLocalBody({ kind: 'conflict' });
     };
     window.addEventListener('storage', handleBodyStorage);
     return () => window.removeEventListener('storage', handleBodyStorage);
@@ -4184,16 +4351,10 @@ function ResolvedDocumentWorkspace({
       suggestionAvailable={canStartSuggestion}
       mobileSidebarExpanded={mobileSidebarOpen}
       mobileDiscussionVisible
-      discussionExpanded={
-        isMobileRailViewport
-          ? mobileRailOpen && ['chat', 'history', 'ai'].includes(activeTab)
-          : railOpen && ['chat', 'history', 'ai'].includes(activeTab)
-      }
+      discussionExpanded={railVisible && ['chat', 'history', 'ai'].includes(activeTab)}
       shareExpanded={
         runtimeMode === 'development-loopback'
-          ? isMobileRailViewport
-            ? mobileRailOpen && activeTab === 'share'
-            : railOpen && activeTab === 'share'
+          ? railVisible && activeTab === 'share'
           : shareDialogOpen
       }
       settingsExpanded={documentSettingsOpen}
@@ -4230,9 +4391,8 @@ function ResolvedDocumentWorkspace({
   const rail = (
     <RightRail
       active={activeTab}
-      onChange={setActiveTab}
+      onChange={selectRailTab}
       tabs={namedComment ? railTabs.filter(({ id }) => id === 'chat') : railTabs}
-      jumpRequest={railJumpRequest}
       onClose={closeActivityRail}
     />
   );
@@ -4251,11 +4411,16 @@ function ResolvedDocumentWorkspace({
           focusMode={isFocusMode}
           railOpen={railOpen}
           sidebarCollapsed={sidebarCollapsed}
-          mobileSidebarOpen={mobileSidebarOpen}
-          mobileRailOpen={mobileRailOpen}
-          mobileRailFocusRequest={mobileRailFocusRequest}
-          onMobileSidebarClose={closeMobileSidebar}
-          onMobileRailClose={closeActivityRail}
+          mobileViewport={chrome.viewport === 'mobile'}
+          mobileDrawer={
+            chrome.drawer === 'rail'
+              ? { kind: 'rail', trigger: mobileRailFocusRequest.trigger }
+              : chrome.drawer === 'sidebar'
+                ? { kind: 'sidebar' }
+                : null
+          }
+          restoreMobileDrawerFocus={mobileRailFocusRequest.restoreFocus}
+          onMobileDrawerClose={mobileRailOpen ? closeActivityRail : closeMobileSidebar}
         >
           <EditorToolbar
             editor={editor}
@@ -4311,6 +4476,28 @@ function ResolvedDocumentWorkspace({
                   />
                 ) : null}
 
+                {!realtimeEnabled && documentIndexNeedsRetry ? (
+                  <div
+                    className="lash-local-body-notice"
+                    data-kind="save-error"
+                    data-testid="document-index-notice"
+                    role="status"
+                  >
+                    <span>Lash couldn’t update the document list.</span>
+                    <button
+                      type="button"
+                      className="lash-local-body-notice-action"
+                      disabled={!canEditDocument}
+                      onClick={() =>
+                        runDocumentMetadataMutation(() =>
+                          updateLocalDocumentIndex(browserLocalStorage()),
+                        )
+                      }
+                    >
+                      Retry updating the list
+                    </button>
+                  </div>
+                ) : null}
                 {isEditorReady && !documentMutationLocked && activeTableCell && !isFocusMode ? (
                   <TableCellPanel
                     active={activeTableCell}
@@ -4326,7 +4513,7 @@ function ResolvedDocumentWorkspace({
                   aria-label="Writing canvas"
                   data-body-mutation-locked={documentMutationLocked ? 'true' : 'false'}
                 >
-                  {remoteCursorMarkers.length ? (
+                  {remoteCursorMarkers?.length ? (
                     <div className="lash-remote-cursor-layer" aria-hidden="true">
                       {remoteCursorMarkers}
                     </div>
@@ -4404,13 +4591,8 @@ function ResolvedDocumentWorkspace({
         </AppShell>
       </div>
       <OwnerShareDialog
-        adjuncts={{
-          comments: commentThreadCount,
-          suggestions: unresolvedSuggestionCount,
-        }}
-        detail={
-          staticPreview ? 'Account saving and sharing aren’t available in this preview.' : ownerShareDetail
-        }
+        adjuncts={ownerShare.phase === 'blocked' ? ownerShare.adjuncts : NO_SHARE_ADJUNCTS}
+        detail={ownerShareDetail}
         documentTitle={docTitle.trim() || DEFAULT_DOC_TITLE}
         onClose={closeOwnerShareDialog}
         onPrimary={() => void handleOwnerPromotion()}
@@ -4427,7 +4609,7 @@ function ResolvedDocumentWorkspace({
         publicAccess={publicAccessState}
         onManagePublicAccess={() => {
           documentSettingsTriggerRef.current = shareTriggerRef.current;
-          setShareDialogOpen(false);
+          setOwnerShare({ phase: 'closed' });
           setDocumentSettingsOpen(true);
         }}
       />

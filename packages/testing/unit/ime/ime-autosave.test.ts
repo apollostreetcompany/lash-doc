@@ -16,11 +16,13 @@ describe('ime-autosave', () => {
 
   it('waits until compositionend before scheduling an autosave', async () => {
     const saves: unknown[] = [];
+    const statuses: string[] = [];
     let text = '';
     const scheduler = createAutosaveScheduler({
       debounceMs: 500,
       getDocJson: () => ({ text }),
       onSave: ({ docJson }) => saves.push(docJson),
+      onStatusChange: (status) => statuses.push(status),
     });
     const gate = createImeAwareTransactionGate(scheduler);
 
@@ -29,15 +31,21 @@ describe('ime-autosave', () => {
     gate.notifyTransaction();
     await vi.advanceTimersByTimeAsync(1_000);
     expect(saves).toEqual([]);
+    expect(gate.isComposing()).toBe(true);
+    expect(scheduler.getStatus()).toBe('idle');
 
     text = '日本';
     gate.notifyTransaction();
+    text = '日本語';
+    gate.notifyTransaction();
     gate.compositionEnd();
+    expect(scheduler.getStatus()).toBe('pending');
     await vi.advanceTimersByTimeAsync(499);
     expect(saves).toEqual([]);
 
     await vi.advanceTimersByTimeAsync(2);
-    expect(saves).toEqual([{ text: '日本' }]);
+    expect(saves).toEqual([{ text: '日本語' }]);
+    expect(statuses).toEqual(['pending', 'saving', 'saved']);
   });
 
   it('suspends an armed dirty timer through composition and saves only the final snapshot', async () => {

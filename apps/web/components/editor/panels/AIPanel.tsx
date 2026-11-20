@@ -3,7 +3,7 @@
 import { suggestFallback, validateEditPatch, type ValidatorOptions } from '@lash/ai';
 import type { DocumentId, EditPatch, EditPatchCitation } from '@lash/types';
 import type { Editor } from '@tiptap/core';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 
 import { getAiSelection, isAiSelectionCurrent, type AiSelection } from '../../../lib/aiSelection';
 import {
@@ -48,6 +48,21 @@ interface Revision extends Source {
   editing?: boolean;
 }
 
+type Activity =
+  | { phase: 'idle' }
+  | { phase: 'generating'; controller: AbortController }
+  | { phase: 'applying'; visit: symbol };
+
+type PanelResult = (
+  | { kind: 'notice' }
+  | { kind: 'revision' | 'fixture-applied'; revision: Revision }
+  | { kind: 'answer'; answer: Source & { text: string } }
+  | { kind: 'fallback'; rationale: string }
+) & { status: string; jumpTarget?: string };
+
+const IDLE = { phase: 'idle' } as const;
+const NO_RESULT = { kind: 'notice', status: '' } as const;
+
 function revisionContext(currentText: string, { from, to }: AiSelection['plaintextRange']) {
   const paragraphStart = from > 0 ? currentText.lastIndexOf('\n', from - 1) + 1 : 0;
   const nextBreak = currentText.indexOf('\n', to);
@@ -71,43 +86,57 @@ export function AIPanel({
   showTestControls = false,
   onApplyPatch,
 }: AIPanelProps) {
-  const request = useRef<AbortController | null>(null);
-  const applying = useRef(false);
+  // Read the owner synchronously in event handlers. React renders only its phase.
+  const operation = useRef<Activity>(IDLE);
+  const panelVisit = useRef<symbol | null>(null);
+  const capabilityCheck = useRef<symbol | null>(null);
   const promptRef = useRef<HTMLTextAreaElement>(null);
   const lastFocusedRevision = useRef<number | undefined>(undefined);
-  const [availability, setAvailability] = useState<WritingModelAvailability | null>(null);
-  const [availabilityAttempt, setAvailabilityAttempt] = useState(0);
-  const [pendingRevision, setPendingRevision] = useState<Revision | null>(null);
-  const [fixtureAppliedRevision, setFixtureAppliedRevision] = useState<Revision | null>(null);
-  const [answer, setAnswer] = useState<(Source & { text: string }) | null>(null);
-  const [fallback, setFallback] = useState<string | null>(null);
-  const [status, setStatus] = useState('');
+  const [availability, setAvailability] = useState<WritingModelAvailability | 'checking'>(
+    'checking',
+  );
+  const [panelResult, setPanelResult] = useState<PanelResult>(NO_RESULT);
+  const [activity, setActivity] = useState<Activity['phase']>('idle');
   const [prompt, setPrompt] = useState('');
-  const [busy, setBusy] = useState(false);
   const [globalConfirmed, setGlobalConfirmed] = useState(false);
-  const [jumpTarget, setJumpTarget] = useState('');
+
+  const hasActiveOperation = () => operation.current.phase !== 'idle';
+  const transition = (next: Activity) => {
+    operation.current = next;
+    setActivity(next.phase);
+  };
+  const setStatus = (status: string) => setPanelResult((current) => ({ ...current, status }));
+
+  const checkCapability = useCallback(() => {
+    const check = Symbol();
+    capabilityCheck.current = check;
+    void getWritingModelAvailability().then((result) => {
+      if (capabilityCheck.current !== check) return;
+      capabilityCheck.current = null;
+      setAvailability(result);
+    });
+  }, []);
 
   useEffect(() => {
     if (!open || showTestControls) return;
-    let current = true;
-    void getWritingModelAvailability().then((result) => {
-      if (current) setAvailability(result);
-    });
+    checkCapability();
     return () => {
-      current = false;
+      capabilityCheck.current = null;
     };
-  }, [availabilityAttempt, open, showTestControls]);
+  }, [checkCapability, open, showTestControls]);
 
-  useEffect(() => {
-    setBusy(applying.current);
-    if (!showTestControls) {
-      setPendingRevision(null);
-      setAnswer(null);
-      setStatus('');
-    }
+  useLayoutEffect(() => {
+    panelVisit.current = Symbol();
+    setActivity(operation.current.phase);
+    if (!showTestControls || operation.current.phase === 'applying') setPanelResult(NO_RESULT);
     return () => {
-      request.current?.abort();
-      request.current = null;
+      panelVisit.current = null;
+      const running = operation.current;
+      if (running.phase === 'generating') {
+        operation.current = IDLE;
+        running.controller.abort();
+      }
+      // A document write already in progress keeps its lock until it settles.
     };
   }, [open, editor, docId, showTestControls, revisionFocusRequest]);
 
@@ -127,6 +156,7 @@ export function AIPanel({
   const selectionFits = Boolean(
     selection?.text.trim() && selection.text.length <= MAX_AI_SELECTION_LENGTH,
   );
+  const busy = activity !== 'idle';
   const canAsk = canUseModel && !busy && selectionFits;
   const canRevise = canAsk && selection?.canReplace;
 
@@ -181,26 +211,30 @@ export function AIPanel({
     };
     const result = validateRevision(patch, selection);
     if (!result.ok) {
-      setPendingRevision(null);
-      setFallback(suggestFallback(patch, result)?.rationale ?? null);
-      setStatus(
+      const rationale = suggestFallback(patch, result)?.rationale;
+      const status =
         result.reason === 'doc-wide-without-confirm'
           ? 'Global edit requires confirmation.'
-          : 'This revision couldn’t be applied safely.',
+          : 'This revision couldn’t be applied safely.';
+      setPanelResult(
+        rationale ? { kind: 'fallback', rationale, status } : { kind: 'notice', status },
       );
       return;
     }
-    setPendingRevision({
-      ...source,
-      patch,
-      text,
-      ...revisionContext(currentText, selection.plaintextRange),
+    setPanelResult({
+      kind: 'revision',
+      status: showTestControls ? 'AI patch ready for review.' : 'Review the proposed revision.',
+      revision: {
+        ...source,
+        patch,
+        text,
+        ...revisionContext(currentText, selection.plaintextRange),
+      },
     });
-    setStatus(showTestControls ? 'AI patch ready for review.' : 'Review the proposed revision.');
   };
 
   const run = async (kind: 'revision' | 'question') => {
-    if (!editor || !baseVersion || request.current || applying.current || !hasModel) return;
+    if (!editor || !baseVersion || hasActiveOperation() || !hasModel) return;
     const excerpt = getAiSelection(editor, currentText);
     if (!excerpt?.text.trim() || excerpt.text.length > MAX_AI_SELECTION_LENGTH) {
       setStatus(
@@ -218,10 +252,6 @@ export function AIPanel({
     if (kind === 'question' && !input && !showTestControls) return;
 
     const source = getSource(excerpt, baseVersion);
-    setPendingRevision(null);
-    setFixtureAppliedRevision(null);
-    setFallback(null);
-    setAnswer(null);
     if (showTestControls) {
       if (kind === 'revision') {
         stageRevision(
@@ -230,19 +260,24 @@ export function AIPanel({
           'Tighten the selected wording while preserving the original meaning.',
         );
       } else {
-        setAnswer({ ...source, text: `AI answer grounded in "${excerpt.text}".` });
-        setStatus('AI answer includes a document citation.');
+        setPanelResult({
+          kind: 'answer',
+          answer: { ...source, text: `AI answer grounded in "${excerpt.text}".` },
+          status: 'AI answer includes a document citation.',
+        });
       }
       return;
     }
 
     const controller = new AbortController();
-    request.current = controller;
-    setBusy(true);
+    const generation = { phase: 'generating', controller } as const;
+    transition(generation);
     const inProgress = kind === 'revision' ? 'Preparing a revision…' : 'Reading the excerpt…';
-    setStatus(
-      availability === 'available' ? inProgress : 'Preparing the browser’s on-device model…',
-    );
+    setPanelResult({
+      kind: 'notice',
+      status:
+        availability === 'available' ? inProgress : 'Preparing the browser’s on-device model…',
+    });
     try {
       const { from, to } = excerpt.plaintextRange;
       const context = {
@@ -256,21 +291,26 @@ export function AIPanel({
           : { ...context, kind, question: input },
         controller.signal,
         (progress) => {
-          if (request.current !== controller || availability === 'available') return;
+          if (operation.current !== generation || availability === 'available') return;
           setStatus(
             progress === 100 ? inProgress : `Downloading the on-device model (${progress}%)…`,
           );
         },
       );
-      if (request.current !== controller || controller.signal.aborted) return;
+      if (operation.current !== generation || controller.signal.aborted) return;
+      // Successful inference is stronger evidence than the outstanding capability check.
+      capabilityCheck.current = null;
       setAvailability('available');
       if (editor.isDestroyed || !isAiSelectionCurrent(editor, excerpt)) {
         setStatus(DRAFT_CHANGED);
         return;
       }
       if (response.kind === 'question') {
-        setAnswer({ ...source, text: response.answer });
-        setStatus('Answer ready.');
+        setPanelResult({
+          kind: 'answer',
+          answer: { ...source, text: response.answer },
+          status: 'Answer ready.',
+        });
         return;
       }
       if (response.revision === excerpt.text.trim()) {
@@ -285,24 +325,22 @@ export function AIPanel({
         response.rationale,
       );
     } catch {
-      if (request.current === controller && !controller.signal.aborted) {
+      if (operation.current === generation && !controller.signal.aborted) {
         setStatus(
           'The on-device model couldn’t complete this request. Try again with a shorter excerpt.',
         );
       }
     } finally {
-      if (request.current === controller) {
-        request.current = null;
-        setBusy(false);
-      }
+      if (operation.current === generation) transition(IDLE);
     }
   };
 
+  const pendingRevision = panelResult.kind === 'revision' ? panelResult.revision : null;
+
   const acceptRevision = async () => {
-    if (!pendingRevision || applying.current) return;
+    if (!pendingRevision || hasActiveOperation() || !panelVisit.current) return;
     if (pendingRevision.patch.allowGlobal && !globalConfirmed) {
-      setPendingRevision(null);
-      setStatus('Global edit requires confirmation.');
+      setPanelResult({ kind: 'notice', status: 'Global edit requires confirmation.' });
       return;
     }
     if (
@@ -310,8 +348,7 @@ export function AIPanel({
       (!pendingRevision.patch.allowGlobal &&
         !isAiSelectionCurrent(editor, pendingRevision.selection))
     ) {
-      setPendingRevision(null);
-      setStatus(DRAFT_CHANGED);
+      setPanelResult({ kind: 'notice', status: DRAFT_CHANGED });
       return;
     }
     const { text, selection: selectedSource } = pendingRevision;
@@ -322,27 +359,30 @@ export function AIPanel({
       operations: [{ op: 'replace_text', from, to, text }],
     };
     if (!validateRevision(patch, selectedSource).ok) {
-      setPendingRevision(null);
-      setStatus(DRAFT_CHANGED);
+      setPanelResult({ kind: 'notice', status: DRAFT_CHANGED });
       return;
     }
-    applying.current = true;
-    setBusy(true);
+    const apply = { phase: 'applying', visit: panelVisit.current } as const;
+    transition(apply);
     try {
       const result = await onApplyPatch(patch, selectedSource);
+      if (panelVisit.current !== apply.visit) return;
       if (!result.ok) {
-        setPendingRevision(null);
-        setStatus(`Couldn’t apply the revision. ${result.reason}`);
+        setPanelResult({ kind: 'notice', status: `Couldn’t apply the revision. ${result.reason}` });
         return;
       }
-      if (showTestControls) setFixtureAppliedRevision(pendingRevision);
-      setPendingRevision(null);
-      setStatus(showTestControls ? 'AI patch applied.' : 'Revision applied.');
+      setPanelResult(
+        showTestControls
+          ? { kind: 'fixture-applied', revision: pendingRevision, status: 'AI patch applied.' }
+          : { kind: 'notice', status: 'Revision applied.' },
+      );
     } catch {
-      setStatus('Couldn’t apply the revision. Check the draft before trying again.');
+      if (panelVisit.current === apply.visit) {
+        setStatus('Couldn’t apply the revision. Check the draft before trying again.');
+      }
     } finally {
-      applying.current = false;
-      setBusy(false);
+      if (panelVisit.current === null) operation.current = IDLE;
+      else transition(IDLE);
     }
   };
 
@@ -354,12 +394,15 @@ export function AIPanel({
     }
     const { from, to } = source.selection.pmRange;
     editor.chain().focus().setTextSelection({ from, to }).run();
-    setJumpTarget(source.selection.text);
+    setPanelResult((current) => ({ ...current, jumpTarget: source.selection.text }));
   };
 
-  const visibleRevision = pendingRevision ?? fixtureAppliedRevision;
+  const visibleRevision =
+    pendingRevision ?? (panelResult.kind === 'fixture-applied' ? panelResult.revision : null);
+  const answer = panelResult.kind === 'answer' ? panelResult.answer : null;
+  const { status, jumpTarget } = panelResult;
   const guidance = !hasModel
-    ? availability === null
+    ? availability === 'checking'
       ? 'Checking for an on-device model…'
       : availability === 'timed-out'
         ? 'The browser’s on-device model didn’t respond. You can keep editing your draft.'
@@ -396,7 +439,7 @@ export function AIPanel({
           </label>
         </>
       ) : null}
-      {hasModel ? (
+      {hasModel || activity === 'generating' ? (
         <div className="ai-controls">
           <button
             type="button"
@@ -416,15 +459,16 @@ export function AIPanel({
           >
             Ask about selection
           </button>
-          {busy && !applying.current ? (
+          {activity === 'generating' ? (
             <button
               type="button"
               className="ai-action-button"
               onClick={() => {
-                request.current?.abort();
-                request.current = null;
-                setBusy(false);
-                setStatus('Request canceled.');
+                const running = operation.current;
+                if (running.phase !== 'generating') return;
+                transition(IDLE);
+                running.controller.abort();
+                setPanelResult({ kind: 'notice', status: 'Request canceled.' });
               }}
             >
               Cancel
@@ -439,9 +483,9 @@ export function AIPanel({
             type="button"
             className="ai-action-button"
             data-testid="ai-run-invalid"
-            disabled={!baseVersion}
+            disabled={busy || !baseVersion}
             onClick={() => {
-              if (!baseVersion) return;
+              if (!baseVersion || hasActiveOperation()) return;
               const result = validateEditPatch(
                 {
                   patchId: crypto.randomUUID(),
@@ -460,8 +504,14 @@ export function AIPanel({
                   confirmations: {},
                 },
               );
-              setPendingRevision(null);
-              if (!result.ok) setStatus(`AI patch rejected: ${result.details ?? result.reason}.`);
+              setPanelResult(
+                result.ok
+                  ? NO_RESULT
+                  : {
+                      kind: 'notice',
+                      status: `AI patch rejected: ${result.details ?? result.reason}.`,
+                    },
+              );
             }}
           >
             Test invalid patch
@@ -479,9 +529,9 @@ export function AIPanel({
             type="button"
             className="ai-action-button"
             data-testid="ai-global-rewrite"
-            disabled={!baseVersion || !currentText}
+            disabled={busy || !baseVersion || !currentText}
             onClick={() => {
-              if (!editor || !baseVersion) return;
+              if (!editor || !baseVersion || hasActiveOperation()) return;
               const whole = getAiSelection(editor, currentText, {
                 from: 1,
                 to: editor.state.doc.content.size - 1,
@@ -513,8 +563,8 @@ export function AIPanel({
           type="button"
           className="ai-action-button"
           onClick={() => {
-            setAvailability(null);
-            setAvailabilityAttempt((attempt) => attempt + 1);
+            setAvailability('checking');
+            checkCapability();
           }}
         >
           Check again
@@ -542,7 +592,14 @@ export function AIPanel({
                       disabled={busy}
                       onChange={(event) => {
                         const text = event.currentTarget.value;
-                        setPendingRevision((draft) => draft && { ...draft, text });
+                        setPanelResult((current) =>
+                          current.kind === 'revision'
+                            ? {
+                                ...current,
+                                revision: { ...current.revision, text },
+                              }
+                            : current,
+                        );
                       }}
                     />
                   ) : (
@@ -554,7 +611,14 @@ export function AIPanel({
                         data-testid="ai-edit-revision"
                         disabled={busy}
                         onClick={() =>
-                          setPendingRevision((draft) => draft && { ...draft, editing: true })
+                          setPanelResult((current) =>
+                            current.kind === 'revision'
+                              ? {
+                                  ...current,
+                                  revision: { ...current.revision, editing: true },
+                                }
+                              : current,
+                          )
                         }
                       >
                         Edit wording
@@ -614,8 +678,10 @@ export function AIPanel({
                 data-testid="ai-reject-button"
                 disabled={busy}
                 onClick={() => {
-                  setPendingRevision(null);
-                  setStatus(showTestControls ? 'AI patch rejected.' : 'Revision discarded.');
+                  setPanelResult({
+                    kind: 'notice',
+                    status: showTestControls ? 'AI patch rejected.' : 'Revision discarded.',
+                  });
                 }}
               >
                 {showTestControls ? 'Reject' : 'Discard'}
@@ -625,9 +691,9 @@ export function AIPanel({
         </div>
       ) : null}
 
-      {fallback ? (
+      {panelResult.kind === 'fallback' ? (
         <p className="ai-fallback" data-testid="ai-fallback">
-          {fallback}
+          {panelResult.rationale}
         </p>
       ) : null}
       {answer ? (

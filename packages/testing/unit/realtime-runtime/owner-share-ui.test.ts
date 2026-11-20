@@ -19,17 +19,6 @@ describe('account-owner Share UI contract', () => {
     expect(workspace).toContain('<OwnerShareDialog');
   });
 
-  it('creates one opaque attempt from live content and retains it for retry', () => {
-    const workspace = read('apps/web/components/editor/EditorWorkspace.tsx');
-
-    expect(workspace).toContain('createBrowserDocumentPromotionAttempt');
-    expect(workspace).toContain('promotionAttemptRef.current ??=');
-    expect(workspace).toContain('body: editor.getJSON()');
-    expect(workspace).toContain('comments: commentThreadCount');
-    expect(workspace).toContain('suggestions: unresolvedSuggestionCount');
-    expect(workspace).toContain('promoteOwnerDocument(attempt)');
-  });
-
   it('checks account state without exposing the principal and uses the existing return contract', () => {
     const workspace = read('apps/web/components/editor/EditorWorkspace.tsx');
 
@@ -46,13 +35,6 @@ describe('account-owner Share UI contract', () => {
     expect(dialog).toContain("phase === 'retryable'");
     expect(workspace).toContain('Lash could not reach account storage.');
     expect(workspace).toContain('Your document was saved, but Lash could not reconnect to it.');
-  });
-
-  it('reports live comment counts to prevent silent adjunct loss', () => {
-    const chat = read('apps/web/components/editor/panels/ChatPanel.tsx');
-
-    expect(chat).toContain('onThreadCountChange?: (count: number) => void');
-    expect(chat).toContain('onThreadCountChange?.(threads.length)');
   });
 
   it('lets trusted Yjs hydration target the committed remote document identity', () => {

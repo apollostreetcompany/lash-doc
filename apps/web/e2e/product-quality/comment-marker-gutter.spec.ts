@@ -7,7 +7,6 @@ async function postComment(page: Page) {
   await page.goto('/');
   const editor = page.getByRole('textbox', { name: 'Document editor' });
   await expect(editor).toHaveAttribute('contenteditable', 'true');
-  await expect(page.locator('.lash-app')).not.toHaveAttribute('data-entrance', 'true');
   await editor.fill(sentence);
   await editor.locator('p').click();
   await page.keyboard.press('End');

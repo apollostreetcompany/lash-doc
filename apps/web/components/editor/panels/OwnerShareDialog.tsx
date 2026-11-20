@@ -45,6 +45,44 @@ export const ownerShareAccessSummary = (publicAccess: PublicAccessStateV1 | null
   }
 };
 
+function PublicLinkCopy({ url }: { url: string }) {
+  const [phase, setPhase] = useState<'idle' | 'copying' | 'copied' | 'failed'>('idle');
+  const copy = async () => {
+    setPhase('copying');
+    try {
+      await navigator.clipboard.writeText(url);
+      setPhase('copied');
+    } catch {
+      setPhase('failed');
+    }
+  };
+  return (
+    <>
+      <button
+        className="lash-owner-share-copy"
+        disabled={phase === 'copying'}
+        onClick={() => void copy()}
+        type="button"
+      >
+        {phase === 'copying'
+          ? 'Copying…'
+          : phase === 'copied'
+            ? 'Copied'
+            : phase === 'failed'
+              ? 'Try copy again'
+              : 'Copy link'}
+      </button>
+      <span className="sr-only" aria-live="polite">
+        {phase === 'copied'
+          ? 'Link copied.'
+          : phase === 'failed'
+            ? 'Couldn’t copy the link. Try again.'
+            : ''}
+      </span>
+    </>
+  );
+}
+
 export function OwnerShareDialog({
   adjuncts,
   detail,
@@ -61,7 +99,6 @@ export function OwnerShareDialog({
   const dialogRef = useRef<HTMLDialogElement | null>(null);
   const primaryButtonRef = useRef<HTMLButtonElement | null>(null);
   const primaryLinkRef = useRef<HTMLAnchorElement | null>(null);
-  const [copyState, setCopyState] = useState<'idle' | 'copying' | 'copied' | 'failed'>('idle');
   const pending = phase === 'saving';
 
   useEffect(() => {
@@ -76,10 +113,6 @@ export function OwnerShareDialog({
       if (dialog.open) dialog.close();
     };
   }, [open]);
-
-  useEffect(() => {
-    if (open) setCopyState('idle');
-  }, [open, publicAccess?.publicUrl]);
 
   if (!open) return null;
 
@@ -100,7 +133,7 @@ export function OwnerShareDialog({
             : phase === 'signed-out'
               ? 'Sign in to save this document to your account. Signing in does not move it by itself.'
               : phase === 'checking-account'
-                ? 'Checking account…'
+                ? detail || 'Checking account…'
                 : 'This document is only on this device. Save it to your account before sharing.';
 
   return (
@@ -166,34 +199,8 @@ export function OwnerShareDialog({
                 Manage in document settings
               </button>
               {publicAccess?.publicUrl && !publicAccess.publicProjectionBlocked ? (
-                <button
-                  className="lash-owner-share-copy"
-                  disabled={copyState === 'copying'}
-                  onClick={() => {
-                    setCopyState('copying');
-                    void navigator.clipboard
-                      .writeText(publicAccess.publicUrl ?? '')
-                      .then(() => setCopyState('copied'))
-                      .catch(() => setCopyState('failed'));
-                  }}
-                  type="button"
-                >
-                  {copyState === 'copying'
-                    ? 'Copying…'
-                    : copyState === 'copied'
-                      ? 'Copied'
-                      : copyState === 'failed'
-                        ? 'Try copy again'
-                        : 'Copy link'}
-                </button>
+                <PublicLinkCopy key={publicAccess.publicUrl} url={publicAccess.publicUrl} />
               ) : null}
-              <span className="sr-only" aria-live="polite">
-                {copyState === 'copied'
-                  ? 'Link copied.'
-                  : copyState === 'failed'
-                    ? 'Couldn’t copy the link. Try again.'
-                    : ''}
-              </span>
             </section>
           ) : null}
         </div>
