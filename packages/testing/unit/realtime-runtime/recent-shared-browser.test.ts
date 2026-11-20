@@ -51,6 +51,57 @@ describe('recent shared documents in a browser', () => {
     });
   });
 
+  it('merges two queued arrivals under one origin lock and refreshes an already open library', async () => {
+    const queued: Array<() => void> = [];
+    const request = vi.fn((_name: string, write: () => void) => {
+      return new Promise<void>((resolve) => {
+        queued.push(() => {
+          write();
+          resolve();
+        });
+      });
+    });
+    vi.stubGlobal('navigator', { locks: { request } });
+    const second = { id: `doc-v1-${'b'.repeat(64)}`, title: 'Second shared draft' };
+    const fetcher = vi.fn(async () => response([second, shared]));
+
+    // Both tabs queue their opening before the shared lock is granted to either.
+    rememberRecentSharedDocument(actor(1), seal(1));
+    rememberRecentSharedDocument(actor(2), seal(2));
+    expect(request.mock.calls.map(([name]) => name)).toEqual([
+      RECENT_SHARED_BOOKMARKS_KEY,
+      RECENT_SHARED_BOOKMARKS_KEY,
+    ]);
+    expect(window.localStorage.getItem(RECENT_SHARED_BOOKMARKS_KEY)).toBeNull();
+    const publish = start(fetcher);
+    expect(fetcher).not.toHaveBeenCalled();
+
+    for (const grantLock of queued) grantLock();
+    await vi.advanceTimersByTimeAsync(50);
+
+    expect(fetcher).toHaveBeenCalledOnce();
+    expect(fetcher).toHaveBeenCalledWith(
+      '/api/documents/recent',
+      expect.objectContaining({
+        body: JSON.stringify({ version: 1, bookmarks: [seal(2), seal(1)] }),
+      }),
+    );
+    expect(publish).toHaveBeenLastCalledWith({ kind: 'ready', documents: [second, shared] }, false);
+  });
+
+  it('keeps the last good storage state when the lock request rejects', async () => {
+    rememberRecentSharedDocument(actor(1), seal(1));
+    const oldStorage = window.localStorage.getItem(RECENT_SHARED_BOOKMARKS_KEY);
+    const request = vi.fn().mockRejectedValue(new DOMException('Lock aborted', 'AbortError'));
+    vi.stubGlobal('navigator', { locks: { request } });
+
+    expect(() => rememberRecentSharedDocument(actor(2), seal(2))).not.toThrow();
+    await drain();
+
+    expect(request).toHaveBeenCalledOnce();
+    expect(window.localStorage.getItem(RECENT_SHARED_BOOKMARKS_KEY)).toBe(oldStorage);
+  });
+
   it('stays device-only without readable bookmarks', () => {
     vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => {
       throw new DOMException('Storage disabled', 'SecurityError');
@@ -134,6 +185,33 @@ describe('recent shared documents in a browser', () => {
     observer!.retry();
     await drain();
     expect(publish).toHaveBeenLastCalledWith({ kind: 'empty' }, false);
+  });
+
+  it('finds a temporarily missing share again until the visible library is signed out', async () => {
+    rememberRecentSharedDocument(actor(1), seal(1));
+    const fetcher = vi
+      .fn()
+      .mockResolvedValueOnce(response([]))
+      .mockResolvedValueOnce(response())
+      .mockResolvedValueOnce(response([]))
+      .mockResolvedValueOnce(response())
+      .mockResolvedValueOnce(new Response(null, { status: 401 }));
+    const publish = start(fetcher);
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(publish).toHaveBeenLastCalledWith({ kind: 'empty' }, false);
+    expect(fetcher).toHaveBeenCalledTimes(1);
+
+    observer!.retry();
+    await drain();
+    expect(publish).toHaveBeenLastCalledWith({ kind: 'ready', documents: [shared] }, false);
+    await vi.advanceTimersByTimeAsync(15_000);
+    expect(publish).toHaveBeenLastCalledWith({ kind: 'empty' }, false);
+    await vi.advanceTimersByTimeAsync(15_000);
+    expect(publish).toHaveBeenLastCalledWith({ kind: 'ready', documents: [shared] }, false);
+
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(publish).toHaveBeenLastCalledWith({ kind: 'empty' }, false);
+    expect(fetcher).toHaveBeenCalledTimes(5);
   });
 
   it('refreshes an expired account session only after a deliberate reconnect and checks access again', async () => {

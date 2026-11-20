@@ -2,6 +2,7 @@ import { hasKeys, isObject, NAMED_EDIT_ROOM_ID } from './namedEdit/contract';
 
 export const RECENT_SHARED_BOOKMARKS_KEY = 'lash:recent-shared-bookmarks';
 export const RECENT_SHARED_BOOKMARK_HEADER = 'X-Lash-Recent-Bookmark';
+const BOOKMARKS_CHANGED = 'lash:recent-shared-bookmarks-changed';
 const BOOKMARK_LIMIT = 8;
 const MAX_STORED_LENGTH = 9_000;
 const BOOKMARK = /^[A-Za-z0-9_-]{39,1015}$/u;
@@ -20,6 +21,7 @@ export type RecentSharedDocuments =
   | { kind: 'pending' | 'empty' | 'checking' | 'unavailable' }
   | { kind: 'reconnect'; failed?: true }
   | { kind: 'ready'; documents: SharedDocument[] };
+type RecentLookup = RecentSharedDocuments | { kind: 'no-authorized-documents' };
 
 function readBookmarks(storage: Storage): Bookmark[] {
   const raw = storage.getItem(RECENT_SHARED_BOOKMARKS_KEY);
@@ -57,24 +59,51 @@ function readBookmarks(storage: Storage): Bookmark[] {
 
 export function rememberRecentSharedDocument(actorId: string, bookmark: string) {
   if (!isRecentSharedBookmark(bookmark) || !ACTOR_ID.test(actorId)) return;
+  const write = () => {
+    try {
+      const storage = window.localStorage;
+      const records = readBookmarks(storage);
+      if (records[0]?.actorId === actorId && records[0].bookmark === bookmark) return;
+      const bookmarks = [
+        { actorId, bookmark },
+        ...records.filter((row) => row.actorId !== actorId),
+      ];
+      storage.setItem(
+        RECENT_SHARED_BOOKMARKS_KEY,
+        JSON.stringify({ version: 1, bookmarks: bookmarks.slice(0, BOOKMARK_LIMIT) }),
+      );
+      // Native storage events only reach other tabs. Documents may have opened
+      // in this tab while the bookmark was waiting for its lock.
+      window.dispatchEvent(new Event(BOOKMARKS_CHANGED));
+    } catch {
+      // Recent documents are optional. The authorized document still opens.
+    }
+  };
+
+  let locks: LockManager | undefined;
   try {
-    const storage = window.localStorage;
-    const records = readBookmarks(storage);
-    if (records[0]?.actorId === actorId && records[0].bookmark === bookmark) return;
-    const bookmarks = [{ actorId, bookmark }, ...records.filter((row) => row.actorId !== actorId)];
-    storage.setItem(
-      RECENT_SHARED_BOOKMARKS_KEY,
-      JSON.stringify({ version: 1, bookmarks: bookmarks.slice(0, BOOKMARK_LIMIT) }),
-    );
+    locks = window.navigator.locks;
   } catch {
-    // Recent documents are optional. The authorized document still opens.
+    // Some restricted environments do not expose the lock manager.
+  }
+  if (typeof locks?.request !== 'function') {
+    write();
+    return;
+  }
+
+  try {
+    void locks.request(RECENT_SHARED_BOOKMARKS_KEY, write).catch(() => {
+      // Leave existing bookmarks intact if the page cannot acquire its lock.
+    });
+  } catch {
+    // The grant remains valid when the lock request fails synchronously.
   }
 }
 
 async function lookupRecentDocuments(
   bookmarks: string[],
   signal: AbortSignal,
-): Promise<RecentSharedDocuments> {
+): Promise<RecentLookup> {
   const unavailable = { kind: 'unavailable' } as const;
   try {
     const response = await fetch('/api/documents/recent', {
@@ -128,7 +157,7 @@ async function lookupRecentDocuments(
       ids.add(value.id);
       documents.push({ id: value.id, title: value.title });
     }
-    return documents.length ? { kind: 'ready', documents } : { kind: 'empty' };
+    return documents.length ? { kind: 'ready', documents } : { kind: 'no-authorized-documents' };
   } catch {
     return unavailable;
   }
@@ -139,7 +168,7 @@ const reconnectFailed = { kind: 'reconnect', failed: true } as const;
 async function reconnectRecentDocuments(
   bookmarks: string[],
   signal: AbortSignal,
-): Promise<RecentSharedDocuments> {
+): Promise<RecentLookup> {
   try {
     const response = await fetch('/api/account/session', {
       method: 'GET',
@@ -171,6 +200,7 @@ export function watchRecentSharedDocuments(
   let expiry: number | undefined;
   let revalidation: number | undefined;
   let expiresAt = 0;
+  let sawAuthorizedDocuments = false;
 
   const clearRequest = () => {
     current?.abort();
@@ -190,6 +220,7 @@ export function watchRecentSharedDocuments(
     clearRevalidation();
     clearRequest();
     clearExpiry();
+    sawAuthorizedDocuments = false;
     onChange({ kind: 'empty' }, true);
   };
 
@@ -197,6 +228,7 @@ export function watchRecentSharedDocuments(
     clearRequest();
     if (document.visibilityState === 'hidden') {
       clearExpiry();
+      sawAuthorizedDocuments = false;
       onChange({ kind: 'empty' }, false);
       return;
     }
@@ -208,6 +240,7 @@ export function watchRecentSharedDocuments(
     }
     if (!bookmarks.length) {
       clearExpiry();
+      sawAuthorizedDocuments = false;
       onChange({ kind: 'empty' }, false);
       return;
     }
@@ -223,6 +256,7 @@ export function watchRecentSharedDocuments(
       if (current !== controller) return;
       clearRequest();
       clearExpiry();
+      sawAuthorizedDocuments = false;
       onChange(failure, false);
     }, REQUEST_TIMEOUT_MS);
     const lookup = mode === 'reconnect' ? reconnectRecentDocuments : lookupRecentDocuments;
@@ -237,17 +271,25 @@ export function watchRecentSharedDocuments(
       clearExpiry();
       const elapsed = performance.now() - started;
       if (elapsed >= REQUEST_TIMEOUT_MS) {
+        sawAuthorizedDocuments = false;
         onChange(failure, false);
         return;
       }
 
-      onChange(result, false);
+      if (result.kind !== 'no-authorized-documents') {
+        sawAuthorizedDocuments = result.kind === 'ready';
+      }
+      onChange(result.kind === 'no-authorized-documents' ? { kind: 'empty' } : result, false);
       if (result.kind === 'ready') {
         expiresAt = started + MAX_AGE_MS;
         expiry = window.setTimeout(() => {
           expiresAt = 0;
           onChange({ kind: 'checking' }, false);
         }, MAX_AGE_MS - elapsed);
+      }
+      // A successful empty read immediately removes titles. A library that saw
+      // authorized shares can still detect their return while it stays open.
+      if (sawAuthorizedDocuments) {
         recheck = window.setTimeout(() => check('scheduled'), RECHECK_MS - elapsed);
       }
     });
@@ -284,6 +326,7 @@ export function watchRecentSharedDocuments(
   window.addEventListener('pageshow', onPageShow);
   window.addEventListener('pagehide', reset);
   window.addEventListener('storage', onStorage);
+  window.addEventListener(BOOKMARKS_CHANGED, revalidate);
   check();
 
   return {
@@ -304,6 +347,7 @@ export function watchRecentSharedDocuments(
       window.removeEventListener('pageshow', onPageShow);
       window.removeEventListener('pagehide', reset);
       window.removeEventListener('storage', onStorage);
+      window.removeEventListener(BOOKMARKS_CHANGED, revalidate);
     },
   };
 }
