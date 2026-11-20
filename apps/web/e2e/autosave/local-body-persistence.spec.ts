@@ -127,6 +127,73 @@ const reopenInRestoredContext = async (browser: Browser, page: Page, documentId:
 };
 
 test.describe('local document body persistence', () => {
+  test('shows opening until the saved draft can accept its first paragraph', async ({ page }) => {
+    await page.goto(route('local-body-opening'));
+    const editor = page.getByRole('textbox', { name: 'Document editor' });
+    const first = 'A saved paragraph.';
+    const next = 'A new paragraph.';
+    await expect(editor).toBeEditable();
+    await editor.fill(first);
+    await waitForSaved(page);
+
+    const historyGate = Promise.withResolvers<void>();
+    let historyReadHeld = false;
+    await page.exposeFunction('waitForLocalBodyHistoryTest', () => {
+      historyReadHeld = true;
+      return historyGate.promise;
+    });
+    await page.addInitScript(() => {
+      const open = IDBFactory.prototype.open;
+      IDBFactory.prototype.open = function (name, version) {
+        const request = open.call(this, name, version);
+        if (name === 'lash-history') {
+          const add = request.addEventListener.bind(request);
+          Object.defineProperty(request, 'addEventListener', {
+            value: (
+              type: string,
+              listener: EventListenerOrEventListenerObject,
+              options?: boolean | AddEventListenerOptions,
+            ) => {
+              if (type !== 'success' || typeof listener !== 'function') {
+                return add(type, listener, options);
+              }
+              // Delay the native success notification, keeping the real stored History.
+              return add(
+                type,
+                (event) => {
+                  const waitForHistory = (
+                    window as Window & { waitForLocalBodyHistoryTest?: () => Promise<void> }
+                  ).waitForLocalBodyHistoryTest;
+                  if (!waitForHistory) throw new Error('The local History fixture did not install.');
+                  void waitForHistory().then(() => listener.call(request, event));
+                },
+                options,
+              );
+            },
+          });
+        }
+        return request;
+      };
+    });
+
+    try {
+      await page.reload();
+      await expect.poll(() => historyReadHeld).toBe(true);
+      const canvas = page.getByRole('region', { name: 'Writing canvas' });
+      await expect(canvas.getByRole('status')).toHaveText('Opening draft…');
+      await expect(editor).toHaveCount(0);
+    } finally {
+      historyGate.resolve();
+    }
+    await expect(editor).toHaveText(first);
+    expect(await editor.getAttribute('contenteditable')).toBe('true');
+    await editor.press('End');
+    await page.keyboard.press('Enter');
+    await page.keyboard.insertText(next);
+    await expect(editor.locator(':scope > p')).toHaveText([first, next]);
+    await waitForSaved(page);
+  });
+
   test('verified saved content survives reload and a restored browser context', async ({
     browser,
     page,

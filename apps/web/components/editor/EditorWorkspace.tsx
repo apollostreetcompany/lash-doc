@@ -998,6 +998,11 @@ function ResolvedDocumentWorkspace({
     historyAvailability !== 'body-history-diverged';
   const documentMutationLocked =
     localBodyMutationLocked || localHistoryMutationLocked || !canEditDocument;
+  const openingLocalDraft =
+    !realtimeEnabled &&
+    canEditDocument &&
+    (localBodyState === 'loading' ||
+      (localBodyState === 'ready' && historyAvailability === 'loading'));
   const runDocumentMetadataMutation = useCallback(
     (mutate: () => void) =>
       mutationAuthority.runMetadataMutation(mutationAuthority.capture(), mutate),
@@ -1586,7 +1591,7 @@ function ResolvedDocumentWorkspace({
   }, [activeDocumentId, editor, realtimeEnabled, validateLocalBodySchema]);
 
   const inviteScope = accessSnapshot.scope;
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (!editor || editor.isDestroyed) return;
     editor.setEditable(!documentMutationLocked);
     if (documentMutationLocked) return;
@@ -4998,7 +5003,11 @@ function ResolvedDocumentWorkspace({
                       {remoteCursorMarkers}
                     </div>
                   ) : null}
-                  {!isMounted || !isEditorReady ? (
+                  {openingLocalDraft ? (
+                    <div className="editor-loading" role="status">
+                      Opening draft…
+                    </div>
+                  ) : !isMounted || !isEditorReady ? (
                     <div className="editor-loading">Preparing your editor…</div>
                   ) : (
                     <div
