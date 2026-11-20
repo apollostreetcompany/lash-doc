@@ -531,7 +531,90 @@ describe('owner Share dialog', () => {
     expect(host.textContent).toContain('Send this link to second@example.test');
     expect(button(host, 'Copy invite link')).toBeDefined();
     expect(button(host, 'Invite link copied')).toBeUndefined();
+    await React.act(async () => button(host, 'Copy invite link')?.click());
+    expect(button(host, 'Invite link copied')).toBeDefined();
+    expect(button(host, 'Select invite link')).toBeUndefined();
   });
+
+  it.each(['missing', 'rejected'])(
+    'lets the owner select the same invite link when the clipboard is %s',
+    async (clipboard) => {
+      const roomId = `doc-v1-${'a'.repeat(64)}`;
+      const token = 'b'.repeat(43);
+      const invite = {
+        inviteId: crypto.randomUUID(),
+        email: 'owner-invite@example.test',
+        role: 'edit',
+        status: 'pending',
+        expiresAt: '2026-11-28T12:34:56.789Z',
+      };
+      const fetcher = vi.fn(async (path: string, init: RequestInit) => {
+        if (path.endsWith('/list')) return Response.json({ ok: true, version: 1, invites: [] });
+        if (path.endsWith('/revoke')) {
+          return Response.json({ ok: true, version: 1, invite: { ...invite, status: 'revoked' } });
+        }
+        const { inviteId } = JSON.parse(init.body as string) as { inviteId: string };
+        invite.inviteId = inviteId;
+        return Response.json({ ok: true, version: 1, token, invite });
+      });
+      vi.stubGlobal('fetch', fetcher);
+      const writeText = vi.fn(async (_text: string) => {
+        throw new DOMException('Clipboard unavailable', 'NotAllowedError');
+      });
+      if (clipboard === 'rejected') {
+        Object.defineProperty(navigator, 'clipboard', {
+          configurable: true,
+          value: { writeText },
+        });
+      }
+      const input = props({ phase: 'saved', namedEditRoomId: roomId });
+      const { host, rerender } = await render(React.createElement(OwnerShareDialog, input));
+      const email = host.querySelector<HTMLInputElement>('#lash-named-edit-email');
+      const fill = (value: string) =>
+        React.act(async () => {
+          Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set?.call(
+            email,
+            value,
+          );
+          email?.dispatchEvent(new Event('input', { bubbles: true }));
+        });
+      await fill(invite.email);
+      await React.act(async () => email?.form?.requestSubmit());
+      expect(Boolean(host.querySelector('input[readonly]'))).toBe(false);
+      await React.act(async () => button(host, 'Copy invite link')?.click());
+      expect(host.querySelector('[role="alert"]')?.textContent).toContain('Copy it manually.');
+      expect(button(host, 'Invite link copied')).toBeUndefined();
+      const field = host.querySelector<HTMLInputElement>('input[readonly]');
+      const expected = new URL(`/join/${roomId}`, window.location.origin);
+      expected.hash = `invite=${token}`;
+      expect(field?.value === expected.href).toBe(true);
+      expect(field?.labels?.[0].textContent?.trim()).toBe('Invite link');
+      expect(Boolean(host.querySelector('a[href*="#invite="]'))).toBe(false);
+      if (clipboard === 'rejected') {
+        expect(writeText.mock.calls.length).toBe(1);
+        expect(writeText.mock.calls[0]?.[0] === expected.href).toBe(true);
+      }
+      expect(document.activeElement === field).toBe(false);
+      await React.act(async () => button(host, 'Select invite link')?.click());
+      expect(document.activeElement === field).toBe(true);
+      expect(field?.selectionStart).toBe(0);
+      expect(field?.selectionEnd).toBe(expected.href.length);
+
+      email?.focus();
+      await fill('another@example.test');
+      expect(document.activeElement).toBe(email);
+      expect(host.querySelector('input[readonly]') === field).toBe(true);
+      expect(fetcher.mock.calls.filter(([path]) => path.endsWith('/issue'))).toHaveLength(1);
+      if (clipboard === 'missing') {
+        await React.act(async () => button(host, 'Revoke access')?.click());
+      } else {
+        await rerender(React.createElement(OwnerShareDialog, { ...input, open: false }));
+        await rerender(React.createElement(OwnerShareDialog, input));
+      }
+      expect(Boolean(host.querySelector('input[readonly]'))).toBe(false);
+      expect(button(host, 'Select invite link')).toBeUndefined();
+    },
+  );
 });
 
 describe('top-bar Share disclosure', () => {
