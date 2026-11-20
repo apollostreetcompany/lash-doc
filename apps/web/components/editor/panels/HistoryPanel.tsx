@@ -8,6 +8,8 @@ import type { DiffJSON, DiffSpan, HistoryEntry } from '@lash/types';
 import type { Editor } from '@tiptap/core';
 import { useEffect, useId, useState } from 'react';
 
+import { HistoryVersionReader, type LoadHistoryVersion } from './HistoryVersionReader';
+
 export type HistoryTimeFilter = 'last-7-days' | null;
 export type HistoryAvailabilityState =
   | 'loading'
@@ -55,6 +57,7 @@ export interface HistoryPanelProps {
   open?: boolean;
   restoreNotice?: string;
   loadSavedHistoryPreview?: LoadSavedHistoryPreview;
+  loadVersion?: LoadHistoryVersion;
   loadDiff: LoadHistoryDiff;
   onSelect: (entryId: string) => void;
   onRestore: (entry: HistoryEntry) => void;
@@ -246,6 +249,7 @@ export function HistoryPanel({
   open = true,
   restoreNotice,
   loadSavedHistoryPreview,
+  loadVersion,
   loadDiff,
   onSelect,
   onRestore,
@@ -300,6 +304,7 @@ export function HistoryPanel({
       ? loaded.result
       : null;
   const diff = comparison?.state === 'ready' ? comparison.diff : null;
+  const readSelectedVersion = selectedEntry?.intent === 'suggest' ? undefined : loadVersion;
   const canRestoreSelected = selectedEntry ? entryHasHistoryBody(selectedEntry) : false;
   const hasActiveFilters = Boolean(authorFilter || timeFilter);
   const selectedSuggestionAccepted = selectedEntry
@@ -489,12 +494,22 @@ export function HistoryPanel({
         <p role="status">This version comparison is unavailable.</p>
       ) : null}
 
-      {historyVerified && selectedEntry && diff ? (
+      {historyVerified && selectedEntry && (diff || readSelectedVersion) ? (
         <div className="history-diff-card">
           <div className="history-diff-meta">
             <span data-testid="history-selected-version">Version {selectedEntry.seq}</span>
             <span>{selectedEntry.actor.type === 'ai' ? 'AI' : selectedEntry.actor.id}</span>
           </div>
+          {readSelectedVersion ? (
+            <div className="history-diff-actions">
+              <HistoryVersionReader
+                key={`${selectedEntry.id}:${selectedEntry.resultSha}`}
+                load={readSelectedVersion}
+                sequence={selectedEntry.seq}
+                sha={selectedEntry.resultSha}
+              />
+            </div>
+          ) : null}
           {selectedEntry.intent === 'suggest' ? (
             <div className="history-suggestion-status" data-testid="history-suggestion-status">
               {selectedSuggestionResolution?.action === 'rejected'
@@ -504,20 +519,25 @@ export function HistoryPanel({
                   : 'Pending suggestion'}
             </div>
           ) : null}
-          <pre
-            className="history-diff"
-            data-testid="history-diff"
-            aria-label="Version diff"
-            aria-describedby={diffDescriptionId}
-            aria-live="polite"
-          >
-            {diff.spans.map(renderSpan)}
-          </pre>
-          <p id={diffDescriptionId} className="sr-only" data-testid="history-diff-announcement">
-            {diffAnnouncement(diff.spans)}
-          </p>
+          {diff ? (
+            <>
+              <pre
+                className="history-diff"
+                data-testid="history-diff"
+                aria-label="Version diff"
+                aria-describedby={diffDescriptionId}
+                aria-live="polite"
+              >
+                {diff.spans.map(renderSpan)}
+              </pre>
+              <p id={diffDescriptionId} className="sr-only" data-testid="history-diff-announcement">
+                {diffAnnouncement(diff.spans)}
+              </p>
+            </>
+          ) : null}
           <div className="history-diff-actions">
-            {selectedEntry.intent === 'suggest' &&
+            {diff &&
+            selectedEntry.intent === 'suggest' &&
             !selectedSuggestionAccepted &&
             selectedSuggestionResolution?.action !== 'rejected' ? (
               <>
@@ -541,15 +561,17 @@ export function HistoryPanel({
                 </button>
               </>
             ) : null}
-            <button
-              type="button"
-              className="history-restore-button"
-              data-testid="history-restore-button"
-              onClick={() => onRestore(selectedEntry)}
-              disabled={!editor || !canRestore || !canRestoreSelected}
-            >
-              Restore
-            </button>
+            {diff ? (
+              <button
+                type="button"
+                className="history-restore-button"
+                data-testid="history-restore-button"
+                onClick={() => onRestore(selectedEntry)}
+                disabled={!editor || !canRestore || !canRestoreSelected}
+              >
+                Restore
+              </button>
+            ) : null}
           </div>
           {!canRestoreSelected ? (
             <p>This version saved text only. Its original formatting is unavailable.</p>

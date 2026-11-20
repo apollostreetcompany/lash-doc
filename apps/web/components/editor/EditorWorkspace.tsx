@@ -1438,6 +1438,7 @@ function ResolvedDocumentWorkspace({
       assertStrictLocalBodySchemaJson(doc, editor.schema);
       const node = editor.schema.nodeFromJSON(doc);
       node.check();
+      return node;
     },
     [editor],
   );
@@ -2018,6 +2019,38 @@ function ResolvedDocumentWorkspace({
     realtimeEnabled,
     validateLocalBodySchema,
   ]);
+
+  const loadHistoryVersion = useCallback(
+    async (sha: string) => {
+      if (!editor || realtimeEnabled) return null;
+      const ticket = mutationAuthority.capture();
+      const canRead = () =>
+        !editor.isDestroyed &&
+        ticket.routeDocumentId === activeDocumentId &&
+        ticket.remoteDocumentId === null &&
+        mutationAuthority.allowsBodyMutation(ticket);
+      if (!canRead()) return null;
+      const version = (await historyStore.loadAt(historyDocumentId, sha)) as HistoryDocumentState;
+      if (!canRead()) return null;
+      const { text, body } = version;
+      if (!body) return { text };
+      try {
+        return { text, document: validateLocalBodySchema(body) };
+      } catch {
+        // Some verified older versions only support the stored text projection.
+        return { text };
+      }
+    },
+    [
+      activeDocumentId,
+      editor,
+      historyDocumentId,
+      historyStore,
+      mutationAuthority,
+      realtimeEnabled,
+      validateLocalBodySchema,
+    ],
+  );
 
   const loadSavedHistoryPreview = useCallback(async () => {
     if (!divergentHistoryHead || realtimeEnabled) return null;
@@ -3886,6 +3919,9 @@ function ResolvedDocumentWorkspace({
           legacySuggestionError={legacySuggestionError}
           restoreNotice={historyRestoreNotice}
           loadDiff={loadHistoryDiff}
+          loadVersion={
+            !realtimeEnabled && !namedComment && canEditDocument ? loadHistoryVersion : undefined
+          }
           loadSavedHistoryPreview={
             !realtimeEnabled &&
             historyAvailability === 'body-history-diverged' &&
