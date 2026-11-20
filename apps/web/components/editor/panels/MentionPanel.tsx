@@ -9,7 +9,11 @@ import {
   parseDateMention,
 } from '@lash/mentions';
 import { createPolicyEngine } from '@lash/rbac';
-import type { MentionResolveResult } from '@lash/types';
+import type {
+  AnonymizedMentionResult,
+  MentionResolveResult,
+  VisibleMentionResult,
+} from '@lash/types';
 import type { Editor } from '@tiptap/core';
 import { useEffect, useMemo, useState } from 'react';
 
@@ -38,31 +42,29 @@ const resolveMentionContext = () => {
   return { callerId: 'local-user', locale, timezone };
 };
 
-const visibleMentions = (
-  mentions: MentionResolveResult[],
-): Extract<MentionResolveResult, { visible: true }>[] =>
-  mentions.filter((mention): mention is Extract<MentionResolveResult, { visible: true }> =>
-    Boolean(mention.visible),
-  );
+type MentionLookup =
+  | { kind: 'idle' }
+  | { kind: 'loading' | 'error'; trigger: string }
+  | {
+      kind: 'ready';
+      trigger: string;
+      suggestions: VisibleMentionResult[];
+      anonymized: AnonymizedMentionResult[];
+    };
 
-const hiddenMentions = (
-  mentions: MentionResolveResult[],
-): Extract<MentionResolveResult, { visible: false }>[] =>
-  mentions.filter(
-    (mention): mention is Extract<MentionResolveResult, { visible: false }> => !mention.visible,
-  );
+const readyLookup = (trigger: string, mentions: MentionResolveResult[]): MentionLookup => ({
+  kind: 'ready',
+  trigger,
+  suggestions: mentions.filter((mention): mention is VisibleMentionResult => mention.visible),
+  anonymized: mentions.filter((mention): mention is AnonymizedMentionResult => !mention.visible),
+});
 
 const activeTrigger = (text: string) => text.match(/@([^@\n]{1,40})$/)?.[0] ?? null;
 
 export function MentionPanel({ editor, currentText }: MentionPanelProps) {
-  const [suggestions, setSuggestions] = useState<
-    Extract<MentionResolveResult, { visible: true }>[]
-  >([]);
-  const [anonymized, setAnonymized] = useState<Extract<MentionResolveResult, { visible: false }>[]>(
-    [],
-  );
-  const [chips, setChips] = useState<Extract<MentionResolveResult, { visible: true }>[]>([]);
-  const [status, setStatus] = useState<'idle' | 'loading' | 'ready' | 'error'>('idle');
+  const [lookup, setLookup] = useState<MentionLookup>({ kind: 'idle' });
+  const [chips, setChips] = useState<VisibleMentionResult[]>([]);
+  const trigger = activeTrigger(currentText);
 
   const context = useMemo(() => resolveMentionContext(), []);
 
@@ -100,60 +102,55 @@ export function MentionPanel({ editor, currentText }: MentionPanelProps) {
   }, []);
 
   useEffect(() => {
-    const match = currentText.match(/@([^@\n]{1,40})$/);
-    if (!match) {
-      setSuggestions([]);
-      setAnonymized([]);
-      setStatus('idle');
+    if (!trigger) {
+      setLookup({ kind: 'idle' });
+      return;
+    }
+
+    const query = trigger.slice(1).trim();
+    const date = parseDateMention(query, context);
+    if (date?.visible) {
+      setLookup(readyLookup(trigger, [date]));
       return;
     }
 
     let disposed = false;
-    const query = match[1].trim();
-    const date = parseDateMention(query, context);
-    if (date?.visible) {
-      setSuggestions([date]);
-      setAnonymized([]);
-      setStatus('ready');
-      return;
-    }
-
-    setStatus('loading');
+    setLookup({ kind: 'loading', trigger });
     Promise.all([providers.user.resolve(query, context), providers.group.resolve(query, context)])
       .then((results) => {
-        if (disposed) return;
-        const flattened = results.flat();
-        setSuggestions(visibleMentions(flattened));
-        setAnonymized(hiddenMentions(flattened));
-        setStatus('ready');
+        if (!disposed) setLookup(readyLookup(trigger, results.flat()));
       })
       .catch((error) => {
         if (disposed) return;
-        // Surface the failure instead of leaving a silent empty render or an
-        // unhandled promise rejection.
         console.error('Mention provider resolution failed', error);
-        setSuggestions([]);
-        setAnonymized([]);
-        setStatus('error');
+        setLookup({ kind: 'error', trigger });
       });
 
     return () => {
       disposed = true;
     };
-  }, [currentText, context, providers]);
+  }, [trigger, context, providers]);
 
-  const insertMention = (mention: Extract<MentionResolveResult, { visible: true }>) => {
-    setChips((items) => [...items, mention]);
-    if (!editor) return;
+  const current = lookup.kind !== 'idle' && lookup.trigger === trigger ? lookup : null;
 
-    const trigger = activeTrigger(currentText);
-    const to = editor.state.selection.from;
-    const from = trigger ? Math.max(1, to - trigger.length) : to;
+  const insertMention = (mention: VisibleMentionResult) => {
+    if (!editor?.isEditable || !trigger || current?.kind !== 'ready') return;
+    const { doc, selection } = editor.state;
+    const { $from } = selection;
+    const to = $from.pos;
+    const from = to - trigger.length;
+    if (
+      !selection.empty ||
+      !$from.parent.isTextblock ||
+      $from.parentOffset < trigger.length ||
+      doc.textBetween(from, to, '\n', '\uFFFC') !== trigger
+    )
+      return;
+
     editor
       .chain()
       .focus()
-      .deleteRange({ from, to })
-      .insertContent([
+      .insertContentAt({ from, to }, [
         {
           type: 'mention',
           attrs: {
@@ -166,47 +163,52 @@ export function MentionPanel({ editor, currentText }: MentionPanelProps) {
         { type: 'text', text: ' ' },
       ])
       .run();
+    if (editor.state.doc !== doc) setChips((items) => [...items, mention]);
   };
 
   return (
     <section className="lash-mention-panel" data-testid="mention-panel" aria-label="Mentions">
       <div className="mention-suggestions" data-testid="mention-suggestions">
-        {status === 'loading' && (
+        {current?.kind === 'loading' && (
           <span className="mention-status" data-testid="mention-loading" role="status">
             Searching…
           </span>
         )}
-        {status === 'error' && (
+        {current?.kind === 'error' && (
           <span className="mention-status mention-error" data-testid="mention-error" role="alert">
             Couldn’t load mentions. Please try again.
           </span>
         )}
-        {status === 'ready' && suggestions.length === 0 && anonymized.length === 0 && (
-          <span className="mention-status" data-testid="mention-empty">
-            No people or groups found
-          </span>
-        )}
-        {suggestions.map((mention) => (
-          <button
-            key={`${mention.kind}:${mention.refId}`}
-            type="button"
-            className="mention-suggestion"
-            data-testid="mention-suggestion"
-            data-kind={mention.kind}
-            onClick={() => insertMention(mention)}
-          >
-            {mention.display}
-          </button>
-        ))}
-        {anonymized.map((mention) => (
-          <span
-            key={mention.anonymizedDisplay}
-            className="mention-anonymized"
-            data-testid="mention-anonymized"
-          >
-            {mention.anonymizedDisplay}
-          </span>
-        ))}
+        {current?.kind === 'ready' &&
+          current.suggestions.length === 0 &&
+          current.anonymized.length === 0 && (
+            <span className="mention-status" data-testid="mention-empty">
+              No people or groups found
+            </span>
+          )}
+        {current?.kind === 'ready' &&
+          current.suggestions.map((mention) => (
+            <button
+              key={`${mention.kind}:${mention.refId}`}
+              type="button"
+              className="mention-suggestion"
+              data-testid="mention-suggestion"
+              data-kind={mention.kind}
+              onClick={() => insertMention(mention)}
+            >
+              {mention.display}
+            </button>
+          ))}
+        {current?.kind === 'ready' &&
+          current.anonymized.map((mention) => (
+            <span
+              key={mention.anonymizedDisplay}
+              className="mention-anonymized"
+              data-testid="mention-anonymized"
+            >
+              {mention.anonymizedDisplay}
+            </span>
+          ))}
       </div>
       <div className="mention-chip-list" data-testid="mention-chip-list">
         {chips.map((mention, index) => (

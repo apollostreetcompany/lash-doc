@@ -8,7 +8,7 @@ const ready = async (page: Page) =>
     Boolean((window as unknown as { __lashEditor?: unknown }).__lashEditor),
   );
 
-test('ai-citation-jump', async ({ page }) => {
+test('ai-chat-citation and ai-citation-jump go to the quoted passage', async ({ page }) => {
   await enableAiFixture(page);
   await page.goto('/');
   await ready(page);
@@ -25,7 +25,13 @@ test('ai-citation-jump', async ({ page }) => {
     editor.chain().focus().setTextSelection({ from: 8, to: 14 }).run();
   });
   await page.getByTestId('ai-chat-ask').click();
-  await page.getByTestId('ai-chat-citation').click();
+
+  const citation = page.getByTestId('ai-chat-citation');
+  await expect(page.getByTestId('ai-chat-answer')).toContainText('target');
+  await expect(citation).toContainText('target');
+  await expect(citation).toHaveAttribute('data-range-from', '7');
+  await expect(citation).toHaveAttribute('data-range-to', '13');
+  await citation.click();
 
   await expect(page.getByTestId('ai-citation-jump-target')).toContainText('target');
   const selected = await page.evaluate(() => {

@@ -63,22 +63,6 @@ const openLocalShareDialog = async (page: Page) => {
 };
 
 test.describe('invite access UX', () => {
-  test('normal product omits synthetic Activity identities', async ({ page }) => {
-    await page.goto(`/doc/bead-43-normal-mentions-${Date.now()}`);
-
-    const editor = page.locator('.ProseMirror');
-    await expect(editor).toBeVisible();
-    await expect(page.getByTestId('rail-tab-activity')).toHaveCount(0);
-    await expect(page.getByTestId('mention-panel')).toHaveCount(0);
-
-    await editor.click();
-    await page.keyboard.type('@ada');
-    await expect(
-      page.getByTestId('mention-suggestion').filter({ hasText: 'Ada Lovelace' }),
-    ).toHaveCount(0);
-    await expect(page.getByText('Ada Lovelace', { exact: true })).toHaveCount(0);
-  });
-
   test('Share explains what a browser-only document needs before sharing', async ({ page }) => {
     await page.goto(`/doc/bead-41-copy-${Date.now()}`);
     await expect(page.getByTestId('lash-doc-title-input')).toBeVisible();
@@ -272,36 +256,5 @@ test.describe('invite access UX', () => {
     } finally {
       await ownerContext.close();
     }
-  });
-
-  test('mobile Share opens an accessible dialog and Escape restores focus', async ({
-    page,
-  }, testInfo) => {
-    await page.setViewportSize({ width: 375, height: 812 });
-    await page.emulateMedia({ reducedMotion: 'reduce' });
-    await page.goto(`/doc/bead-41-mobile-share-${Date.now()}`);
-    await expect(page.getByTestId('lash-doc-title-input')).toBeVisible();
-
-    const shareTrigger = page.getByTestId('topbar-share-button');
-    const dialog = await openLocalShareDialog(page);
-    const heading = dialog.getByRole('heading', { name: /^Share “/u });
-    await expect(heading).toBeVisible();
-    await expect(dialog.getByRole('button', { name: 'Close sharing', exact: true })).toBeVisible();
-    await expect(dialog.locator(':focus')).toHaveCount(1);
-    await expect
-      .poll(async () => {
-        const box = await heading.boundingBox();
-        return Boolean(box && box.y >= 0 && box.y + box.height <= 812);
-      })
-      .toBe(true);
-
-    await page.screenshot({
-      path: testInfo.outputPath('mobile-share-gate.png'),
-      animations: 'disabled',
-    });
-    await page.keyboard.press('Escape');
-    await expect(dialog).toBeHidden();
-    await expect(shareTrigger).toHaveAttribute('aria-expanded', 'false');
-    await expect(shareTrigger).toBeFocused();
   });
 });

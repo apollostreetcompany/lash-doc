@@ -50,6 +50,26 @@ describe('document reference access', () => {
     expect(editor.getText()).toBe(path);
   });
 
+  it('keeps a chip preview open until both pointer and focus leave', () => {
+    saveDocumentTitle(window.localStorage, id, 'Private research');
+    const { editor } = makeEditor({ kind: 'local', storage: () => window.localStorage });
+    pasteText(editor, new URL(path, window.location.origin).href);
+    const wrapper = editor.view.dom.querySelector('[data-testid="lash-chip-wrapper"]')!;
+    const link = wrapper.querySelector('a')!;
+    const visible = () => wrapper.querySelector('[data-visible="true"]') !== null;
+
+    wrapper.dispatchEvent(new MouseEvent('mouseenter'));
+    expect(visible()).toBe(true);
+    link.dispatchEvent(new FocusEvent('focus'));
+    wrapper.dispatchEvent(new MouseEvent('mouseleave'));
+    expect(visible()).toBe(true);
+    wrapper.dispatchEvent(new MouseEvent('mouseenter'));
+    link.dispatchEvent(new FocusEvent('blur'));
+    expect(visible()).toBe(true);
+    wrapper.dispatchEvent(new MouseEvent('mouseleave'));
+    expect(visible()).toBe(false);
+  });
+
   it('shows a plain link for an old reference without exposing stored metadata', () => {
     const { editor, catalog } = makeEditor({ kind: 'shared', readCurrent: () => null });
     saveDocumentTitle(window.localStorage, id, 'Private research');

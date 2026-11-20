@@ -166,4 +166,28 @@ describe('named edit invitation join UI', () => {
     expect(host.innerHTML).not.toContain(token);
     expect(openDocument).not.toHaveBeenCalled();
   });
+
+  it('retires a superseded invitation immediately when another link opens', async () => {
+    window.history.replaceState(null, '', inviteLink);
+    let finish: (result: 'accepted') => void = () => undefined;
+    const previous = new Promise<'accepted'>((resolve) => {
+      finish = resolve;
+    });
+    const accept = vi.fn().mockReturnValueOnce(previous).mockResolvedValueOnce('sign-in-required');
+    const openDocument = vi.fn();
+    const host = await render({ accept, openDocument });
+    const originalSignal = accept.mock.calls[0][2] as AbortSignal;
+    const nextToken = 'c'.repeat(43);
+
+    await React.act(async () => {
+      window.history.replaceState(null, '', `${joinPath}#invite=${nextToken}`);
+      window.dispatchEvent(new HashChangeEvent('hashchange'));
+      expect(originalSignal.aborted).toBe(true);
+      finish('accepted');
+    });
+
+    expect(accept).toHaveBeenLastCalledWith(roomId, nextToken, expect.any(AbortSignal));
+    expect(openDocument).not.toHaveBeenCalled();
+    expect(host.textContent).toContain('Sign in to accept');
+  });
 });

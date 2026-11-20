@@ -30,64 +30,117 @@ const issueError = {
     'This document can’t be opened with comment-only access right now.',
 };
 
-export function NamedEditInvites({ roomId }: { roomId: string }) {
-  const [invites, setInvites] = useState<NamedEditInvite[] | null>(null);
-  const [listState, setListState] = useState<'loading' | 'ready' | 'retry' | 'unavailable'>(
-    'loading',
+type InviteList =
+  | { phase: 'loading' | 'retry' | 'unavailable' }
+  | { phase: 'ready'; invites: NamedEditInvite[]; commentInvitesEnabled: boolean };
+type InviteAction =
+  | { phase: 'idle' | 'issuing' | 'revoking' }
+  | { phase: 'done' | 'failed'; message: string };
+type IssuedInvite = { invite: NamedEditInvite; url: string };
+
+function InviteDelivery({ issued }: { issued: IssuedInvite }) {
+  const [copyPhase, setCopyPhase] = useState<'idle' | 'copying' | 'copied' | 'failed'>('idle');
+  const copy = async () => {
+    setCopyPhase('copying');
+    try {
+      await navigator.clipboard.writeText(issued.url);
+      setCopyPhase('copied');
+    } catch {
+      setCopyPhase('failed');
+    }
+  };
+  return (
+    <div className={styles.delivery}>
+      <p>Send this link to {issued.invite.email}. They’ll sign in with this email.</p>
+      <button disabled={copyPhase === 'copying'} type="button" onClick={() => void copy()}>
+        {copyPhase === 'copied'
+          ? 'Invite link copied'
+          : copyPhase === 'copying'
+            ? 'Copying invite link…'
+            : 'Copy invite link'}
+      </button>
+      <span className="sr-only" role="status">
+        {copyPhase === 'copied' ? 'Invite link copied.' : ''}
+      </span>
+      {copyPhase === 'failed' ? (
+        <p role="alert">Couldn’t copy the invite link. Try again.</p>
+      ) : null}
+    </div>
   );
+}
+
+export function NamedEditInvites({ roomId }: { roomId: string }) {
+  const [list, setList] = useState<InviteList>({ phase: 'loading' });
   const [listAttempt, retryList] = useState(0);
   const [email, setEmail] = useState('');
   const [role, setRole] = useState<NamedInviteRole>('edit');
-  const [commentInvitesEnabled, setCommentInvitesEnabled] = useState(false);
-  const [busy, setBusy] = useState(false);
-  const [message, setMessage] = useState('');
-  const [error, setError] = useState('');
-  const [issued, setIssued] = useState<{ invite: NamedEditInvite; url: string } | null>(null);
-  const [copied, setCopied] = useState(false);
+  const [action, setAction] = useState<InviteAction>({ phase: 'idle' });
+  const [issued, setIssued] = useState<IssuedInvite | null>(null);
   const lifecycle = useRef<AbortController | null>(null);
   const issueAttempt = useRef<{ email: string; inviteId: string; role: NamedInviteRole } | null>(
     null,
   );
-  const mutationInProgress = useRef(false);
+  const pendingMutation = useRef<AbortSignal | null>(null);
+  const busy = action.phase === 'issuing' || action.phase === 'revoking';
 
   useEffect(() => {
     const controller = new AbortController();
     lifecycle.current = controller;
-    setListState('loading');
+    setList({ phase: 'loading' });
+    setAction({ phase: 'idle' });
     void requestNamedEditOwner(roomId, 'list', {}, controller.signal).then((result) => {
       if (controller.signal.aborted) return;
       if (result.ok && 'invites' in result) {
-        setInvites(result.invites);
-        setCommentInvitesEnabled(result.commentInvitesEnabled === true);
+        setList({
+          phase: 'ready',
+          invites: result.invites,
+          commentInvitesEnabled: result.commentInvitesEnabled === true,
+        });
         if (!result.commentInvitesEnabled) setRole('edit');
-        setListState('ready');
       } else {
-        setListState(!result.ok && result.reason === 'unavailable' ? 'unavailable' : 'retry');
+        setList({ phase: !result.ok && result.reason === 'unavailable' ? 'unavailable' : 'retry' });
       }
     });
     return () => controller.abort();
   }, [roomId, listAttempt]);
 
   const updateInvite = (invite: NamedEditInvite) => {
-    setInvites((current) => [
-      invite,
-      ...(current ?? []).filter((item) => item.inviteId !== invite.inviteId),
-    ]);
+    setList((current) =>
+      current.phase === 'ready'
+        ? {
+            ...current,
+            invites: [
+              invite,
+              ...current.invites.filter((item) => item.inviteId !== invite.inviteId),
+            ],
+          }
+        : current,
+    );
+  };
+
+  const beginMutation = (phase: 'issuing' | 'revoking') => {
+    const signal = lifecycle.current?.signal;
+    if (!signal || signal.aborted || pendingMutation.current === signal || list.phase !== 'ready')
+      return null;
+    pendingMutation.current = signal;
+    setAction({ phase });
+    return signal;
+  };
+
+  const endMutation = (signal: AbortSignal) => {
+    if (pendingMutation.current === signal) pendingMutation.current = null;
+    return !signal.aborted;
   };
 
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (mutationInProgress.current || !lifecycle.current) return;
-    const signal = lifecycle.current.signal;
     const recipient = email.trim();
     if (!recipient) return;
+    const signal = beginMutation('issuing');
+    if (!signal) return;
     if (issueAttempt.current?.email !== recipient || issueAttempt.current.role !== role) {
       issueAttempt.current = { email: recipient, inviteId: crypto.randomUUID(), role };
     }
-    mutationInProgress.current = true;
-    setBusy(true);
-    setError('');
-    setMessage('');
     const { inviteId } = issueAttempt.current;
     const result = await requestNamedEditOwner(
       roomId,
@@ -95,58 +148,49 @@ export function NamedEditInvites({ roomId }: { roomId: string }) {
       { email: recipient, inviteId, ...(role === 'comment' ? { role } : {}) },
       signal,
     );
-    mutationInProgress.current = false;
-    if (signal.aborted) return;
-    setBusy(false);
+    if (!endMutation(signal)) return;
     if (result.ok && 'invite' in result && result.token) {
       const url = new URL(`/join/${roomId}`, window.location.origin);
       url.hash = `invite=${result.token}`;
       setIssued({ invite: result.invite, url: url.href });
       updateInvite(result.invite);
-      setCopied(false);
       setEmail('');
       setRole('edit');
       issueAttempt.current = null;
-      setMessage('Invite link created.');
-    } else if (!result.ok) {
-      setError(issueError[result.reason]);
+      setAction({ phase: 'done', message: 'Invite link created.' });
+    } else {
+      setAction({ phase: 'failed', message: issueError[result.ok ? 'retry' : result.reason] });
     }
   };
 
   const revoke = async (invite: NamedEditInvite) => {
-    if (mutationInProgress.current || !lifecycle.current) return;
-    const signal = lifecycle.current.signal;
-    mutationInProgress.current = true;
-    setBusy(true);
-    setError('');
-    setMessage('');
+    const signal = beginMutation('revoking');
+    if (!signal) return;
     const result = await requestNamedEditOwner(
       roomId,
       'revoke',
       { inviteId: invite.inviteId, ...(invite.role === 'comment' ? { role: invite.role } : {}) },
       signal,
     );
-    mutationInProgress.current = false;
-    if (signal.aborted) return;
-    setBusy(false);
+    if (!endMutation(signal)) return;
     if (result.ok && 'invite' in result) {
       updateInvite(result.invite);
       setIssued((current) =>
         current?.invite.inviteId === result.invite.inviteId ? null : current,
       );
-      setMessage(`Access revoked for ${result.invite.email}.`);
+      setAction({ phase: 'done', message: `Access revoked for ${result.invite.email}.` });
     } else {
-      setError('Couldn’t revoke access. Try again.');
+      setAction({ phase: 'failed', message: 'Couldn’t revoke access. Try again.' });
     }
   };
 
-  if (listState === 'unavailable') return null;
+  if (list.phase === 'unavailable') return null;
 
   return (
     <section className={styles.section} aria-labelledby="lash-share-people-title">
       <h3 id="lash-share-people-title">People with access</h3>
-      {listState === 'loading' ? <p role="status">Checking access…</p> : null}
-      {listState === 'retry' ? (
+      {list.phase === 'loading' ? <p role="status">Checking access…</p> : null}
+      {list.phase === 'retry' ? (
         <p>
           Couldn’t check access.{' '}
           <button type="button" onClick={() => retryList((attempt) => attempt + 1)}>
@@ -154,7 +198,7 @@ export function NamedEditInvites({ roomId }: { roomId: string }) {
           </button>
         </p>
       ) : null}
-      {listState === 'ready' ? (
+      {list.phase === 'ready' ? (
         <>
           <form className={styles.form} onSubmit={(event) => void submit(event)}>
             <div className={styles.fieldRow}>
@@ -172,7 +216,7 @@ export function NamedEditInvites({ roomId }: { roomId: string }) {
                   value={email}
                 />
               </label>
-              {commentInvitesEnabled ? (
+              {list.commentInvitesEnabled ? (
                 <label className={styles.field}>
                   Access level
                   <select
@@ -195,29 +239,10 @@ export function NamedEditInvites({ roomId }: { roomId: string }) {
               Create invite link
             </button>
           </form>
-          {issued ? (
-            <div className={styles.delivery}>
-              <p>Send this link to {issued.invite.email}. They’ll sign in with this email.</p>
-              <button
-                type="button"
-                onClick={async () => {
-                  try {
-                    await navigator.clipboard.writeText(issued.url);
-                    setCopied(true);
-                    setError('');
-                    setMessage('Invite link copied.');
-                  } catch {
-                    setError('Couldn’t copy the invite link. Try again.');
-                  }
-                }}
-              >
-                {copied ? 'Invite link copied' : 'Copy invite link'}
-              </button>
-            </div>
-          ) : null}
-          {invites?.length ? (
+          {issued ? <InviteDelivery key={issued.invite.inviteId} issued={issued} /> : null}
+          {list.invites.length ? (
             <ul className={styles.list} aria-label="Named access">
-              {invites.map((invite) => (
+              {list.invites.map((invite) => (
                 <li className={styles.invite} key={invite.inviteId}>
                   <div>
                     <span className={styles.email}>{invite.email}</span>
@@ -238,8 +263,8 @@ export function NamedEditInvites({ roomId }: { roomId: string }) {
           )}
         </>
       ) : null}
-      {message ? <p role="status">{message}</p> : null}
-      {error ? <p role="alert">{error}</p> : null}
+      {action.phase === 'done' ? <p role="status">{action.message}</p> : null}
+      {action.phase === 'failed' ? <p role="alert">{action.message}</p> : null}
     </section>
   );
 }

@@ -19,27 +19,30 @@ export interface LashImageOptions {
   initialWidth: number;
 }
 
+type UploadPhase =
+  | { kind: 'queued'; source: 'insert' | 'retry' }
+  | { kind: 'uploading' }
+  | { kind: 'retryable' };
+
 interface UploadEntry {
+  phase: UploadPhase;
   file: File;
   resized: boolean;
 }
+
+type UploadView = Pick<EditorView, 'state' | 'dispatch'>;
 
 interface UploadManager {
   plugin: Plugin;
   hasFile(uploadId: string): boolean;
   /** insert via direct view.dispatch — used by paste/drop handlers (outside CM context) */
-  insert(view: { state: EditorState; dispatch: (tr: Transaction) => void }, file: File): void;
+  insert(view: UploadView, file: File): void;
   /** retry via direct view.dispatch — used outside CM context */
-  retry(view: { state: EditorState; dispatch: (tr: Transaction) => void }, uploadId: string): void;
+  retry(view: UploadView, uploadId: string): void;
   /** insert by mutating an existing tr — used inside addCommands so CM dispatches our tr cleanly */
   insertIntoTransaction(state: EditorState, tr: Transaction, view: EditorView, file: File): void;
   /** retry by mutating an existing tr — used inside addCommands */
-  retryIntoTransaction(
-    state: EditorState,
-    tr: Transaction,
-    view: EditorView,
-    uploadId: string,
-  ): void;
+  retryIntoTransaction(tr: Transaction, view: EditorView, uploadId: string): void;
 }
 
 interface LashImageStorage {
@@ -60,7 +63,10 @@ export class ImageUploadError extends Error {
   }
 }
 
-const findImageByUploadId = (doc: ProseMirrorNode, uploadId: string) => {
+const findImageByUploadId = (
+  doc: ProseMirrorNode,
+  uploadId: string,
+): { pos: number; node: ProseMirrorNode } | null => {
   let found: { pos: number; node: ProseMirrorNode } | null = null;
   doc.descendants((node, pos) => {
     if (node.type.name === 'image' && node.attrs.uploadId === uploadId) {
@@ -81,7 +87,7 @@ const updateImageAttrs = (
   if (!result) {
     return null;
   }
-  const { pos, node } = result as { pos: number; node: ProseMirrorNode };
+  const { pos, node } = result;
   const tr = state.tr.setNodeMarkup(pos, undefined, {
     ...node.attrs,
     ...attrs,
@@ -89,60 +95,59 @@ const updateImageAttrs = (
   return tr;
 };
 
-const scheduleUpload = (
-  view: { state: EditorState; dispatch: (tr: Transaction) => void },
-  uploader: LashImageUploader,
-  initialWidth: number,
-  uploadId: string,
-  entry: UploadEntry,
-  onSuccess: () => void,
-  onFailure: (retryable: boolean) => void,
-) => {
-  let cancelled = false;
-  const onProgress = (progress: number) => {
-    if (cancelled) {
+const createUploadManager = (options: LashImageOptions): UploadManager => {
+  const uploads = new Map<string, UploadEntry>();
+
+  const startUpload = async (view: UploadView, uploadId: string, entry: UploadEntry) => {
+    if (uploads.get(uploadId) !== entry || entry.phase.kind !== 'queued') return;
+    const placeholder = findImageByUploadId(view.state.doc, uploadId);
+    if (!placeholder) {
+      uploads.delete(uploadId);
       return;
     }
-    const tr = updateImageAttrs(view.state, uploadId, { progress });
-    if (tr) {
-      view.dispatch(tr);
+    // A transaction guard may have rejected the retry. Keep the original file.
+    if (placeholder.node.attrs.status !== 'uploading') {
+      if (entry.phase.source === 'retry') entry.phase = { kind: 'retryable' };
+      else uploads.delete(uploadId);
+      return;
     }
-  };
 
-  uploader
-    .upload(entry.file, onProgress)
-    .then((result) => {
-      if (cancelled) {
-        return;
-      }
-      const attrs: Record<string, unknown> = {
-        src: result.src,
-        status: 'idle',
-        uploadId: null,
-        progress: 1,
-        previewSrc: null,
-        error: null,
-      };
-      const current = findImageByUploadId(view.state.doc, uploadId) as {
-        pos: number;
-        node: ProseMirrorNode;
-      } | null;
-      const currentWidth = current?.node.attrs.width;
-      if (
-        typeof result.width === 'number' &&
-        result.width > 0 &&
-        !entry.resized &&
-        (typeof currentWidth !== 'number' || currentWidth === initialWidth)
-      ) {
-        attrs.width = result.width;
-      }
-      const successTr = updateImageAttrs(view.state, uploadId, attrs);
-      if (successTr) {
-        const encoded = new TextEncoder().encode(JSON.stringify(successTr.doc.toJSON()));
-        if (encoded.byteLength > MAX_BODY_BYTES_WITH_NEW_IMAGE) {
+    // The phase object identifies this particular attempt, even across retries.
+    const attempt = (entry.phase = { kind: 'uploading' });
+    const isCurrent = () => uploads.get(uploadId) === entry && entry.phase === attempt;
+    try {
+      const result = await options.uploader.upload(entry.file, (progress) => {
+        if (!isCurrent()) return;
+        const tr = updateImageAttrs(view.state, uploadId, { progress });
+        if (tr) view.dispatch(tr);
+      });
+      if (!isCurrent()) return;
+
+      const current = findImageByUploadId(view.state.doc, uploadId);
+      if (current) {
+        const currentWidth = current.node.attrs.width;
+        const width =
+          typeof result.width === 'number' &&
+          result.width > 0 &&
+          !entry.resized &&
+          (typeof currentWidth !== 'number' || currentWidth === options.initialWidth)
+            ? result.width
+            : currentWidth;
+        const tr = view.state.tr.setNodeMarkup(current.pos, undefined, {
+          ...current.node.attrs,
+          src: result.src,
+          status: 'idle',
+          uploadId: null,
+          progress: 1,
+          previewSrc: null,
+          error: null,
+          width,
+        });
+        const bytes = new TextEncoder().encode(JSON.stringify(tr.doc.toJSON()));
+        if (bytes.byteLength > MAX_BODY_BYTES_WITH_NEW_IMAGE) {
           throw new ImageUploadError('This document is too large to add this image.', true);
         }
-        view.dispatch(successTr);
+        view.dispatch(tr);
         if (findImageByUploadId(view.state.doc, uploadId)) {
           throw new ImageUploadError(
             'The image could not be added. Try again when editing is available.',
@@ -150,69 +155,17 @@ const scheduleUpload = (
           );
         }
       }
-      onSuccess();
-    })
-    .catch((error: unknown) => {
-      if (cancelled) {
-        return;
-      }
-      onFailure(!(error instanceof ImageUploadError) || error.retryable);
-      const failureTr = updateImageAttrs(view.state, uploadId, {
+      if (isCurrent()) uploads.delete(uploadId);
+    } catch (error: unknown) {
+      if (!isCurrent()) return;
+      if (error instanceof ImageUploadError && !error.retryable) uploads.delete(uploadId);
+      else entry.phase = { kind: 'retryable' };
+      const tr = updateImageAttrs(view.state, uploadId, {
         status: 'error',
         error: error instanceof Error ? error.message : 'The image could not be added.',
       });
-      if (failureTr) {
-        view.dispatch(failureTr);
-      }
-    });
-
-  return () => {
-    cancelled = true;
-  };
-};
-
-const createUploadManager = (options: LashImageOptions): UploadManager => {
-  const uploads = new Map<string, UploadEntry>();
-  const disposers = new Map<string, () => void>();
-  // Flipped by the plugin's view().destroy() — used by deferred microtasks
-  // to skip uploads after editor teardown (proconsult-m0/A P1).
-  let destroyed = false;
-
-  const startUpload = (
-    view: { state: EditorState; dispatch: (tr: Transaction) => void },
-    uploadId: string,
-    entry: UploadEntry,
-  ) => {
-    uploads.set(uploadId, entry);
-    const disposer = scheduleUpload(
-      view,
-      options.uploader,
-      options.initialWidth,
-      uploadId,
-      entry,
-      () => {
-        uploads.delete(uploadId);
-        disposers.delete(uploadId);
-      },
-      (retryable) => {
-        if (!retryable) uploads.delete(uploadId);
-        disposers.delete(uploadId);
-      },
-    );
-    disposers.set(uploadId, disposer);
-  };
-
-  // Defer work from command transactions until the placeholder has committed.
-  const startUploadIfPlaceholderAlive = (
-    view: { state: EditorState; dispatch: (tr: Transaction) => void },
-    uploadId: string,
-    entry: UploadEntry,
-  ) => {
-    if (destroyed || !findImageByUploadId(view.state.doc, uploadId)) {
-      uploads.delete(uploadId);
-      return;
+      if (tr) view.dispatch(tr);
     }
-    startUpload(view, uploadId, entry);
   };
 
   const buildPlaceholderNode = (state: EditorState) => {
@@ -238,78 +191,64 @@ const createUploadManager = (options: LashImageOptions): UploadManager => {
     return tr.replaceSelectionWith(node).scrollIntoView();
   };
 
-  // Direct-dispatch path: used by paste/drop handlers, outside CM context.
-  const insert = (
-    view: { state: EditorState; dispatch: (tr: Transaction) => void },
-    file: File,
-  ) => {
-    const { uploadId, node } = buildPlaceholderNode(view.state);
-    const tr = insertPlaceholder(view.state.tr, node);
-    const entry = { file, resized: false };
+  const queueInsert = (state: EditorState, tr: Transaction, file: File) => {
+    const { uploadId, node } = buildPlaceholderNode(state);
+    insertPlaceholder(tr, node);
+    const entry: UploadEntry = {
+      phase: { kind: 'queued', source: 'insert' },
+      file,
+      resized: false,
+    };
     uploads.set(uploadId, entry);
-    view.dispatch(tr);
-    startUploadIfPlaceholderAlive(view, uploadId, entry);
+    return { uploadId, entry };
   };
 
-  const retry = (
-    view: { state: EditorState; dispatch: (tr: Transaction) => void },
-    uploadId: string,
-  ) => {
+  const queueRetry = (tr: Transaction, uploadId: string) => {
     const entry = uploads.get(uploadId);
-    if (!entry || disposers.has(uploadId)) {
-      return;
-    }
-    const resetTr = updateImageAttrs(view.state, uploadId, {
+    if (entry?.phase.kind !== 'retryable') return null;
+    const image = findImageByUploadId(tr.doc, uploadId);
+    if (!image) return null;
+
+    tr.setNodeMarkup(image.pos, undefined, {
+      ...image.node.attrs,
       status: 'uploading',
       progress: 0,
       error: null,
     });
-    if (resetTr) {
-      view.dispatch(resetTr);
-      startUploadIfPlaceholderAlive(view, uploadId, entry);
-    }
+    entry.phase = { kind: 'queued', source: 'retry' };
+    return entry;
   };
 
-  // Tr-mutation path: used by addCommands so TipTap CommandManager dispatches a single
-  // coherent tr. Upload start is deferred to a microtask to ensure the placeholder is
-  // committed to view.state before scheduleUpload's first onProgress runs. The deferred
-  // start is guarded in case the insert is undone or the editor closes first.
+  // Direct events dispatch before starting the file read. TipTap commands defer
+  // the read until their transaction has been applied to the editor view.
+  const insert = (view: UploadView, file: File) => {
+    const tr = view.state.tr;
+    const { uploadId, entry } = queueInsert(view.state, tr, file);
+    view.dispatch(tr);
+    void startUpload(view, uploadId, entry);
+  };
+
+  const retry = (view: UploadView, uploadId: string) => {
+    const tr = view.state.tr;
+    const entry = queueRetry(tr, uploadId);
+    if (!entry) return;
+    view.dispatch(tr);
+    void startUpload(view, uploadId, entry);
+  };
+
   const insertIntoTransaction = (
     state: EditorState,
     tr: Transaction,
     view: EditorView,
     file: File,
   ) => {
-    const { uploadId, node } = buildPlaceholderNode(state);
-    insertPlaceholder(tr, node);
-    const entry = { file, resized: false };
-    uploads.set(uploadId, entry);
-    queueMicrotask(() => startUploadIfPlaceholderAlive(view, uploadId, entry));
+    const { uploadId, entry } = queueInsert(state, tr, file);
+    queueMicrotask(() => void startUpload(view, uploadId, entry));
   };
 
-  const retryIntoTransaction = (
-    state: EditorState,
-    tr: Transaction,
-    view: EditorView,
-    uploadId: string,
-  ) => {
-    const entry = uploads.get(uploadId);
-    if (!entry || disposers.has(uploadId)) {
-      return;
-    }
-    const result = findImageByUploadId(state.doc, uploadId);
-    if (!result) {
-      // Placeholder is already gone — caller is retrying a stale id.
-      return;
-    }
-    const { pos, node } = result as { pos: number; node: ProseMirrorNode };
-    tr.setNodeMarkup(pos, undefined, {
-      ...node.attrs,
-      status: 'uploading',
-      progress: 0,
-      error: null,
-    });
-    queueMicrotask(() => startUploadIfPlaceholderAlive(view, uploadId, entry));
+  const retryIntoTransaction = (tr: Transaction, view: EditorView, uploadId: string) => {
+    const entry = queueRetry(tr, uploadId);
+    if (entry) queueMicrotask(() => void startUpload(view, uploadId, entry));
   };
 
   const plugin = new Plugin({
@@ -382,26 +321,14 @@ const createUploadManager = (options: LashImageOptions): UploadManager => {
         }
         return true;
       });
-      const removed: string[] = [];
-      uploads.forEach((_entry, id) => {
-        if (!active.has(id)) {
-          removed.push(id);
-        }
-      });
-      removed.forEach((id) => {
-        uploads.delete(id);
-        const disposer = disposers.get(id);
-        disposer?.();
-        disposers.delete(id);
-      });
+      for (const id of uploads.keys()) {
+        if (!active.has(id)) uploads.delete(id);
+      }
       return null;
     },
     view() {
       return {
         destroy() {
-          destroyed = true;
-          disposers.forEach((dispose) => dispose());
-          disposers.clear();
           uploads.clear();
         },
       };
@@ -724,7 +651,7 @@ export const LashImage = Node.create<LashImageOptions>({
         };
       },
       retryImageUpload(uploadId: string) {
-        return ({ tr, state, view, dispatch }: CommandProps) => {
+        return ({ tr, view, dispatch }: CommandProps) => {
           const storage = extension.storage as LashImageStorage;
           if (!storage.uploadManager) {
             return false;
@@ -732,7 +659,7 @@ export const LashImage = Node.create<LashImageOptions>({
           if (!dispatch) {
             return true;
           }
-          storage.uploadManager.retryIntoTransaction(state, tr, view, uploadId);
+          storage.uploadManager.retryIntoTransaction(tr, view, uploadId);
           return true;
         };
       },

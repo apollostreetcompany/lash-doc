@@ -6,7 +6,7 @@ import { createDocumentId, type EditPatch } from '@lash/types';
 import { Editor, type JSONContent } from '@tiptap/core';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { AIPanel } from '../../../../apps/web/components/editor/panels/AIPanel';
+import { AIPanel, type AIPanelProps } from '../../../../apps/web/components/editor/panels/AIPanel';
 import { getAiSelection, prepareAiReplacement } from '../../../../apps/web/lib/aiSelection';
 import { getWritingModelAvailability } from '../../../../apps/web/lib/browserWritingModel';
 import * as React from '../../../../apps/web/node_modules/react';
@@ -52,28 +52,38 @@ const findOccurrencePmRange = (editor: Editor, needle: string, occurrence: numbe
   return match;
 };
 
-const renderPanel = async (editor: Editor, currentText: string, showTestControls = true) => {
+const renderPanel = async (
+  editor: Editor,
+  currentText: string,
+  showTestControls = true,
+  overrides: Partial<AIPanelProps> = {},
+) => {
   const onApplyPatch = vi.fn(async (_patch: EditPatch) => ({ ok: true as const }));
   const container = document.createElement('div');
   document.body.appendChild(container);
   const root = createRoot(container);
   mountedRoots.push(root);
 
-  await React.act(async () => {
-    root.render(
-      React.createElement(AIPanel, {
-        editor,
-        docId,
-        baseVersion: 'base-version',
-        currentText,
-        schemaVersion: '1',
-        showTestControls,
-        onApplyPatch,
-      }),
-    );
-  });
+  const render = async (updates: Partial<AIPanelProps> = {}) => {
+    await React.act(async () => {
+      root.render(
+        React.createElement(AIPanel, {
+          editor,
+          docId,
+          baseVersion: 'base-version',
+          currentText,
+          schemaVersion: '1',
+          showTestControls,
+          onApplyPatch,
+          ...overrides,
+          ...updates,
+        }),
+      );
+    });
+  };
+  await render();
 
-  return { container, onApplyPatch };
+  return { container, onApplyPatch, render };
 };
 
 const stageAndAccept = async (container: HTMLElement) => {
@@ -171,6 +181,9 @@ describe('AIPanel exact selection scope', () => {
     expect(onApplyPatch.mock.calls[0][0].operations).toEqual([
       { op: 'replace_text', from: 8, to: 44, text: 'The project is nearly complete.' },
     ]);
+    expect(container.querySelector('[data-testid="ai-status"]')?.textContent).toBe(
+      'Revision applied.',
+    );
   });
 
   it('discards a model response if the selection moves while waiting', async () => {
@@ -204,6 +217,129 @@ describe('AIPanel exact selection scope', () => {
       /selection changed/,
     );
     expect(onApplyPatch).not.toHaveBeenCalled();
+  });
+
+  it('does not show a finished apply from a previous panel visit', async () => {
+    const editor = createEditor('<p>A draft sentence.</p>');
+    editor.commands.setTextSelection(findOccurrencePmRange(editor, 'draft', 0));
+    vi.stubGlobal('LanguageModel', {
+      availability: async () => 'available',
+      create: async () => ({
+        prompt: async () => JSON.stringify({ revision: 'sample', rationale: 'More specific.' }),
+        destroy: vi.fn(),
+      }),
+    });
+    let completeApply!: (result: { ok: true }) => void;
+    const onApplyPatch = vi.fn(
+      () =>
+        new Promise<{ ok: true }>((resolve) => {
+          completeApply = resolve;
+        }),
+    );
+    const { container, render } = await renderPanel(editor, editor.getText(), false, {
+      onApplyPatch,
+    });
+    await stageAndAccept(container);
+    expect(onApplyPatch).toHaveBeenCalledOnce();
+
+    await render({ open: false });
+    await render({ open: true });
+    const improve = container.querySelector<HTMLButtonElement>('[data-testid="ai-improve-button"]');
+    expect(improve?.disabled).toBe(true);
+    expect(container.querySelector('[data-testid="ai-review"]')).toBeNull();
+    await React.act(async () => completeApply({ ok: true }));
+
+    expect(improve?.disabled).toBe(false);
+    expect(container.querySelector('[data-testid="ai-status"]')?.textContent).not.toContain(
+      'Revision applied.',
+    );
+    expect(onApplyPatch).toHaveBeenCalledOnce();
+  });
+
+  it('keeps model access when an older capability check resolves after successful inference', async () => {
+    const editor = createEditor('<p>A draft sentence.</p>');
+    editor.commands.setTextSelection(findOccurrencePmRange(editor, 'draft', 0));
+    let completeCheck!: (result: string) => void;
+    const availability = vi
+      .fn<[], Promise<string>>()
+      .mockResolvedValueOnce('downloadable')
+      .mockImplementationOnce(
+        () =>
+          new Promise<string>((resolve) => {
+            completeCheck = resolve;
+          }),
+      );
+    vi.stubGlobal('LanguageModel', {
+      availability,
+      create: async () => ({
+        prompt: async () => JSON.stringify({ revision: 'sample', rationale: 'More specific.' }),
+        destroy: vi.fn(),
+      }),
+    });
+    const { container, render } = await renderPanel(editor, editor.getText(), false);
+    await render({ open: false });
+    await render({ open: true });
+    expect(availability).toHaveBeenCalledTimes(2);
+    const improve = container.querySelector<HTMLButtonElement>('[data-testid="ai-improve-button"]');
+    expect(improve?.disabled).toBe(false);
+    await React.act(async () => improve?.click());
+    expect(container.querySelector('[data-testid="ai-revision"]')?.textContent).toBe('sample');
+
+    await React.act(async () => completeCheck('unavailable'));
+
+    expect(container.querySelector('[data-testid="ai-improve-button"]')).toBe(improve);
+    expect(container.querySelector('[data-testid="ai-revision"]')?.textContent).toBe('sample');
+    expect(container.textContent).not.toContain('download its model');
+  });
+
+  it('lets the writer cancel in-flight inference even if capability changes', async () => {
+    const editor = createEditor('<p>A draft sentence.</p>');
+    editor.commands.setTextSelection(findOccurrencePmRange(editor, 'draft', 0));
+    let completeCheck!: (result: string) => void;
+    let completePrompt!: (result: string) => void;
+    const create = vi.fn(async (_options: { signal: AbortSignal }) => ({
+      prompt: () =>
+        new Promise<string>((resolve) => {
+          completePrompt = resolve;
+        }),
+      destroy: vi.fn(),
+    }));
+    vi.stubGlobal('LanguageModel', {
+      availability: vi
+        .fn<[], Promise<string>>()
+        .mockResolvedValueOnce('available')
+        .mockImplementationOnce(
+          () =>
+            new Promise<string>((resolve) => {
+              completeCheck = resolve;
+            }),
+        ),
+      create,
+    });
+    const { container, render } = await renderPanel(editor, editor.getText(), false);
+    await render({ open: false });
+    await render({ open: true });
+    await React.act(async () =>
+      container.querySelector<HTMLButtonElement>('[data-testid="ai-improve-button"]')?.click(),
+    );
+    expect(create).toHaveBeenCalledOnce();
+    await React.act(async () => completeCheck('unavailable'));
+
+    const cancel = [...container.querySelectorAll('button')].find(
+      (button) => button.textContent === 'Cancel',
+    );
+    if (!cancel) throw new Error('Expected the in-flight request to remain cancelable');
+    await React.act(async () => cancel.click());
+    expect(create.mock.calls[0][0].signal.aborted).toBe(true);
+
+    await React.act(async () =>
+      completePrompt(JSON.stringify({ revision: 'sample', rationale: 'Arrived after cancel.' })),
+    );
+    expect(container.querySelector('[data-testid="ai-review"]')).toBeNull();
+    expect(container.querySelector('[data-testid="ai-status"]')?.textContent).toBe(
+      'Request canceled.',
+    );
+    expect(container.querySelector('[data-testid="ai-improve-button"]')).toBeNull();
   });
 
   it('shows duplicate surrounding words in context and applies only the corrected selection', async () => {

@@ -29,6 +29,7 @@ test.describe('local durability truth', () => {
     );
     await expect(page.getByTestId('realtime-presence-bar')).toHaveText('On this device');
     await expect(page.getByTestId('remote-collaborator')).toHaveCount(0);
+    await expect(page.getByTestId('collaboration-empty-state')).toHaveCount(0);
 
     await editor.click();
     await page.keyboard.type(durableText);
@@ -97,15 +98,15 @@ test.describe('local durability truth', () => {
 test.describe('local durability truth on a phone', () => {
   test.use({ viewport: { width: 375, height: 812 }, hasTouch: true });
 
-  test('mobile Share navigation keeps a reachable close path and restores focus', async ({
+  test('mobile Share remains reachable and restores focus after touch or Escape', async ({
     page,
-  }) => {
+  }, testInfo) => {
     await page.goto(route(`bead-43-mobile-truth-${Date.now()}`));
     await expect(documentEditor(page)).toBeVisible();
 
-    const shareTrigger = page.getByTestId('topbar-share-button');
-    const share = page.getByRole('dialog', { name: /^Share/ });
-    const close = share.getByRole('button', { name: 'Close sharing' });
+    const shareTrigger = page.getByRole('button', { name: 'Share document', exact: true });
+    const share = page.getByRole('dialog', { name: /^Share “/u });
+    const close = share.getByRole('button', { name: 'Close sharing', exact: true });
     await expect(shareTrigger).toHaveAttribute('aria-expanded', 'false');
     await shareTrigger.tap();
     await expect(shareTrigger).toHaveAttribute('aria-expanded', 'true');
@@ -115,13 +116,6 @@ test.describe('local durability truth on a phone', () => {
     await expect(page.getByTestId('rail-tab-activity')).toHaveCount(0);
     await expectNoSimulatedCollaboration(page);
 
-    await close.tap();
-    await expect(share).toBeHidden();
-    await expect(shareTrigger).toHaveAttribute('aria-expanded', 'false');
-    await expect(shareTrigger).toBeFocused();
-
-    await shareTrigger.tap();
-    await expect(shareTrigger).toHaveAttribute('aria-expanded', 'true');
     await expect(close).toBeVisible();
     const closeBox = await close.boundingBox();
     expect(closeBox?.width ?? 0).toBeGreaterThanOrEqual(44);
@@ -138,6 +132,29 @@ test.describe('local durability truth on a phone', () => {
     ).toEqual({ documentWidth: 375, viewportWidth: 375 });
 
     await close.tap({ position: { x: 38, y: 6 } });
+    await expect(share).toBeHidden();
+    await expect(shareTrigger).toHaveAttribute('aria-expanded', 'false');
+    await expect(shareTrigger).toBeFocused();
+
+    await page.emulateMedia({ reducedMotion: 'reduce' });
+    await shareTrigger.tap();
+    await expect(shareTrigger).toHaveAttribute('aria-expanded', 'true');
+    await expect(share).toHaveAttribute('data-phase', /^(signed-out|unavailable)$/u);
+    const heading = share.getByRole('heading', { name: /^Share “/u });
+    await expect(heading).toBeVisible();
+    await expect(close).toBeVisible();
+    await expect(share.locator(':focus')).toHaveCount(1);
+    await expect
+      .poll(async () => {
+        const box = await heading.boundingBox();
+        return Boolean(box && box.y >= 0 && box.y + box.height <= 812);
+      })
+      .toBe(true);
+    await page.screenshot({
+      path: testInfo.outputPath('mobile-share-gate.png'),
+      animations: 'disabled',
+    });
+    await page.keyboard.press('Escape');
     await expect(share).toBeHidden();
     await expect(shareTrigger).toHaveAttribute('aria-expanded', 'false');
     await expect(shareTrigger).toBeFocused();

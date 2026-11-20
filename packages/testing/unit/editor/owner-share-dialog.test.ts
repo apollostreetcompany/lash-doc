@@ -57,6 +57,7 @@ afterEach(async () => {
     await React.act(async () => root?.unmount());
   }
   document.body.replaceChildren();
+  Reflect.deleteProperty(navigator, 'clipboard');
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
 });
@@ -188,6 +189,112 @@ describe('owner Share dialog', () => {
       expect(cancel()).toBe(false);
     });
     expect(input.onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it('reports clipboard absence as a retryable error', async () => {
+    const { host } = await render(
+      React.createElement(
+        OwnerShareDialog,
+        props({
+          phase: 'saved',
+          onManagePublicAccess: vi.fn(),
+          publicAccess: {
+            mode: 'read',
+            publicUrl: 'https://example.test/public/one',
+            policyVersion: 1,
+            cutoffGeneration: 1,
+          },
+        }),
+      ),
+    );
+    await React.act(async () => button(host, 'Copy link')?.click());
+    expect(button(host, 'Try copy again')).toBeDefined();
+  });
+
+  it('does not announce a retired clipboard result after closing and reopening Share', async () => {
+    let finishCopy: () => void = () => undefined;
+    const pending = new Promise<void>((resolve) => {
+      finishCopy = resolve;
+    });
+    const writeText = vi.fn(() => pending);
+    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } });
+    const input = props({
+      phase: 'saved',
+      onManagePublicAccess: vi.fn(),
+      publicAccess: {
+        mode: 'read',
+        publicUrl: 'https://example.test/public/one',
+        policyVersion: 1,
+        cutoffGeneration: 1,
+      },
+    });
+    const { host, rerender } = await render(React.createElement(OwnerShareDialog, input));
+    await React.act(async () => button(host, 'Copy link')?.click());
+    expect(button(host, 'Copying…')).toBeDefined();
+    await rerender(React.createElement(OwnerShareDialog, { ...input, open: false }));
+    await rerender(React.createElement(OwnerShareDialog, input));
+    await React.act(async () => finishCopy());
+    expect(button(host, 'Copy link')).toBeDefined();
+    expect(button(host, 'Copied')).toBeUndefined();
+  });
+
+  it('retries the same named invite and scopes copy completion to that issued link', async () => {
+    const roomId = `doc-v1-${'a'.repeat(64)}`;
+    const issues: Array<{ inviteId: string; email: string }> = [];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (path: string, init: RequestInit) => {
+        if (path.endsWith('/list')) return Response.json({ ok: true, version: 1, invites: [] });
+        const request = JSON.parse(init.body as string) as (typeof issues)[number];
+        issues.push(request);
+        if (issues.length === 1) return Response.json({}, { status: 503 });
+        return Response.json({
+          ok: true,
+          version: 1,
+          token: 'b'.repeat(43),
+          invite: {
+            inviteId: request.inviteId,
+            email: request.email,
+            role: 'edit',
+            status: 'pending',
+            expiresAt: '2026-11-28T12:34:56.789Z',
+          },
+        });
+      }),
+    );
+    let finishCopy: () => void = () => undefined;
+    const pending = new Promise<void>((resolve) => {
+      finishCopy = resolve;
+    });
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: { writeText: () => pending },
+    });
+    const { host } = await render(
+      React.createElement(OwnerShareDialog, props({ phase: 'saved', namedEditRoomId: roomId })),
+    );
+    const email = host.querySelector<HTMLInputElement>('#lash-named-edit-email');
+    const fill = (value: string) =>
+      React.act(async () => {
+        Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set?.call(
+          email,
+          value,
+        );
+        email?.dispatchEvent(new Event('input', { bubbles: true }));
+      });
+    await fill('first@example.test');
+    await React.act(async () => email?.form?.requestSubmit());
+    expect(host.textContent).toContain('Couldn’t create the invite link. Try again.');
+    await React.act(async () => email?.form?.requestSubmit());
+    expect(issues[0]?.inviteId).toBe(issues[1]?.inviteId);
+    expect(host.textContent).toContain('Send this link to first@example.test');
+    await React.act(async () => button(host, 'Copy invite link')?.click());
+    await fill('second@example.test');
+    await React.act(async () => email?.form?.requestSubmit());
+    await React.act(async () => finishCopy());
+    expect(host.textContent).toContain('Send this link to second@example.test');
+    expect(button(host, 'Copy invite link')).toBeDefined();
+    expect(button(host, 'Invite link copied')).toBeUndefined();
   });
 });
 

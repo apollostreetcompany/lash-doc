@@ -80,7 +80,6 @@ for (const words of [10_000, 50_000]) {
       );
       await page.goto('/doc/' + documentId);
       await expect(page.locator('[data-body-mutation-locked="false"] ' + editor)).toBeVisible();
-      await expect(page.locator('.lash-app')).toHaveAttribute('data-entrance', 'false');
 
       const blocks = page.locator(editor + ' > *');
       await expect(blocks).toHaveCount(words / 100);

@@ -57,6 +57,105 @@ afterEach(async () => {
 });
 
 describe('Document settings', () => {
+  it('can retry an unconfirmed initial settings read without presenting editable options', async () => {
+    const fetcher = vi
+      .fn()
+      .mockRejectedValueOnce(new Error('offline'))
+      .mockResolvedValueOnce(
+        Response.json({
+          ok: true,
+          version: 1,
+          state: {
+            mode: 'restricted',
+            policyVersion: 1,
+            cutoffGeneration: 0,
+            publicUrl: null,
+          },
+        }),
+      );
+    vi.stubGlobal('fetch', fetcher);
+    const host = await render(
+      React.createElement(DocumentSettingsDialog, {
+        localDocumentId: 'first-document',
+        onClose: vi.fn(),
+        onUpdated: vi.fn(),
+        open: true,
+        ownerBacked: true,
+        returnFocusTo: null,
+      }),
+    );
+    expect(host.querySelector('input[type="radio"]')).toBeNull();
+    const retry = [...host.querySelectorAll('button')].find(
+      (button) => button.textContent === 'Try again',
+    );
+    expect(retry).toBeDefined();
+    await React.act(async () => retry?.click());
+    expect(fetcher).toHaveBeenCalledTimes(2);
+    expect(host.querySelector<HTMLInputElement>('input[value="restricted"]')?.checked).toBe(true);
+  });
+
+  it('retires a save when settings switch to a different document', async () => {
+    const restricted = {
+      mode: 'restricted',
+      policyVersion: 1,
+      cutoffGeneration: 0,
+      publicUrl: null,
+    };
+    let finishSave: (result: Response) => void = () => undefined;
+    const pending = new Promise<Response>((resolve) => {
+      finishSave = resolve;
+    });
+    const fetcher = vi
+      .fn()
+      .mockResolvedValueOnce(Response.json({ ok: true, version: 1, state: restricted }))
+      .mockReturnValueOnce(pending)
+      .mockResolvedValueOnce(Response.json({ ok: true, version: 1, state: restricted }));
+    vi.stubGlobal('fetch', fetcher);
+    const props = {
+      localDocumentId: 'first-document',
+      onClose: vi.fn(),
+      onUpdated: vi.fn(),
+      open: true,
+      ownerBacked: true,
+      returnFocusTo: null,
+    };
+    const host = await render(React.createElement(DocumentSettingsDialog, props));
+    await React.act(async () =>
+      host.querySelector<HTMLInputElement>('input[value="read"]')?.click(),
+    );
+    const save = [...host.querySelectorAll('button')].find(
+      (button) => button.textContent === 'Save settings',
+    );
+    await React.act(async () => save?.click());
+    expect(fetcher.mock.calls[1]?.[1]).toMatchObject({ method: 'PATCH' });
+    await React.act(async () =>
+      roots.at(-1)?.render(
+        React.createElement(DocumentSettingsDialog, {
+          ...props,
+          localDocumentId: 'second-document',
+        }),
+      ),
+    );
+    await React.act(async () =>
+      finishSave(
+        Response.json({
+          ok: true,
+          version: 1,
+          changed: true,
+          state: {
+            mode: 'read',
+            policyVersion: 2,
+            cutoffGeneration: 0,
+            publicUrl: `http://localhost:3000/public/${ROOM_ID}`,
+          },
+        }),
+      ),
+    );
+    expect(host.querySelector<HTMLInputElement>('input[value="restricted"]')?.checked).toBe(true);
+    expect(props.onUpdated).not.toHaveBeenCalled();
+    expect(props.onClose).not.toHaveBeenCalled();
+  });
+
   it('keeps the Share status truthful for each authoritative public mode', () => {
     const state = {
       policyVersion: 3,

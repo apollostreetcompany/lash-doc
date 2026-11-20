@@ -1,5 +1,6 @@
 /** @vitest-environment jsdom */
 
+import { createDocumentId, type DiffJSON, type HistoryEntry } from '@lash/types';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
@@ -132,5 +133,54 @@ describe('History panel saved version preview', () => {
     await React.act(async () => resolveSnapshot({ text: 'Late result' }));
     expect(host.textContent).not.toContain('Late result');
     expect(host.querySelector('textarea')).toBeNull();
+  });
+});
+
+const version: HistoryEntry = {
+  id: 'saved-version',
+  docId: createDocumentId('history-test'),
+  actor: { type: 'user', id: 'writer' },
+  ts: '2026-11-21T00:00:00.000Z',
+  parentSha: 'parent',
+  resultSha: 'saved',
+  seq: 1,
+  lamport: 1,
+  schemaVersion: 'lash-schema-v1',
+  ops: [],
+  intent: 'edit',
+  audit: { ua: 'history-panel-test' },
+};
+
+const insertion = (text: string): DiffJSON => ({
+  from: version.parentSha,
+  to: version.resultSha,
+  spans: [{ id: 'insertion', kind: 'inserted', from: 0, to: text.length, text }],
+});
+
+describe('History panel comparison', () => {
+  it('only requests a comparison while History is visible and verified', async () => {
+    const loadDiff = vi.fn(async () => insertion('Verified change'));
+    await render({ entries: [version], open: false, availability: 'ready', loadDiff });
+    await render({ entries: [version], availability: 'unavailable', loadDiff });
+    expect(loadDiff).not.toHaveBeenCalled();
+
+    await render({ entries: [version], availability: 'ready', loadDiff });
+    expect(loadDiff).toHaveBeenCalledWith(version.parentSha, version.resultSha);
+    expect(host.querySelector('ins')?.textContent).toBe('Verified change');
+  });
+
+  it('withholds the previous comparison until the current loader finishes', async () => {
+    const loadDiff = vi.fn(async () => insertion('Previous comparison'));
+    await render({ entries: [version], availability: 'ready', loadDiff });
+    expect(host.querySelector('ins')?.textContent).toBe('Previous comparison');
+
+    let complete!: (diff: DiffJSON) => void;
+    const next = new Promise<DiffJSON>((resolve) => {
+      complete = resolve;
+    });
+    await render({ entries: [version], availability: 'ready', loadDiff: () => next });
+    expect(host.querySelector('ins')).toBeNull();
+    await React.act(async () => complete(insertion('Current comparison')));
+    expect(host.querySelector('ins')?.textContent).toBe('Current comparison');
   });
 });

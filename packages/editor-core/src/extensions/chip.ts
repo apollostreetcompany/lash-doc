@@ -71,6 +71,8 @@ class LashChipNodeView implements NodeView {
 
   private readonly previewEditor = document.createElement('span');
 
+  private readonly previewSources = new Set<'pointer' | 'focus'>();
+
   constructor(
     private node: ProseMirrorNode,
     private readonly resolveDocChip: LashChipNodeOptions['resolveDocChip'],
@@ -92,10 +94,10 @@ class LashChipNodeView implements NodeView {
     this.dom.append(this.link, this.preview);
 
     this.link.addEventListener('click', (event) => event.stopPropagation());
-    this.dom.addEventListener('mouseenter', () => this.showPreview());
-    this.dom.addEventListener('mouseleave', () => this.hidePreview());
-    this.link.addEventListener('focus', () => this.showPreview());
-    this.link.addEventListener('blur', () => this.hidePreview());
+    this.dom.addEventListener('mouseenter', () => this.setPreviewSource('pointer', true));
+    this.dom.addEventListener('mouseleave', () => this.setPreviewSource('pointer', false));
+    this.link.addEventListener('focus', () => this.setPreviewSource('focus', true));
+    this.link.addEventListener('blur', () => this.setPreviewSource('focus', false));
     this.updateDom();
   }
 
@@ -110,7 +112,7 @@ class LashChipNodeView implements NodeView {
     return true;
   }
 
-  private updateDom(): boolean {
+  private updateDom() {
     const href = safeChipHref(this.node.attrs.href);
     const reference = matchInternalDocUrl(href, window.location.origin);
     const metadata = reference ? this.resolveDocChip?.(reference.refId) : null;
@@ -140,19 +142,23 @@ class LashChipNodeView implements NodeView {
       this.previewEditor.textContent = '';
     }
     this.previewEditor.hidden = !this.previewEditor.textContent;
-    this.hidePreview();
-    return Boolean(metadata);
+    this.setPreviewVisible(Boolean(metadata) && this.previewSources.size > 0);
   }
 
-  private showPreview() {
-    if (!this.updateDom()) return;
-    this.preview.style.display = 'inline-flex';
-    this.preview.setAttribute('data-visible', 'true');
+  private setPreviewSource(source: 'pointer' | 'focus', active: boolean) {
+    if (active === this.previewSources.has(source)) return;
+    if (active) this.previewSources.add(source);
+    else this.previewSources.delete(source);
+    if (this.previewSources.size) this.updateDom();
+    else this.setPreviewVisible(false);
   }
 
-  private hidePreview() {
-    this.preview.style.display = 'none';
-    this.preview.removeAttribute('data-visible');
+  private setPreviewVisible(visible: boolean) {
+    const display = visible ? 'inline-flex' : 'none';
+    if (this.preview.style.display === display) return;
+    this.preview.style.display = display;
+    if (visible) this.preview.setAttribute('data-visible', 'true');
+    else this.preview.removeAttribute('data-visible');
   }
 }
 

@@ -1,5 +1,32 @@
 import { expect, test, type Page } from '@playwright/test';
 
+test('finds and reopens an older title in a large document library', async ({ page }) => {
+  await page.goto('/documents');
+  await page.evaluate(() => {
+    const records = Array.from({ length: 120 }, (_, index) => ({
+      id: `archive-${index}`,
+      title: index === 0 ? 'Original field notes' : `Workshop notes ${index}`,
+      createdAt: '2024-05-01T12:00:00Z',
+      updatedAt: new Date(Date.UTC(2024, 4, 1, 12, index)).toISOString(),
+    }));
+    localStorage.setItem('lash:documents', JSON.stringify(records));
+  });
+  await page.reload();
+  const list = page.getByRole('list', { name: 'Documents, most recent first' });
+  await expect(list.getByRole('link').first()).toHaveAccessibleName(/^Workshop notes 119/);
+  const initialRows = await list.getByRole('link').count();
+  expect(initialRows).toBeLessThan(120);
+  await page.getByRole('button', { name: 'Show more documents' }).click();
+  await expect(list.getByRole('link').nth(initialRows)).toBeFocused();
+  await page.getByRole('searchbox', { name: 'Search by title' }).fill('original field');
+  const older = list.getByRole('link', { name: /^Original field notes/ });
+  await expect(older).toBeVisible();
+  await older.click();
+  await expect(page.getByRole('textbox', { name: 'Document title' })).toHaveValue(
+    'Original field notes',
+  );
+});
+
 async function openDocuments(page: Page, compact: boolean) {
   if (compact) await page.getByRole('button', { name: 'Open navigation menu' }).click();
   const link = page.getByRole('link', { name: 'Documents', exact: true });

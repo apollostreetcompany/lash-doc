@@ -6,7 +6,6 @@ type LashTestWindow = Window & {
 
 const waitForEditor = async (page: Page) => {
   await page.waitForFunction(() => Boolean((window as LashTestWindow).__lashEditor));
-  await expect(page.locator('.lash-app')).toHaveAttribute('data-entrance', 'false');
 };
 
 const durationInMilliseconds = (value: string) => {

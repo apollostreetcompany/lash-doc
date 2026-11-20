@@ -102,7 +102,7 @@
   font: inherit;
 }
 
-.workspace :is(.brand, .create, .search input, .document, .clear):focus-visible {
+.workspace :is(.brand, .create, .search input, .document, .clear, .more):focus-visible {
   outline: 2px solid var(--color-coral-600);
   outline-offset: 2px;
 }
@@ -178,6 +178,18 @@
   font: inherit;
   font-weight: 600;
   text-decoration: underline;
+  cursor: pointer;
+}
+
+.more {
+  margin-top: var(--space-4);
+  min-height: 44px;
+  padding: 0 var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-paper);
+  color: var(--color-text-primary);
+  font: inherit;
   cursor: pointer;
 }
 

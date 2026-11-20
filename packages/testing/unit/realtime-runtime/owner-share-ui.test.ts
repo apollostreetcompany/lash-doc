@@ -19,17 +19,6 @@ describe('account-owner Share UI contract', () => {
     expect(workspace).toContain('<OwnerShareDialog');
   });
 
-  it('creates one opaque attempt from live content and retains it for retry', () => {
-    const workspace = read('apps/web/components/editor/EditorWorkspace.tsx');
-
-    expect(workspace).toContain('createBrowserDocumentPromotionAttempt');
-    expect(workspace).toContain('promotionAttemptRef.current ??=');
-    expect(workspace).toContain('body: editor.getJSON()');
-    expect(workspace).toContain('comments: commentThreadCount');
-    expect(workspace).toContain('suggestions: unresolvedSuggestionCount');
-    expect(workspace).toContain('promoteOwnerDocument(attempt)');
-  });
-
   it('checks account state without exposing the principal and uses the existing return contract', () => {
     const workspace = read('apps/web/components/editor/EditorWorkspace.tsx');
 

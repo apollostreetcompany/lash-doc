@@ -33,6 +33,8 @@ export interface LocalBodyEnvelope {
   suggestions?: LocalSuggestion[];
   /** A known divergent History head, or null when its identity could not be verified. */
   divergentHistoryHead?: string | null;
+  /** A first saved edit whose locally verified blank baseline still needs a History revision. */
+  firstHistoryPending?: true;
 }
 
 export interface LocalBodyExpectedRevision {
@@ -110,6 +112,8 @@ export interface SaveLocalDocumentBodyOptions extends LocalBodyPersistenceOption
   doc: LocalBodyDocJson;
   suggestions?: LocalSuggestion[];
   divergentHistoryHead?: string | null;
+  /** Mark an initially blank document on its first save, or clear after History commits it. */
+  firstHistoryPending?: boolean;
   expected: LocalBodyExpectedRevision | null;
   savedAt?: string;
   now?: () => Date;
@@ -603,6 +607,7 @@ const parseEnvelope = (
   if (suggestions === null) {
     throw persistenceError('structural-invalid', 'Saved suggestions are invalid.');
   }
+  const hasDivergentHistory = Object.hasOwn(value, 'divergentHistoryHead');
   return {
     version: LOCAL_BODY_ENVELOPE_VERSION,
     schemaVersion: LOCAL_BODY_SCHEMA_VERSION,
@@ -612,8 +617,11 @@ const parseEnvelope = (
     savedAt: value.savedAt,
     doc: validateDocument(value.doc, validateSchema),
     ...(suggestions?.length ? { suggestions } : {}),
-    ...(Object.hasOwn(value, 'divergentHistoryHead')
+    ...(hasDivergentHistory
       ? { divergentHistoryHead: normalizeDivergentHistoryHead(value.divergentHistoryHead) }
+      : {}),
+    ...(!hasDivergentHistory && value.firstHistoryPending === true
+      ? { firstHistoryPending: true }
       : {}),
   };
 };
@@ -765,6 +773,12 @@ export const saveLocalDocumentBody = (options: SaveLocalDocumentBodyOptions): Lo
     current.envelope?.divergentHistoryHead === undefined
       ? options.divergentHistoryHead
       : current.envelope.divergentHistoryHead;
+  const firstHistoryPending =
+    divergentHistoryHead === undefined &&
+    options.firstHistoryPending !== false &&
+    (current.envelope
+      ? current.envelope.firstHistoryPending
+      : options.firstHistoryPending === true);
   const envelope: LocalBodyEnvelope = {
     version: LOCAL_BODY_ENVELOPE_VERSION,
     schemaVersion: LOCAL_BODY_SCHEMA_VERSION,
@@ -777,6 +791,7 @@ export const saveLocalDocumentBody = (options: SaveLocalDocumentBodyOptions): Lo
     ...(divergentHistoryHead !== undefined
       ? { divergentHistoryHead: normalizeDivergentHistoryHead(divergentHistoryHead) }
       : {}),
+    ...(firstHistoryPending ? { firstHistoryPending: true } : {}),
   };
   const nextRaw = serializeEnvelope(envelope);
   // Validate generated metadata as an envelope before rotating either slot.

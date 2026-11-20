@@ -4,6 +4,29 @@ import { MAX_SUGGESTION_TEXT, type SuggestionDecision } from '@lash/doc-chat';
 import { useEffect, useRef, useState } from 'react';
 
 type Result = { ok: true } | { ok: false; message: string };
+type Submission = { phase: 'idle' | 'sending' } | { phase: 'failed'; message: string };
+
+function useSuggestionSubmission() {
+  const [state, setState] = useState<Submission>({ phase: 'idle' });
+  const pending = useRef(false);
+  const clearError = () => {
+    setState((current) => (current.phase === 'failed' ? { phase: 'idle' } : current));
+  };
+  const run = async (submit: () => Promise<Result> | Result, fallback: string) => {
+    if (pending.current) return;
+    pending.current = true;
+    setState({ phase: 'sending' });
+    try {
+      const result = await submit();
+      setState(result.ok ? { phase: 'idle' } : { phase: 'failed', message: result.message });
+    } catch {
+      setState({ phase: 'failed', message: fallback });
+    } finally {
+      pending.current = false;
+    }
+  };
+  return { state, clearError, run };
+}
 
 export function SuggestionComposer({
   quote,
@@ -16,10 +39,9 @@ export function SuggestionComposer({
 }) {
   const [replacement, setReplacement] = useState(quote);
   const [note, setNote] = useState('');
-  const [submitting, setSubmitting] = useState(false);
-  const [error, setError] = useState('');
+  const submission = useSuggestionSubmission();
+  const submitting = submission.state.phase === 'sending';
   const input = useRef<HTMLInputElement>(null);
-  const pending = useRef(false);
   useEffect(() => {
     const frame = window.requestAnimationFrame(() => {
       input.current?.focus({ preventScroll: true });
@@ -31,21 +53,13 @@ export function SuggestionComposer({
     <form
       className="chat-new-thread-composer"
       data-testid="suggestion-composer"
-      onSubmit={async (event) => {
+      onSubmit={(event) => {
         event.preventDefault();
-        if (replacement === quote || pending.current) return;
-        pending.current = true;
-        setSubmitting(true);
-        setError('');
-        try {
-          const result = await onSubmit(replacement, note);
-          if (!result.ok) setError(result.message);
-        } catch {
-          setError('Lash could not save your suggestion. Try again.');
-        } finally {
-          pending.current = false;
-          setSubmitting(false);
-        }
+        if (replacement === quote) return;
+        void submission.run(
+          () => onSubmit(replacement, note),
+          'Lash could not save your suggestion. Try again.',
+        );
       }}
     >
       <div className="chat-new-thread-context">
@@ -62,7 +76,10 @@ export function SuggestionComposer({
         value={replacement}
         maxLength={MAX_SUGGESTION_TEXT}
         disabled={submitting}
-        onChange={(event) => setReplacement(event.target.value)}
+        onChange={(event) => {
+          setReplacement(event.target.value);
+          submission.clearError();
+        }}
       />
       <label className="chat-new-thread-label" htmlFor="suggestion-note">
         Comment (optional)
@@ -74,9 +91,12 @@ export function SuggestionComposer({
         maxLength={2_000}
         value={note}
         disabled={submitting}
-        onChange={(event) => setNote(event.target.value)}
+        onChange={(event) => {
+          setNote(event.target.value);
+          submission.clearError();
+        }}
       />
-      {error ? <p role="alert">{error}</p> : null}
+      {submission.state.phase === 'failed' ? <p role="alert">{submission.state.message}</p> : null}
       <div className="chat-new-thread-actions">
         <button
           type="button"
@@ -115,23 +135,11 @@ export function SuggestionCard({
   stale?: boolean;
   onDecide?: (decision: SuggestionDecision) => Promise<Result> | Result;
 }) {
-  const [error, setError] = useState('');
-  const [sending, setSending] = useState(false);
-  const pending = useRef(false);
-  const decide = async (decision: SuggestionDecision) => {
-    if (!onDecide || pending.current) return;
-    pending.current = true;
-    setSending(true);
-    setError('');
-    try {
-      const result = await onDecide(decision);
-      if (!result.ok) setError(result.message);
-    } catch {
-      setError('Lash could not save this decision. Try again.');
-    } finally {
-      pending.current = false;
-      setSending(false);
-    }
+  const submission = useSuggestionSubmission();
+  const sending = submission.state.phase === 'sending';
+  const decide = (decision: SuggestionDecision) => {
+    if (!onDecide || status !== 'pending' || (decision === 'accepted' && stale)) return;
+    void submission.run(() => onDecide(decision), 'Lash could not save this decision. Try again.');
   };
   return (
     <div className="chat-new-thread-context" data-testid="suggestion-card">
@@ -173,7 +181,7 @@ export function SuggestionCard({
           <button
             type="button"
             className="chat-action-button"
-            onClick={() => void decide('rejected')}
+            onClick={() => decide('rejected')}
             disabled={sending}
           >
             Reject suggestion
@@ -181,14 +189,16 @@ export function SuggestionCard({
           <button
             type="button"
             className="chat-action-button"
-            onClick={() => void decide('accepted')}
+            onClick={() => decide('accepted')}
             disabled={sending || stale}
           >
             Accept suggestion
           </button>
         </div>
       ) : null}
-      {error && status === 'pending' ? <p role="alert">{error}</p> : null}
+      {onDecide && status === 'pending' && submission.state.phase === 'failed' ? (
+        <p role="alert">{submission.state.message}</p>
+      ) : null}
     </div>
   );
 }

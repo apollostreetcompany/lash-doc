@@ -15,6 +15,13 @@ type ReferenceOption =
   | { kind: 'date'; value: VisibleMentionResult }
   | { kind: 'document'; value: DocumentReference };
 
+type ReferencePickerState =
+  | { kind: 'closed' }
+  | { kind: 'dismissed'; editor: Editor; trigger: ReferenceTrigger }
+  | { kind: 'open'; editor: Editor; trigger: ReferenceTrigger; activeKey: string | null };
+
+const closedPicker = { kind: 'closed' } as const;
+
 const readTrigger = (editor: Editor): ReferenceTrigger | null => {
   if (editor.isDestroyed || !editor.isEditable || editor.view.composing) return null;
   const { selection } = editor.state;
@@ -36,6 +43,9 @@ const sameTrigger = (left: ReferenceTrigger | null, right: ReferenceTrigger | nu
 const optionText = (option: ReferenceOption) =>
   option.kind === 'date' ? option.value.display : option.value.title;
 
+const optionKey = (option: ReferenceOption) =>
+  option.kind === 'date' ? `date:${option.value.refId}` : `document:${option.value.id}`;
+
 export function DocumentReferencePicker({
   editor,
   searchDocuments,
@@ -44,10 +54,9 @@ export function DocumentReferencePicker({
   searchDocuments: (query: string) => DocumentReference[];
 }) {
   const popup = useRef<HTMLDivElement>(null);
-  const dismissed = useRef<ReferenceTrigger | null>(null);
-  const currentTrigger = useRef<ReferenceTrigger | null>(null);
-  const [trigger, setTrigger] = useState<ReferenceTrigger | null>(null);
-  const [activeIndex, setActiveIndex] = useState(0);
+  const [picker, setPicker] = useState<ReferencePickerState>(closedPicker);
+  const currentPicker = useRef<ReferencePickerState>(closedPicker);
+  const trigger = picker.kind === 'open' && picker.editor === editor ? picker.trigger : null;
   const options = useMemo<ReferenceOption[]>(() => {
     if (!trigger || trigger.query.trim() === '') return [];
     const date = parseDateMention(trigger.query, {
@@ -60,43 +69,79 @@ export function DocumentReferencePicker({
     ];
   }, [searchDocuments, trigger]);
 
-  const publishTrigger = useCallback((next: ReferenceTrigger | null) => {
-    if (sameTrigger(next, currentTrigger.current)) return;
-    currentTrigger.current = next;
-    setTrigger(next);
-    setActiveIndex(0);
+  const publishPicker = useCallback((next: ReferencePickerState) => {
+    if (next === currentPicker.current) return;
+    currentPicker.current = next;
+    setPicker(next);
   }, []);
 
-  const refresh = useCallback(() => {
-    if (!editor.isFocused) return;
-    const next = readTrigger(editor);
-    if (next && sameTrigger(next, dismissed.current)) return;
-    dismissed.current = null;
-    publishTrigger(next);
-  }, [editor, publishTrigger]);
-
   useEffect(() => {
-    const hide = () => {
-      dismissed.current = null;
-      publishTrigger(null);
+    let compositionFrame: number | null = null;
+    let composing = false;
+    const cancelCompositionFrame = () => {
+      if (compositionFrame === null) return;
+      cancelAnimationFrame(compositionFrame);
+      compositionFrame = null;
     };
-    const readAfterComposition = () => requestAnimationFrame(refresh);
+    const refresh = () => {
+      if (!editor.isFocused || composing) return;
+      const next = readTrigger(editor);
+      const current = currentPicker.current;
+      if (
+        next &&
+        current.kind !== 'closed' &&
+        current.editor === editor &&
+        sameTrigger(next, current.trigger)
+      )
+        return;
+      publishPicker(next ? { kind: 'open', editor, trigger: next, activeKey: null } : closedPicker);
+    };
+    const hide = () => {
+      cancelCompositionFrame();
+      composing = false;
+      publishPicker(closedPicker);
+    };
+    const startComposition = () => {
+      cancelCompositionFrame();
+      composing = true;
+      publishPicker(closedPicker);
+    };
+    const finishComposition = () => {
+      cancelCompositionFrame();
+      composing = false;
+      compositionFrame = requestAnimationFrame(() => {
+        compositionFrame = null;
+        refresh();
+      });
+    };
     editor.on('transaction', refresh);
     editor.on('focus', refresh);
     editor.on('blur', hide);
     const input = editor.view.dom;
-    input.addEventListener('compositionend', readAfterComposition);
+    input.addEventListener('compositionstart', startComposition);
+    input.addEventListener('compositionend', finishComposition);
+    refresh();
     return () => {
+      cancelCompositionFrame();
       editor.off('transaction', refresh);
       editor.off('focus', refresh);
       editor.off('blur', hide);
-      input.removeEventListener('compositionend', readAfterComposition);
+      input.removeEventListener('compositionstart', startComposition);
+      input.removeEventListener('compositionend', finishComposition);
     };
-  }, [editor, publishTrigger, refresh]);
+  }, [editor, publishPicker]);
 
   const insert = useCallback(
     (option: ReferenceOption) => {
-      if (!trigger || !sameTrigger(trigger, readTrigger(editor))) return;
+      const current = currentPicker.current;
+      if (
+        !trigger ||
+        current.kind !== 'open' ||
+        current.editor !== editor ||
+        current.trigger !== trigger ||
+        !sameTrigger(trigger, readTrigger(editor))
+      )
+        return;
       let node;
       if (option.kind === 'date') {
         const { kind, refId, display, iso } = option.value;
@@ -111,15 +156,19 @@ export function DocumentReferencePicker({
         .focus()
         .insertContentAt(trigger, [node, { type: 'text', text: ' ' }])
         .run();
-      publishTrigger(null);
+      publishPicker(closedPicker);
     },
-    [editor, publishTrigger, searchDocuments, trigger],
+    [editor, publishPicker, searchDocuments, trigger],
   );
 
   useEffect(() => {
     if (!trigger || options.length === 0) return;
     const onKey = (event: KeyboardEvent) => {
+      const current = currentPicker.current;
       if (
+        current.kind !== 'open' ||
+        current.editor !== editor ||
+        current.trigger !== trigger ||
         event.isComposing ||
         event.metaKey ||
         event.ctrlKey ||
@@ -129,19 +178,25 @@ export function DocumentReferencePicker({
         !sameTrigger(trigger, readTrigger(editor))
       )
         return;
+
+      const index = Math.max(
+        0,
+        options.findIndex((option) => optionKey(option) === current.activeKey),
+      );
       switch (event.key) {
         case 'ArrowDown':
-          setActiveIndex((index) => (index + 1) % options.length);
+        case 'ArrowUp': {
+          const direction = event.key === 'ArrowDown' ? 1 : -1;
+          const next = options[(index + direction + options.length) % options.length];
+          const activeKey = optionKey(next);
+          if (activeKey !== current.activeKey) publishPicker({ ...current, activeKey });
           break;
-        case 'ArrowUp':
-          setActiveIndex((index) => (index + options.length - 1) % options.length);
-          break;
+        }
         case 'Enter':
-          insert(options[activeIndex] ?? options[0]);
+          insert(options[index]);
           break;
         case 'Escape':
-          dismissed.current = trigger;
-          publishTrigger(null);
+          publishPicker({ kind: 'dismissed', editor, trigger });
           break;
         default:
           return;
@@ -152,7 +207,7 @@ export function DocumentReferencePicker({
     const input = editor.view.dom;
     input.addEventListener('keydown', onKey, true);
     return () => input.removeEventListener('keydown', onKey, true);
-  }, [activeIndex, editor, insert, options, publishTrigger, trigger]);
+  }, [editor, insert, options, publishPicker, trigger]);
 
   useLayoutEffect(() => {
     const element = popup.current;
@@ -193,7 +248,8 @@ export function DocumentReferencePicker({
     };
   }, [editor, options.length, trigger]);
 
-  const active = options[activeIndex] ?? options[0];
+  const preferredKey = picker.kind === 'open' ? picker.activeKey : null;
+  const active = options.find((option) => optionKey(option) === preferredKey) ?? options[0];
   return (
     <>
       <div className="sr-only" aria-live="polite">
@@ -203,12 +259,12 @@ export function DocumentReferencePicker({
         ? createPortal(
             <div ref={popup} className={styles.popup}>
               <div role="listbox" aria-label="Insert a reference" data-testid="reference-picker">
-                {options.map((option, index) => (
+                {options.map((option) => (
                   <button
-                    key={option.kind === 'date' ? option.value.refId : option.value.id}
+                    key={optionKey(option)}
                     type="button"
                     role="option"
-                    aria-selected={index === activeIndex}
+                    aria-selected={option === active}
                     tabIndex={-1}
                     className={styles.option}
                     onPointerDown={(event) => event.preventDefault()}

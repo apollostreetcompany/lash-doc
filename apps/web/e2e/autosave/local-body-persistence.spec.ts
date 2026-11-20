@@ -168,7 +168,6 @@ test.describe('local document body persistence', () => {
 
     await expect.poll(() => editorText(page)).toContain(durableText);
     await expect(page.locator('.ProseMirror')).toContainText(durableText);
-    await expect(page.locator('.lash-app')).toHaveAttribute('data-entrance', 'false');
     await page.screenshot({
       path: test.info().outputPath('FLOW-01-reload.png'),
       fullPage: true,
@@ -308,7 +307,6 @@ test.describe('local document body persistence', () => {
     await page.setViewportSize({ width: 375, height: 812 });
     const keepActionBox = await page.getByTestId('keep-recovered-copy').boundingBox();
     expect(keepActionBox?.height ?? 0).toBeGreaterThanOrEqual(44);
-    await expect(page.locator('.lash-app')).toHaveAttribute('data-entrance', 'false');
     await page.screenshot({
       path: testInfo.outputPath('recovery-mobile-375.png'),
       fullPage: true,

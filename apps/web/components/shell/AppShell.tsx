@@ -1,28 +1,10 @@
-/**
- * AppShell — pure layout wrapper.
- *
- * Renders the sidebar / topbar / canvas / rail grid and sets data
- * attributes that CSS uses to drive collapse / focus / responsive
- * behavior. All state (focus mode, sidebar collapsed, rail open, mobile
- * drawers) is owned by the parent so the chrome stays composable.
- *
- * On first mount the shell flips a transient `data-entrance` flag for
- * 800ms; CSS keyframes scoped to that flag run the choreography exactly
- * once.
- */
 'use client';
 
-import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { useLayoutEffect, useRef, type ReactNode } from 'react';
 
-const MOBILE_DRAWER_QUERY = '(max-width: 767px)';
-const FOCUSABLE_SELECTOR = [
-  'a[href]',
-  'button:not([disabled])',
-  'input:not([disabled])',
-  'select:not([disabled])',
-  'textarea:not([disabled])',
-  '[tabindex]:not([tabindex="-1"])',
-].join(',');
+const FOCUSABLE_SELECTOR = ['a[href]', 'button', 'input', 'select', 'textarea', '[tabindex]'].join(
+  ',',
+);
 
 const setSubtreeUnavailable = (element: HTMLElement | null, unavailable: boolean) => {
   if (!element) return;
@@ -34,13 +16,36 @@ const setSubtreeUnavailable = (element: HTMLElement | null, unavailable: boolean
   }
 };
 
+const isAvailable = (element: HTMLElement) => {
+  if (!element.isConnected || element.matches(':disabled')) return false;
+  if (element.closest('[hidden], [inert], [aria-hidden="true"]')) return false;
+  if (getComputedStyle(element).visibility === 'hidden') return false;
+  for (let ancestor: HTMLElement | null = element; ancestor; ancestor = ancestor.parentElement) {
+    if (getComputedStyle(ancestor).display === 'none') return false;
+  }
+  return true;
+};
+
 const focusableDescendants = (container: HTMLElement) =>
   Array.from(container.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR)).filter(
-    (element) =>
-      !element.hasAttribute('hidden') &&
-      element.getAttribute('aria-hidden') !== 'true' &&
-      element.tabIndex >= 0,
+    (element) => element.tabIndex >= 0 && isAvailable(element),
   );
+
+const setDrawerModal = (drawer: HTMLElement | null, modal: boolean) => {
+  if (!drawer) return;
+  if (modal) {
+    drawer.setAttribute('role', 'dialog');
+    drawer.setAttribute('aria-modal', 'true');
+    drawer.tabIndex = -1;
+  } else {
+    drawer.removeAttribute('role');
+    drawer.removeAttribute('aria-modal');
+    drawer.removeAttribute('tabindex');
+  }
+};
+
+type MobileDrawer = { kind: 'sidebar' } | { kind: 'rail'; trigger: HTMLElement | null };
+type DrawerFocus = { kind: MobileDrawer['kind']; trigger: HTMLElement | null };
 
 export interface MobileRailFocusRequest {
   trigger: HTMLElement | null;
@@ -55,11 +60,10 @@ export interface AppShellProps {
   focusMode: boolean;
   railOpen: boolean;
   sidebarCollapsed: boolean;
-  mobileSidebarOpen: boolean;
-  mobileRailOpen: boolean;
-  mobileRailFocusRequest: MobileRailFocusRequest;
-  onMobileSidebarClose: () => void;
-  onMobileRailClose: () => void;
+  mobileViewport: boolean;
+  mobileDrawer: MobileDrawer | null;
+  restoreMobileDrawerFocus: boolean;
+  onMobileDrawerClose: () => void;
 }
 
 export function AppShell({
@@ -70,152 +74,95 @@ export function AppShell({
   focusMode,
   railOpen,
   sidebarCollapsed,
-  mobileSidebarOpen,
-  mobileRailOpen,
-  mobileRailFocusRequest,
-  onMobileSidebarClose,
-  onMobileRailClose,
+  mobileViewport,
+  mobileDrawer,
+  restoreMobileDrawerFocus,
+  onMobileDrawerClose,
 }: AppShellProps) {
-  const [entrance, setEntrance] = useState(true);
-  const appRef = useRef<HTMLDivElement | null>(null);
-  const canvasRef = useRef<HTMLDivElement | null>(null);
-  const drawerTriggerRef = useRef<HTMLElement | null>(null);
-  const drawerKindRef = useRef<'sidebar' | 'rail' | null>(null);
-  const mobileModalOpenRef = useRef(false);
+  const appRef = useRef<HTMLDivElement>(null);
+  const canvasRef = useRef<HTMLDivElement>(null);
+  const drawerFocusRef = useRef<DrawerFocus | null>(null);
+  const drawerKind = mobileViewport ? mobileDrawer?.kind : undefined;
+  const railTrigger = mobileDrawer?.kind === 'rail' ? mobileDrawer.trigger : null;
 
-  useEffect(() => {
-    const timer = setTimeout(() => setEntrance(false), 800);
-    return () => clearTimeout(timer);
-  }, []);
-
-  const drawerOpen = mobileSidebarOpen || mobileRailOpen;
-
-  // Mobile drawers are modal disclosures. Closed surfaces are removed from
-  // focus/AT, opening moves focus into the active drawer, and the remaining
-  // shell becomes inert until the parent closes the drawer. CSS supplies the
-  // first-frame visibility boundary; this effect supplies runtime semantics.
-  useEffect(() => {
+  useLayoutEffect(() => {
     const app = appRef.current;
-    if (!app || typeof window.matchMedia !== 'function') return;
-    const media = window.matchMedia(MOBILE_DRAWER_QUERY);
+    const canvas = canvasRef.current;
+    if (!app || !canvas) return;
+    const navigation = app.querySelector<HTMLElement>('.lash-sidebar');
+    const activity = app.querySelector<HTMLElement>('.lash-rail');
+    const header = app.querySelector<HTMLElement>('.lash-topbar');
+    const drawer = drawerKind === 'sidebar' ? navigation : drawerKind === 'rail' ? activity : null;
+    setDrawerModal(navigation, drawerKind === 'sidebar');
+    setDrawerModal(activity, drawerKind === 'rail');
 
-    const sync = () => {
-      const sidebar = app.querySelector<HTMLElement>('.lash-sidebar');
-      const rail = app.querySelector<HTMLElement>('.lash-rail');
-      const topBar = app.querySelector<HTMLElement>('.lash-topbar');
-      const menuTrigger = app.querySelector<HTMLElement>('[data-testid="topbar-mobile-menu"]');
-
-      const mobileModalOpen = media.matches && drawerOpen;
-      if (mobileModalOpen && !mobileModalOpenRef.current) {
-        drawerKindRef.current = mobileRailOpen ? 'rail' : 'sidebar';
-        drawerTriggerRef.current = mobileRailOpen ? mobileRailFocusRequest.trigger : menuTrigger;
+    if (!drawer || !drawerKind) {
+      const previous = drawerFocusRef.current;
+      drawerFocusRef.current = null;
+      setSubtreeUnavailable(header, false);
+      setSubtreeUnavailable(canvas, false);
+      setSubtreeUnavailable(navigation, mobileViewport);
+      setSubtreeUnavailable(activity, mobileViewport);
+      if (previous && (previous.kind === 'sidebar' || restoreMobileDrawerFocus)) {
+        const trigger = previous.trigger;
+        const desktopNavigation = !mobileViewport && previous.kind === 'sidebar' && navigation;
+        const returnTarget =
+          trigger && isAvailable(trigger)
+            ? trigger
+            : (desktopNavigation && focusableDescendants(desktopNavigation)[0]) || canvas;
+        returnTarget.focus({ preventScroll: true });
       }
-      if (
-        mobileModalOpen &&
-        drawerKindRef.current === 'rail' &&
-        mobileRailOpen &&
-        mobileRailFocusRequest.restoreFocus &&
-        mobileRailFocusRequest.trigger
-      ) {
-        drawerTriggerRef.current = mobileRailFocusRequest.trigger;
-      }
+      return;
+    }
 
-      if (!media.matches) {
-        setSubtreeUnavailable(sidebar, false);
-        setSubtreeUnavailable(rail, false);
-        setSubtreeUnavailable(topBar, false);
-        setSubtreeUnavailable(canvasRef.current, false);
-        if (mobileModalOpenRef.current) {
-          if (drawerKindRef.current !== 'rail' || mobileRailFocusRequest.restoreFocus) {
-            drawerTriggerRef.current?.focus({ preventScroll: true });
-          }
-          drawerTriggerRef.current = null;
-          drawerKindRef.current = null;
-        }
-        mobileModalOpenRef.current = false;
-        return;
-      }
+    const previous = drawerFocusRef.current;
+    if (drawerKind === 'rail' || previous?.kind !== drawerKind) {
+      const trigger =
+        drawerKind === 'rail'
+          ? railTrigger
+          : (header?.querySelector<HTMLElement>('[aria-controls="lash-sidebar"]') ?? null);
+      drawerFocusRef.current = { kind: drawerKind, trigger };
+    }
+    setSubtreeUnavailable(drawer, false);
+    if (!drawer.contains(document.activeElement)) {
+      const initialFocus =
+        drawer.querySelector<HTMLElement>('[data-mobile-initial-focus="true"]') ??
+        focusableDescendants(drawer)[0] ??
+        drawer;
+      initialFocus.focus({ preventScroll: true });
+    }
+    setSubtreeUnavailable(header, true);
+    setSubtreeUnavailable(canvas, true);
+    setSubtreeUnavailable(drawerKind === 'rail' ? navigation : activity, true);
 
-      const activeDrawer = mobileRailOpen ? rail : mobileSidebarOpen ? sidebar : null;
-      setSubtreeUnavailable(sidebar, !mobileSidebarOpen || mobileRailOpen);
-      setSubtreeUnavailable(rail, !mobileRailOpen);
-
-      if (activeDrawer && !activeDrawer.contains(document.activeElement)) {
-        const initialFocus =
-          activeDrawer.querySelector<HTMLElement>('[data-mobile-initial-focus="true"]') ??
-          activeDrawer.querySelector<HTMLElement>('[aria-current="true"]') ??
-          focusableDescendants(activeDrawer)[0];
-        initialFocus?.focus({ preventScroll: true });
-      }
-
-      setSubtreeUnavailable(topBar, drawerOpen);
-      setSubtreeUnavailable(canvasRef.current, drawerOpen);
-
-      if (!mobileModalOpen && mobileModalOpenRef.current) {
-        if (drawerKindRef.current !== 'rail' || mobileRailFocusRequest.restoreFocus) {
-          drawerTriggerRef.current?.focus({ preventScroll: true });
-        }
-        drawerTriggerRef.current = null;
-        drawerKindRef.current = null;
-      }
-      mobileModalOpenRef.current = mobileModalOpen;
-    };
-
-    sync();
-    media.addEventListener?.('change', sync);
-    return () => media.removeEventListener?.('change', sync);
-  }, [
-    drawerOpen,
-    mobileRailFocusRequest.restoreFocus,
-    mobileRailFocusRequest.trigger,
-    mobileRailOpen,
-    mobileSidebarOpen,
-    railOpen,
-  ]);
-
-  // Close on Escape and contain Tab/Shift+Tab in the active mobile drawer.
-  useEffect(() => {
-    if (!drawerOpen) return;
-    const onKey = (event: KeyboardEvent) => {
-      if (
-        typeof window.matchMedia === 'function' &&
-        !window.matchMedia(MOBILE_DRAWER_QUERY).matches
-      ) {
-        return;
-      }
+    const handleKey = (event: KeyboardEvent) => {
+      if (event.defaultPrevented) return;
       if (event.key === 'Escape') {
         event.preventDefault();
-        if (mobileSidebarOpen) onMobileSidebarClose();
-        if (mobileRailOpen) onMobileRailClose();
+        onMobileDrawerClose();
         return;
       }
       if (event.key !== 'Tab') return;
-
-      const app = appRef.current;
-      const activeDrawer = mobileRailOpen
-        ? app?.querySelector<HTMLElement>('.lash-rail')
-        : app?.querySelector<HTMLElement>('.lash-sidebar');
-      if (!activeDrawer) return;
-      const focusable = focusableDescendants(activeDrawer);
-      if (!focusable.length) {
-        event.preventDefault();
-        return;
-      }
-
+      const focusable = focusableDescendants(drawer);
       const first = focusable[0];
-      const last = focusable[focusable.length - 1];
+      const last = focusable.at(-1);
       const current = document.activeElement;
-      if (event.shiftKey && (current === first || !activeDrawer.contains(current))) {
+      const outside = !drawer.contains(current) || current === drawer;
+      if (!first || (event.shiftKey ? outside || current === first : outside || current === last)) {
         event.preventDefault();
-        last.focus({ preventScroll: true });
-      } else if (!event.shiftKey && (current === last || !activeDrawer.contains(current))) {
-        event.preventDefault();
-        first.focus({ preventScroll: true });
+        (event.shiftKey ? (last ?? drawer) : (first ?? drawer)).focus({ preventScroll: true });
       }
     };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [drawerOpen, mobileSidebarOpen, mobileRailOpen, onMobileSidebarClose, onMobileRailClose]);
+    window.addEventListener('keydown', handleKey);
+    return () => window.removeEventListener('keydown', handleKey);
+  }, [
+    drawerKind,
+    mobileViewport,
+    onMobileDrawerClose,
+    railOpen,
+    railTrigger,
+    restoreMobileDrawerFocus,
+  ]);
 
   return (
     <div
@@ -224,9 +171,8 @@ export function AppShell({
       data-focus-mode={focusMode ? 'true' : 'false'}
       data-rail-open={railOpen ? 'true' : 'false'}
       data-sidebar-collapsed={sidebarCollapsed ? 'true' : 'false'}
-      data-mobile-drawer={mobileSidebarOpen ? 'true' : 'false'}
-      data-rail-mobile={mobileRailOpen ? 'true' : 'false'}
-      data-entrance={entrance ? 'true' : 'false'}
+      data-mobile-drawer={drawerKind === 'sidebar' ? 'true' : 'false'}
+      data-rail-mobile={drawerKind === 'rail' ? 'true' : 'false'}
     >
       {sidebar}
       {topBar}
@@ -243,10 +189,7 @@ export function AppShell({
         aria-label="Close menu"
         tabIndex={-1}
         aria-hidden="true"
-        onClick={() => {
-          if (mobileSidebarOpen) onMobileSidebarClose();
-          if (mobileRailOpen) onMobileRailClose();
-        }}
+        onClick={onMobileDrawerClose}
       />
     </div>
   );

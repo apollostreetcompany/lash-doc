@@ -103,10 +103,12 @@ export function NamedMemberJoinClient({
   const [phase, setPhase] = useState<Acceptance | 'opening'>(roomId ? 'opening' : 'unavailable');
   const [attempt, setAttempt] = useState(0);
   const invitation = useRef<Exclude<Invitation, { status: 'retry' }> | null>(null);
+  const acceptance = useRef<AbortController | null>(null);
 
   useEffect(() => {
     if (!joinPath) return;
     const handleNewLink = () => {
+      acceptance.current?.abort();
       invitation.current = null;
       setPhase('opening');
       setAttempt((count) => count + 1);
@@ -125,6 +127,7 @@ export function NamedMemberJoinClient({
     if (!roomId) return;
 
     const controller = new AbortController();
+    acceptance.current = controller;
     // React may mount effects twice in development. Give cleanup a chance to
     // cancel before a one-time invitation request reaches the server.
     queueMicrotask(() => {
@@ -141,7 +144,10 @@ export function NamedMemberJoinClient({
           if (!controller.signal.aborted) setPhase('retry');
         });
     });
-    return () => controller.abort();
+    return () => {
+      controller.abort();
+      if (acceptance.current === controller) acceptance.current = null;
+    };
   }, [attempt, dependencies, joinPath, roomId]);
 
   return (

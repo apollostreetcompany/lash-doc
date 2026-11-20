@@ -15,7 +15,6 @@ test('reveals the desktop Outline when a heading is added without shifting the p
   await page.goto('/doc/prod-j16-empty-outline-desktop');
   const editor = page.getByRole('textbox', { name: 'Document editor' });
   await expect(editor).toHaveAttribute('contenteditable', 'true');
-  await expect(page.locator('.lash-app')).not.toHaveAttribute('data-entrance', 'true');
 
   const outline = page.getByTestId('lash-document-outline');
   await expect(outline).toBeHidden();
@@ -62,7 +61,6 @@ test('returns focus to the heading for immediate typing after keyboard activatio
   await page.goto('/doc/keyboard-format-heading');
   const editor = page.getByRole('textbox', { name: 'Document editor' });
   await expect(editor).toHaveAttribute('contenteditable', 'true');
-  await expect(page.locator('.lash-app')).not.toHaveAttribute('data-entrance', 'true');
   await editor.click();
 
   const toolbar = page.getByRole('toolbar', { name: 'Editor toolbar' });
@@ -100,7 +98,6 @@ test('keeps the first typed text in one bullet after applying the list format', 
   await page.goto('/doc/toolbar-first-bullet');
   const editor = page.getByRole('textbox', { name: 'Document editor' });
   await expect(editor).toHaveAttribute('contenteditable', 'true');
-  await expect(page.locator('.lash-app')).not.toHaveAttribute('data-entrance', 'true');
   await editor.click();
   await page.getByRole('button', { name: 'Heading 1', exact: true }).click();
   await page.keyboard.insertText('Launch plan');

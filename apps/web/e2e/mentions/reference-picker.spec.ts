@@ -11,10 +11,16 @@ test('keeps synthetic identities out of the normal mention picker and Discussion
   await page.keyboard.type('@Ada');
   await expect(documentEditor(page)).toHaveText('@Ada');
   await expect(page.getByRole('listbox', { name: 'Insert a reference' })).toHaveCount(0);
+  await expect(page.getByTestId('mention-panel')).toHaveCount(0);
+  await expect(
+    page.getByTestId('mention-suggestion').filter({ hasText: 'Ada Lovelace' }),
+  ).toHaveCount(0);
+  await expect(page.getByText('Ada Lovelace', { exact: true })).toHaveCount(0);
 
   await page.getByTestId('topbar-discussion-button').click();
   await expect(page.getByRole('tab', { name: 'Chat' })).toBeVisible();
   await expect(page.getByRole('tab', { name: 'Activity (test fixture)' })).toHaveCount(0);
+  await expect(page.getByTestId('rail-tab-activity')).toHaveCount(0);
   await expect(page.getByTestId('synthetic-mention-fixture')).toHaveCount(0);
 });
 

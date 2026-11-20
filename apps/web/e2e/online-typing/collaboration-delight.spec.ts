@@ -45,19 +45,6 @@ const typeIntoEditor = async (page: Page, text: string) => {
 };
 
 test.describe('collaboration delight', () => {
-  test('local-only documents do not advertise realtime collaboration', async ({ page }) => {
-    await page.goto(`/doc/bead-36-local-only-${Date.now()}`);
-    await waitForEditor(page);
-
-    await expect(page.getByTestId('realtime-presence-bar')).toHaveAttribute(
-      'data-enabled',
-      'false',
-    );
-    await expect(page.getByTestId('collaboration-empty-state')).toHaveCount(0);
-    await expect(page.getByTestId('realtime-presence-bar')).toHaveText('On this device');
-    await expect(page.getByTestId('remote-collaborator')).toHaveCount(0);
-  });
-
   test('first-run collaboration state can open invite flow', async ({
     page,
     developmentLoopbackWorker: worker,

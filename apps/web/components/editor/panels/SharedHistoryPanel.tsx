@@ -1,13 +1,14 @@
 'use client';
 
 import type { SharedHistoryOutcome, SharedHistoryRevision } from '@lash/types';
-import { useEffect, useState, useSyncExternalStore } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react';
 
 import styles from './SharedHistoryPanel.module.css';
 import type { SharedHistoryClient } from '../../../lib/sharedHistoryClient';
 
 type Timeline = Extract<SharedHistoryOutcome, { kind: 'list' }>;
 type Comparison = Extract<SharedHistoryOutcome, { kind: 'compare' }>;
+type ComparisonResult = { from: number; to: number; comparison: Comparison | null };
 
 const revisionLabel = (revision: SharedHistoryRevision) => {
   const time = new Date(revision.createdAt).toLocaleString();
@@ -23,36 +24,57 @@ const revisionLabel = (revision: SharedHistoryRevision) => {
   }
 };
 
-export function SharedHistoryPanel({
-  client,
-  open,
-  connected,
-  canSendRestore,
-}: {
+type SharedHistoryPanelProps = {
   client: SharedHistoryClient;
   open: boolean;
   connected: boolean;
   canSendRestore: boolean;
-}) {
+};
+
+export function SharedHistoryPanel(props: SharedHistoryPanelProps) {
+  const { client } = props;
+  const [scope, setScope] = useState({ client, key: 0 });
+  if (scope.client !== client) {
+    // A different room client must start without this client's timeline or selection.
+    setScope({ client, key: scope.key + 1 });
+    return null;
+  }
+  return <ClientHistoryPanel key={scope.key} {...props} />;
+}
+
+function ClientHistoryPanel({ client, open, connected, canSendRestore }: SharedHistoryPanelProps) {
   const revision = useSyncExternalStore(client.subscribe, client.getRevision, client.getRevision);
   const [timeline, setTimeline] = useState<Timeline | null>(null);
   const [selected, setSelected] = useState<number | null>(null);
   const [fromVersion, setFromVersion] = useState<number | null>(null);
-  const [comparison, setComparison] = useState<Comparison | null>(null);
+  const [comparisonResult, setComparisonResult] = useState<ComparisonResult | null>(null);
   const [listError, setListError] = useState(false);
-  const [compareError, setCompareError] = useState(false);
   const [restoring, setRestoring] = useState(false);
   const [loadingOlder, setLoadingOlder] = useState(false);
   const [confirmation, setConfirmation] = useState<{ expectedHead: number; target: number } | null>(
     null,
   );
   const [notice, setNotice] = useState('');
+  const sessionRef = useRef<object | null>(null);
+
+  useLayoutEffect(() => {
+    if (!open || !connected) {
+      setLoadingOlder(false);
+      setRestoring(false);
+      setConfirmation(null);
+      setNotice('');
+      return;
+    }
+    sessionRef.current = {};
+    return () => {
+      sessionRef.current = null;
+    };
+  }, [connected, open]);
 
   useEffect(() => {
     if (!connected) {
       setTimeline(null);
-      setComparison(null);
-      setConfirmation(null);
+      setComparisonResult(null);
       return;
     }
     if (!open) return;
@@ -90,18 +112,24 @@ export function SharedHistoryPanel({
     null;
   const compareFrom = fromVersion ?? selectedVersion?.parentSequence ?? null;
   const compareTo = selectedVersion?.sequence ?? null;
+  const currentComparison =
+    comparisonResult?.from === compareFrom && comparisonResult.to === compareTo
+      ? comparisonResult
+      : null;
+  const comparison = currentComparison?.comparison;
 
   useEffect(() => {
-    setComparison(null);
-    setCompareError(false);
     if (!open || !connected || compareFrom === null || compareTo === null) return;
     let active = true;
     void client
       .request({ type: 'shared-history-compare', from: compareFrom, to: compareTo })
       .then((result) => {
         if (!active) return;
-        if (result.kind === 'compare') setComparison(result);
-        else setCompareError(true);
+        setComparisonResult({
+          from: compareFrom,
+          to: compareTo,
+          comparison: result.kind === 'compare' ? result : null,
+        });
       });
     return () => {
       active = false;
@@ -110,9 +138,11 @@ export function SharedHistoryPanel({
 
   const loadOlder = async () => {
     const before = timeline?.nextBefore;
-    if (before === null || before === undefined || loadingOlder) return;
+    const session = sessionRef.current;
+    if (!session || before === null || before === undefined || loadingOlder) return;
     setLoadingOlder(true);
     const result = await client.request({ type: 'shared-history-list', before });
+    if (sessionRef.current !== session) return;
     setLoadingOlder(false);
     if (result.kind !== 'list') {
       setNotice('Older versions could not be loaded. Try again.');
@@ -134,9 +164,11 @@ export function SharedHistoryPanel({
   };
 
   const restore = async () => {
-    if (!confirmation || !canSendRestore || restoring) return;
+    const session = sessionRef.current;
+    if (!session || !confirmation || !canSendRestore || restoring) return;
     setRestoring(true);
     const result = await client.request({ type: 'shared-history-restore', ...confirmation });
+    if (sessionRef.current !== session) return;
     setConfirmation(null);
     setRestoring(false);
     if (result.kind === 'restored') {
@@ -219,7 +251,7 @@ export function SharedHistoryPanel({
             </select>
           </label>
           {compareFrom === null ? <p>This is the first version in shared history.</p> : null}
-          {compareError ? (
+          {currentComparison && !comparison ? (
             <p role="status">This comparison is unavailable. Choose another version.</p>
           ) : null}
           {comparison ? (

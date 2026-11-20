@@ -446,4 +446,75 @@ describe('public document client shell', () => {
     expect(requestSession).toHaveBeenCalledTimes(2);
     expect(host.textContent).toContain('Opening public document…');
   });
+
+  it('ignores a retired public comment response and retries the same unconfirmed draft', async () => {
+    const first = providerHarness();
+    const second = providerHarness();
+    const createProvider = vi
+      .fn()
+      .mockReturnValueOnce(first.provider)
+      .mockReturnValueOnce(second.provider);
+    const success = {
+      ok: true,
+      version: 1,
+      created: true,
+      authorization: session.authorization,
+      comment: COMMENT,
+    } as const;
+    let finishPost: (result: typeof success) => void = () => undefined;
+    const pending = new Promise<typeof success>((resolve) => {
+      finishPost = resolve;
+    });
+    const createComment = vi.fn().mockReturnValueOnce(pending).mockResolvedValueOnce(success);
+    const dependencies: PublicDocumentClientDependencies = {
+      getActorId: () => 'public-reader-7',
+      requestSession: vi.fn().mockResolvedValue({ ok: true, session }),
+      createProvider,
+      listComments: vi.fn().mockResolvedValue({
+        ok: true,
+        version: 1,
+        authorization: session.authorization,
+        comments: [],
+        nextBeforeSequence: null,
+      }),
+      requestAuthoringSession: vi.fn().mockResolvedValue({
+        ok: true,
+        version: 1,
+        authenticated: true,
+        csrfProof: 'comment-post-proof',
+        expiresAt: '2026-11-21T17:00:00Z',
+      }),
+      createComment,
+    };
+    const key = `lash:public-comment-draft:v1:${ROOM_ID}`;
+    window.localStorage.setItem(
+      key,
+      JSON.stringify({ body: 'Pending public note', savedAt: Date.now() }),
+    );
+    const host = await render(
+      React.createElement(PublicDocumentClient, { roomId: ROOM_ID, dependencies }),
+    );
+    const ready = {
+      phase: 'ready',
+      mode: 'comment',
+      projection: { title: 'Public discussion', body: { type: 'doc', content: [] } },
+    } as const;
+    const button = (text: string) =>
+      [...host.querySelectorAll('button')].find((item) => item.textContent === text);
+    await React.act(async () => first.publish(ready));
+    await React.act(async () => button('Post comment')?.click());
+    expect(createComment).toHaveBeenCalledOnce();
+    await React.act(async () => first.publish({ phase: 'unavailable', projection: null }));
+    await React.act(async () => button('Try again')?.click());
+    await React.act(async () => second.publish(ready));
+    await React.act(async () => finishPost(success));
+    expect(host.querySelector('textarea')?.value).toBe('Pending public note');
+    expect(host.textContent).not.toContain('Comment posted.');
+    expect(window.localStorage.getItem(key)).toContain('Pending public note');
+    await React.act(async () => button('Post comment')?.click());
+    expect(createComment).toHaveBeenCalledTimes(2);
+    expect(createComment.mock.calls[1][0].mutationId).toBe(
+      createComment.mock.calls[0][0].mutationId,
+    );
+  });
 });

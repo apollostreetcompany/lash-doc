@@ -131,6 +131,66 @@ describe('InsightRouter routing', () => {
     expect(insert).toHaveBeenCalledTimes(1);
   });
 
+  it('shares a pending write only with callers using the same insight and place', async () => {
+    let finish!: (ref: string) => void;
+    const pending = new Promise<string>((resolve) => {
+      finish = resolve;
+    });
+    const insert = vi.fn(() => pending);
+    const collision = vi.fn(() => 'separate ref');
+    const router = new InsightRouter({ now: fixedClock })
+      .register({ ...createDocumentInsertPlace(insert), id: 'a::b' })
+      .register({ ...createDocumentInsertPlace(collision), id: 'b' });
+
+    const owner = router.route(payload({ id: 'insight' }), 'a::b');
+    const waiter = router.route(payload({ id: 'insight' }), 'a::b');
+    expect(await router.route(payload({ id: 'insight::a' }), 'b')).toMatchObject({
+      ok: true,
+      ref: 'separate ref',
+      idempotent: false,
+    });
+    finish('shared ref');
+    await expect(owner).resolves.toMatchObject({ ok: true, ref: 'shared ref', idempotent: false });
+    await expect(waiter).resolves.toMatchObject({ ok: true, ref: 'shared ref', idempotent: true });
+    expect(insert).toHaveBeenCalledTimes(1);
+    expect(collision).toHaveBeenCalledTimes(1);
+    await expect(router.route(payload({ id: 'insight::a' }), 'b')).resolves.toMatchObject({
+      ok: true,
+      ref: 'separate ref',
+      idempotent: true,
+    });
+  });
+
+  it('lets a waiting caller cancel while another retries a failed write with its own signal', async () => {
+    const ownerController = new AbortController();
+    const cancelledController = new AbortController();
+    const nextController = new AbortController();
+    let rejectOwner!: (error: Error) => void;
+    const ownerPending = new Promise<string>((_, reject) => {
+      rejectOwner = reject;
+    });
+    const insert = vi.fn((_payload: InsightPayload, ctx: { signal?: AbortSignal }) =>
+      ctx.signal === ownerController.signal ? ownerPending : 'retry ref',
+    );
+    const router = new InsightRouter({ now: fixedClock }).register(
+      createDocumentInsertPlace(insert),
+    );
+
+    const owner = router.route(payload(), 'doc', { signal: ownerController.signal });
+    const cancelled = router.route(payload(), 'doc', { signal: cancelledController.signal });
+    const next = router.route(payload(), 'doc', { signal: nextController.signal });
+    cancelledController.abort();
+
+    await expect(cancelled).resolves.toMatchObject({ ok: false, code: 'failed' });
+    expect(ownerController.signal.aborted).toBe(false);
+    expect(insert).toHaveBeenCalledTimes(1);
+    rejectOwner(new Error('first write failed'));
+    await expect(owner).resolves.toMatchObject({ ok: false, error: 'first write failed' });
+    await expect(next).resolves.toMatchObject({ ok: true, ref: 'retry ref', idempotent: false });
+    expect(insert).toHaveBeenCalledTimes(2);
+    expect(insert.mock.calls[1][1].signal).toBe(nextController.signal);
+  });
+
   it('does not cache failed writes as idempotent successes', async () => {
     let writes = 0;
     const write: WritingPlace['write'] = (_payload, ctx) => {

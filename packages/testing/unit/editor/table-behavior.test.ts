@@ -2,6 +2,7 @@
 
 import {
   DEFAULT_STATUS_CELL_OPTIONS,
+  TABLE_INTERACTION_PLUGIN_KEY,
   applyMatrixToSelection,
   buildTsvFromMatrix,
   createLashEditorExtensions,
@@ -43,10 +44,12 @@ const locateTable = (editor: Editor) => {
 
 const selectCell = (editor: Editor, row: number, col: number) => {
   const { state, view } = editor;
-  const located = findTable(state.selection) ?? (() => {
-    const { tablePos, tableNode } = locateTable(editor);
-    return { node: tableNode, start: tablePos + 1, pos: tablePos };
-  })();
+  const located =
+    findTable(state.selection) ??
+    (() => {
+      const { tablePos, tableNode } = locateTable(editor);
+      return { node: tableNode, start: tablePos + 1, pos: tablePos };
+    })();
   const map = TableMap.get(located.node);
   const cellRelativePos = map.map[row * map.width + col];
   const cellAbsolutePos = located.start + cellRelativePos;
@@ -105,6 +108,70 @@ describe('Table behavior', () => {
     lashCommands.cycleTableCellOption(editor);
     expect(getCellAttrs(editor, 0, 1).value).toBe(DEFAULT_STATUS_CELL_OPTIONS[0]);
     editor.destroy();
+  });
+
+  it('follows the open picker when its cell moves and closes when its row is deleted', () => {
+    const editor = createEditor();
+    try {
+      ensureTable(editor, 3, 2);
+      selectCell(editor, 1, 0);
+      lashCommands.setTableCellType(editor, 'status');
+      selectCell(editor, 2, 0);
+      lashCommands.setTableCellType(editor, 'status');
+      selectCell(editor, 1, 0);
+      const cells = () => Array.from(editor.view.dom.querySelectorAll('td'));
+      const control = () =>
+        cells()[2].querySelector<HTMLButtonElement>('.lash-table-cell-control')!;
+      const activeMenu = () =>
+        editor.view.dom.querySelector('.lash-table-cell-menu-option[aria-selected="true"]');
+
+      control().click();
+      expect(control().getAttribute('aria-expanded')).toBe('true');
+      expect(activeMenu()?.textContent).toBe(DEFAULT_STATUS_CELL_OPTIONS[0]);
+      const before = TABLE_INTERACTION_PLUGIN_KEY.getState(editor.state)?.openCellPos;
+
+      const paragraph = editor.schema.nodes.paragraph.create();
+      editor.view.dispatch(editor.state.tr.insert(0, paragraph));
+      expect(TABLE_INTERACTION_PLUGIN_KEY.getState(editor.state)?.openCellPos).toBe(
+        before! + paragraph.nodeSize,
+      );
+      expect(control().getAttribute('aria-expanded')).toBe('true');
+      expect(activeMenu()?.textContent).toBe(DEFAULT_STATUS_CELL_OPTIONS[0]);
+
+      editor.commands.deleteRow();
+      expect(TABLE_INTERACTION_PLUGIN_KEY.getState(editor.state)?.openCellPos).toBeNull();
+      expect(control().getAttribute('aria-expanded')).toBe('false');
+      expect(cells()[2].getAttribute('data-picker-open')).toBe('false');
+    } finally {
+      editor.destroy();
+    }
+  });
+
+  it('retains an open cell’s option buttons through a value change and closes on conversion to text', () => {
+    const editor = createEditor();
+    try {
+      ensureTable(editor, 2, 2);
+      selectCell(editor, 0, 1);
+      lashCommands.setTableCellType(editor, 'status');
+      const cell = editor.view.dom.querySelectorAll('td')[1];
+      expect(cell.dataset.cellType).toBe('status');
+      const control = cell.querySelector<HTMLButtonElement>('.lash-table-cell-control')!;
+      const option = () => cell.querySelector('.lash-table-cell-menu-option');
+      control.click();
+      const firstOption = option();
+      expect(firstOption).toBeTruthy();
+
+      lashCommands.setTableCellValue(editor, DEFAULT_STATUS_CELL_OPTIONS[2]);
+      expect(control.getAttribute('aria-expanded')).toBe('true');
+      expect(option()).toBe(firstOption);
+
+      lashCommands.setTableCellType(editor, 'text');
+      expect(cell.dataset.cellType).toBe('text');
+      expect(control.getAttribute('aria-expanded')).toBe('false');
+      expect(cell.querySelector<HTMLUListElement>('.lash-table-cell-menu')?.hidden).toBe(true);
+    } finally {
+      editor.destroy();
+    }
   });
 
   it('reports active cell attrs through helper', () => {

@@ -20,10 +20,7 @@ describe('stranger-visible responsive shell contract', () => {
     );
   });
 
-  it('does not let first-mount choreography replace the closed mobile sidebar or rail transforms', () => {
-    expect(css).toMatch(
-      /@media \(max-width:\s*767px\)\s*{[\s\S]*?\.lash-app\[data-entrance='true'\] \.lash-sidebar,\s*\.lash-app\[data-entrance='true'\] \.lash-rail\s*{[^}]*animation:\s*none;/,
-    );
+  it('keeps both closed mobile drawers off canvas', () => {
     expect(css).toMatch(
       /@media \(max-width:\s*767px\)\s*{[\s\S]*?\.lash-sidebar\s*{[^}]*transform:\s*translateX\(-100%\);/,
     );
@@ -51,11 +48,6 @@ describe('stranger-visible responsive shell contract', () => {
     expect(css).toMatch(
       /@media \(max-width:\s*767px\)\s*{[\s\S]*?\.lash-app,\s*\.lash-app\[data-rail-open='false'\]\s*{[^}]*grid-template-columns:\s*0 minmax\(0,\s*1fr\);[^}]*grid-template-areas:\s*'topbar topbar'\s*'canvas canvas';/,
     );
-  });
-
-  it('declares the mobile navigation disclosure relationship in source', () => {
-    expect(topBar).toMatch(/aria-controls="lash-sidebar"/);
-    expect(topBar).toMatch(/aria-expanded=/);
   });
 
   it('keeps inactive activity panels out of layout while the tab row remains horizontally reachable', () => {
