@@ -58,6 +58,62 @@ test('History retains the first and later edits after leaving as soon as they sa
   await expect(versions).toHaveCount(3);
 });
 
+test('desktop History moves keyboard focus past the document outline', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto('/');
+  const editor = page.getByRole('textbox', { name: 'Document editor' });
+  await expect(editor).toBeEditable();
+  await editor.click();
+  for (const heading of ['Kickoff', 'Review', 'Delivery']) {
+    await page.getByRole('button', { name: 'Heading 1', exact: true }).click();
+    await page.keyboard.insertText(heading);
+    await page.keyboard.press('Enter');
+    await page.keyboard.insertText(firstDraft);
+    if (heading !== 'Delivery') await page.keyboard.press('Enter');
+  }
+  const outline = page.getByTestId('lash-document-outline');
+  await expect(outline.getByRole('button', { name: /^Collapse / })).toHaveCount(3);
+
+  const history = page
+    .getByRole('group', { name: 'Document status' })
+    .getByRole('button', { name: 'History', exact: true });
+  const tab = page.getByRole('tab', { name: 'History', exact: true });
+  const panel = page.getByRole('tabpanel', { name: 'History', exact: true });
+  const close = page.getByRole('button', { name: 'Close activity panel', exact: true });
+  const versions = panel.getByTestId('history-version');
+  await history.click();
+  await expect(panel).toBeVisible();
+  await expect(history).toBeFocused();
+  await expect.poll(() => versions.count()).toBeGreaterThanOrEqual(1);
+  const firstVersionCount = await versions.count();
+  await close.click();
+
+  await editor.locator(':scope > p').last().click();
+  await page.keyboard.press('End');
+  await page.keyboard.insertText(addedSentence);
+  await expect(page.getByTestId('autosave-indicator')).toHaveText(/^All changes saved/);
+  await page.getByRole('textbox', { name: 'Document title' }).focus();
+  await page.keyboard.press('Tab');
+  await expect(history).toBeFocused();
+  await page.keyboard.press('Enter');
+  await expect(tab).toBeFocused();
+  await expect(tab).toHaveAttribute('aria-selected', 'true');
+  await expect(panel).toBeVisible();
+  await expect(versions).toHaveCount(firstVersionCount + 1);
+
+  for (let count = 0; count < 3; count += 1) await page.keyboard.press('Tab');
+  await expect(panel.getByRole('button', { name: /^Read previous draft, Version / })).toBeFocused();
+
+  await history.focus();
+  await page.keyboard.press('Enter');
+  await expect(tab).toBeFocused();
+  await page.keyboard.press('Tab');
+  await expect(close).toBeFocused();
+  await page.keyboard.press('Enter');
+  await expect(panel).toBeHidden();
+  await expect(history).toBeFocused();
+});
+
 test.describe('History entry on a phone', () => {
   test.use({ hasTouch: true, isMobile: true, viewport: { width: 390, height: 844 } });
 
@@ -73,6 +129,7 @@ test.describe('History entry on a phone', () => {
 
     const tab = page.getByRole('tab', { name: 'History', exact: true });
     await expect(tab).toHaveAttribute('aria-selected', 'true');
+    await expect(tab).toBeFocused();
     const historyPanel = page.getByRole('tabpanel', { name: 'History', exact: true });
     await expect(historyPanel).toBeVisible();
     await page.keyboard.press('Escape');

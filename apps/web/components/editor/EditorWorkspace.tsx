@@ -898,6 +898,11 @@ function ResolvedDocumentWorkspace({
   const mobileRailAvailabilityObserverRef = useRef<MutationObserver | null>(null);
   const railJumpSequenceRef = useRef(0);
   const activityRailTriggerRef = useRef<HTMLElement | null>(null);
+  const pendingHistoryFocusRef = useRef<{
+    documentId: string;
+    trigger: HTMLButtonElement;
+    focusedElement: Element | null;
+  } | null>(null);
   const shareTriggerRef = useRef<HTMLElement | null>(null);
   const documentSettingsTriggerRef = useRef<HTMLElement | null>(null);
   const promotionAttemptRef = useRef<OwnerShareAttempt | null>(null);
@@ -4313,6 +4318,30 @@ function ResolvedDocumentWorkspace({
     (realtimeEnabled
       ? realtimeClaimsReady && realtimeProvider?.hasSharedHistory()
       : canEditDocument);
+
+  useLayoutEffect(() => {
+    const request = pendingHistoryFocusRef.current;
+    pendingHistoryFocusRef.current = null;
+    if (
+      !request ||
+      !canOpenHistory ||
+      !historyVisible ||
+      railJumpRequest?.id !== 'history' ||
+      chrome.viewport !== 'desktop' ||
+      getWorkspaceViewport() !== 'desktop' ||
+      request.documentId !== activeDocumentId ||
+      request.trigger !== activityRailTriggerRef.current ||
+      !request.trigger.isConnected ||
+      request.focusedElement !== request.trigger.ownerDocument.activeElement
+    ) {
+      return;
+    }
+    request.trigger
+      .closest('.lash-app')
+      ?.querySelector<HTMLButtonElement>('#lash-rail #rail-tab-history[aria-selected="true"]')
+      ?.focus({ preventScroll: true });
+  }, [activeDocumentId, canOpenHistory, chrome.viewport, historyVisible, railJumpRequest]);
+
   const realtimeLabel = realtimeSyncLabelForAccess({
     canWrite: canEditDocument,
     scope: inviteScope,
@@ -4417,7 +4446,19 @@ function ResolvedDocumentWorkspace({
           data-testid="document-history-button"
           aria-expanded={historyVisible}
           aria-controls={railOpen ? 'lash-rail' : undefined}
-          onClick={(event) => openActivityPanel('history', event.currentTarget)}
+          onClick={(event) => {
+            const trigger = event.currentTarget;
+            // Keyboard and assistive technology activate the button without a click count.
+            pendingHistoryFocusRef.current =
+              event.detail === 0 && getWorkspaceViewport() === 'desktop'
+                ? {
+                    documentId: activeDocumentId,
+                    trigger,
+                    focusedElement: trigger.ownerDocument.activeElement,
+                  }
+                : null;
+            openActivityPanel('history', trigger);
+          }}
         >
           History
         </button>
