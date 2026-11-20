@@ -42,19 +42,27 @@ const hasPrivateReference = (root: Y.XmlFragment) => {
   return false;
 };
 
-const projectionHasDocumentFields = (doc: Y.Doc) => {
-  if (!doc.share.has(CONTENT) || !doc.share.has(METADATA)) return false;
+const readProjectionTitle = (doc: Y.Doc): string | null => {
+  if (!doc.share.has(CONTENT) || !doc.share.has(METADATA)) return null;
   const content = doc.getXmlFragment(CONTENT);
   const metadata = doc.getMap<unknown>(METADATA);
   const title = metadata.get('title');
-  return (
-    content._map.size === 0 &&
+  return content._map.size === 0 &&
     metadata._start === null &&
     metadata.size === 1 &&
     typeof title === 'string' &&
     title.trim().length > 0 &&
     encoder.encode(title).byteLength <= PROMOTION_LIMITS.titleBytes
-  );
+    ? title
+    : null;
+};
+
+export const readRoomYjsTitle = (doc: Y.Doc): string | null => {
+  try {
+    return hasPendingYjsData(doc) ? null : readProjectionTitle(doc);
+  } catch {
+    return null;
+  }
 };
 
 export const loadRoomYjsProjection = loadRealtimeProjection;
@@ -74,7 +82,7 @@ export const isSafePublicYjsProjection = (doc: Y.Doc) => {
   try {
     return (
       [...doc.share.keys()].every(isDocumentRoot) &&
-      projectionHasDocumentFields(doc) &&
+      readProjectionTitle(doc) !== null &&
       !hasPrivateReference(doc.getXmlFragment(CONTENT))
     );
   } catch {
@@ -133,7 +141,7 @@ export const encodeNamedCommentYjsProjection = (
 export const applyNamedEditYjsUpdate = (doc: Y.Doc, update: string) => {
   if (update.length > REALTIME_UPDATE_BASE64_LIMIT) return null;
   try {
-    if (!projectionHasDocumentFields(doc)) return null;
+    if (readProjectionTitle(doc) === null) return null;
     const privateRoots = [...doc.share].filter(([name]) => !isDocumentRoot(name));
     const privateTypes = new Set(privateRoots.map(([, type]) => type));
     let adjunctChanged = false;
@@ -149,7 +157,7 @@ export const applyNamedEditYjsUpdate = (doc: Y.Doc, update: string) => {
     doc.on('afterTransaction', inspect);
     const applied = applyRoomYjsUpdate(doc, update);
     doc.off('afterTransaction', inspect);
-    if (!applied || adjunctChanged || !projectionHasDocumentFields(doc)) return null;
+    if (!applied || adjunctChanged || readProjectionTitle(doc) === null) return null;
     return readCanonicalRoomYjsBody(doc);
   } catch {
     return null;

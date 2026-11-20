@@ -151,6 +151,9 @@ const findRoleInvite = (find: (role: NamedInviteRole) => InviteRow | undefined) 
   return undefined;
 };
 
+const acceptedMembership = (storage: DurableObjectStorage, principalId: string) =>
+  findRoleInvite((role) => member(storage, role, principalId));
+
 const audit = (
   storage: DurableObjectStorage,
   role: NamedInviteRole,
@@ -317,7 +320,7 @@ const resolveMembership = (
   principalId: string,
   nowMs: number,
 ) => {
-  const current = findRoleInvite((role) => member(storage, role, principalId));
+  const current = acceptedMembership(storage, principalId);
   const { tokenHash } = command;
   if (tokenHash === null) return current;
   const candidate = findRoleInvite(
@@ -356,13 +359,41 @@ const actorForPrincipal = async (roomId: string, principalId: string) => {
 
 type ExecuteInput = {
   storage: DurableObjectStorage;
-  command: NamedEditCommand;
+  command: Exclude<NamedEditCommand, { action: 'recent' }>;
   principalId: string;
   roomId: string;
   requestId: string;
   nowMs: number;
   commentEnabled?: boolean;
   commentProjectionAvailable?: () => boolean;
+};
+
+export const readNamedEditRecentTitle = ({
+  storage,
+  roomId,
+  principalId,
+  commentEnabled,
+  commentProjectionAvailable,
+  readTitle,
+}: Pick<
+  ExecuteInput,
+  'storage' | 'roomId' | 'principalId' | 'commentEnabled' | 'commentProjectionAvailable'
+> & {
+  readTitle: () => string | null;
+}): NamedEditResult => {
+  const access = authority(storage, roomId);
+  if (!access || access.owner_principal_id === principalId || access.block_new_sessions !== 0) {
+    return namedEditFailure('forbidden');
+  }
+  const membership = acceptedMembership(storage, principalId);
+  if (
+    !membership ||
+    commentProjectionFailure(membership.role, { commentEnabled, commentProjectionAvailable })
+  ) {
+    return namedEditFailure('forbidden');
+  }
+  const title = readTitle();
+  return title === null ? namedEditFailure('forbidden') : { ok: true, version: 1, title };
 };
 
 const isSessionRateLimited = (storage: DurableObjectStorage, principalId: string) => {

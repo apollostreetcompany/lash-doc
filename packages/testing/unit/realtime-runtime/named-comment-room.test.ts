@@ -14,6 +14,8 @@ const ACTOR_ID = `named-${'b'.repeat(32)}`;
 const INVITE_ID = '338c91e5-e809-4264-b005-269a8442647d';
 const TITLE = 'Ready for comment';
 const BODY = 'review this paragraph';
+const RECENT_PRINCIPAL = `account:v1:${'g'.repeat(43)}`;
+const MANAGEMENT_SECRET = 'recent-management-test-secret-over-32-bytes';
 
 const makeDocument = () => {
   const doc = new Y.Doc();
@@ -55,6 +57,50 @@ const commentAttachment = (expiresAtMs: number) => ({
 
 const frames = (peer: ReturnType<typeof socket>) =>
   peer.send.mock.calls.map(([serialized]) => JSON.parse(serialized) as Record<string, unknown>);
+
+const recentRequest = async (roomId = ROOM_ID, body = '{"version":1}') => {
+  const { MANAGEMENT_ASSERTION_DOMAIN_V2 } = await import(
+    '../../../realtime-worker/src/managementAuth'
+  );
+  const encoder = new TextEncoder();
+  const path = `/api/management/documents/${roomId}/named-edit/recent`;
+  const requestId = randomUUID();
+  const expiresAt = String(Math.floor(Date.now() / 1000) + 30);
+  const bodyDigest = Buffer.from(
+    await crypto.subtle.digest('SHA-256', encoder.encode(body)),
+  ).toString('base64url');
+  const assertion = [
+    MANAGEMENT_ASSERTION_DOMAIN_V2,
+    'POST',
+    path,
+    bodyDigest,
+    requestId,
+    RECENT_PRINCIPAL,
+    expiresAt,
+  ].join('\n');
+  const key = await crypto.subtle.importKey(
+    'raw',
+    encoder.encode(MANAGEMENT_SECRET),
+    { name: 'HMAC', hash: 'SHA-256' },
+    false,
+    ['sign'],
+  );
+  const signature = Buffer.from(
+    await crypto.subtle.sign('HMAC', key, encoder.encode(assertion)),
+  ).toString('base64url');
+  return new Request(`https://worker.test${path}`, {
+    method: 'POST',
+    body,
+    headers: {
+      'content-type': 'application/json',
+      authorization: `Lash-Control v2:${signature}`,
+      'x-lash-control-request-id': requestId,
+      'x-lash-control-principal-id': RECENT_PRINCIPAL,
+      'x-lash-control-expires-at': expiresAt,
+      'x-lash-control-body-sha256': bodyDigest,
+    },
+  });
+};
 
 const makeRoom = async (sockets: Array<ReturnType<typeof socket>>) => {
   const { LashRealtimeRoom } = await import('../../../realtime-worker/src/room');
@@ -138,6 +184,143 @@ const makeRoom = async (sockets: Array<ReturnType<typeof socket>>) => {
 };
 
 describe('named Comment room scope', () => {
+  it.each(['edit', 'comment'] as const)(
+    'returns current title only to accepted %s membership without minting sessions',
+    async (role) => {
+      const { default: worker } = await import('../../../realtime-worker/src/index');
+      const projection = await import('../../../realtime-worker/src/namedEditProjection');
+      const encodeComment = vi.spyOn(projection, 'encodeNamedCommentYjsProjection');
+      const author = socket({
+        protocolVersion: 3,
+        actorId: 'owner',
+        roomId: ROOM_ID,
+        hydrated: true,
+        capabilities: ['doc.read', 'doc.edit'],
+        historyGeneration: 0,
+        connectedAt: 1,
+      });
+      const fixture = await makeRoom([author]);
+      const remote = new Y.Doc();
+      const applyRemoteChange = async (updateId: string, change: (doc: Y.Doc) => void) => {
+        const previous = Y.encodeStateVector(remote);
+        change(remote);
+        await fixture.room.webSocketMessage(
+          author as never,
+          JSON.stringify({
+            type: 'yjs-update',
+            updateId,
+            historyGeneration: 0,
+            update: Buffer.from(Y.encodeStateAsUpdate(remote, previous)).toString('base64'),
+          }),
+        );
+        expect(frames(author)).toContainEqual(
+          expect.objectContaining({ type: 'sync-ack', updateId }),
+        );
+      };
+      const env = {
+        LASH_SHARE_PHASE: 'enabled',
+        LASH_NAMED_EDIT_PHASE: 'enabled',
+        LASH_WORKER_CONTROL_SECRET_CURRENT: MANAGEMENT_SECRET,
+        LASH_REALTIME_ROOM: { getByName: () => fixture.room },
+      } as unknown as Parameters<typeof worker.fetch>[1];
+      const readRecent = (request: Request) => worker.fetch(request.clone(), env);
+      const denied = { ok: false, version: 1, error: 'forbidden', retryable: false };
+      const expectDenied = async (request: Request) => {
+        const response = await readRecent(request);
+        expect(response.status).toBe(403);
+        expect(await response.json()).toEqual(denied);
+      };
+      try {
+        const request = await recentRequest();
+        const inviteTable = `named_${role}_invite_v1`;
+        fixture.db.prepare(`DELETE FROM named_comment_invite_v1`).run();
+        fixture.db
+          .prepare(
+            `INSERT INTO ${inviteTable} (invite_id, email_digest, email_ciphertext, token_hash, expires_at_ms) VALUES (?, 'digest', 'cipher', 'token', ?)`,
+          )
+          .run(INVITE_ID, Date.now() + 60_000);
+        await expectDenied(request);
+        fixture.db
+          .prepare(`UPDATE ${inviteTable} SET accepted_principal_id = ?`)
+          .run(RECENT_PRINCIPAL);
+
+        const current = await readRecent(request);
+        expect(current.status).toBe(200);
+        expect(current.headers.get('cache-control')).toBe('no-store');
+        expect(await current.json()).toEqual({ ok: true, version: 1, title: TITLE });
+        expect((await readRecent(request)).status).toBe(200);
+        expect(encodeComment).toHaveBeenCalledTimes(role === 'comment' ? 1 : 0);
+        const invalid = await readRecent(
+          await recentRequest(ROOM_ID, '{"version":1,"extra":true}'),
+        );
+        expect(invalid.status).toBe(400);
+        expect(await invalid.json()).toEqual({ ...denied, error: 'invalid-request' });
+
+        Y.applyUpdate(remote, Y.encodeStateAsUpdate(fixture.doc));
+        const latestTitle = 'Renamed by the owner';
+        await applyRemoteChange('remote-rename', (doc) => {
+          doc.getMap('lash:document-metadata:v1').set('title', latestTitle);
+        });
+        expect(await (await readRecent(request)).json()).toEqual({
+          ok: true,
+          version: 1,
+          title: latestTitle,
+        });
+        expect(encodeComment).toHaveBeenCalledTimes(role === 'comment' ? 2 : 0);
+
+        await expectDenied(await recentRequest(`doc-v1-${'b'.repeat(64)}`));
+        fixture.db
+          .prepare("UPDATE document_projection_v1 SET snapshot_sha256 = 'mismatched'")
+          .run();
+        await expectDenied(request);
+        fixture.db.prepare("UPDATE document_projection_v1 SET snapshot_sha256 = 'matching'").run();
+        fixture.db.prepare('INSERT INTO owner_session_control_v1 VALUES (1, 0, 1)').run();
+        await expectDenied(request);
+        fixture.db
+          .prepare('UPDATE owner_session_control_v1 SET frozen = 1, block_new_sessions = 0')
+          .run();
+        await expectDenied(request);
+        fixture.db.prepare('DELETE FROM owner_session_control_v1').run();
+        if (role === 'comment') {
+          const paragraph = remote.getXmlFragment('content').get(0) as Y.XmlElement;
+          await applyRemoteChange('remote-private-reference', () => {
+            const chip = new Y.XmlElement<Record<string, string | null>>('chip');
+            chip.setAttribute('kind', 'doc');
+            chip.setAttribute('refId', 'private-reference');
+            chip.setAttribute('href', '/doc/private-reference');
+            chip.setAttribute('display', '');
+            chip.setAttribute('iconUrl', null);
+            chip.setAttribute('lastEditor', null);
+            paragraph.push([chip]);
+          });
+          await expectDenied(request);
+          await applyRemoteChange('remote-private-reference-removal', () => {
+            paragraph.delete(paragraph.length - 1, 1);
+          });
+          expect((await readRecent(request)).status).toBe(200);
+          expect(encodeComment).toHaveBeenCalledTimes(4);
+        }
+        const metadata = fixture.doc.getMap('lash:document-metadata:v1');
+        metadata.set('title', '界'.repeat(1_366));
+        await expectDenied(request);
+        metadata.set('title', latestTitle);
+        metadata.set('lastEditor', 'Private identity');
+        await expectDenied(request);
+        metadata.delete('lastEditor');
+        expect((await readRecent(request)).status).toBe(200);
+        fixture.db.prepare(`UPDATE ${inviteTable} SET revoked_at_ms = ?`).run(Date.now());
+        await expectDenied(request);
+        expect(fixture.db.prepare('SELECT * FROM named_edit_replay_v1').all()).toEqual([]);
+        expect(fixture.db.prepare(`SELECT * FROM named_${role}_ticket_v1`).all()).toEqual([]);
+        expect(fixture.db.prepare(`SELECT * FROM named_${role}_audit_v1`).all()).toEqual([]);
+      } finally {
+        encodeComment.mockRestore();
+        remote.destroy();
+        fixture.close();
+      }
+    },
+  );
+
   it('accepts only the typed v6 Comment attachment without edit or private socket fields', async () => {
     const { isCurrentSocketAttachment } = await import('../../../realtime-worker/src/room');
     const attachment = commentAttachment(1000);

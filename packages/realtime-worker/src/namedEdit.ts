@@ -16,7 +16,7 @@ const ACTOR_ID = /^named-[0-9a-f]{32}$/u;
 
 export type NamedInviteRole = 'edit' | 'comment';
 
-export type NamedEditAction = 'issue' | 'list' | 'revoke' | 'session';
+export type NamedEditAction = 'issue' | 'list' | 'revoke' | 'session' | 'recent';
 
 export type NamedEditCommand =
   | {
@@ -29,6 +29,7 @@ export type NamedEditCommand =
     }
   | { action: 'list'; includeComment?: true }
   | { action: 'revoke'; inviteId: string; role?: NamedInviteRole }
+  | { action: 'recent' }
   | {
       action: 'session';
       browserOrigin: string;
@@ -84,6 +85,7 @@ export type NamedEditResult =
   | { ok: true; version: 1; invite: NamedEditInvite }
   | { ok: true; version: 1; invites: NamedEditInvite[] }
   | { ok: true; version: 1; session: NamedEditSession | NamedCommentSession }
+  | { ok: true; version: 1; title: string }
   | { ok: false; version: 1; error: NamedEditError; retryable: boolean };
 
 export const namedEditFailure = (error: NamedEditError): NamedEditResult => ({
@@ -163,6 +165,8 @@ export const parseNamedEditCommand = (
 ): NamedEditCommand | null => {
   if (!isRecord(value) || value.version !== 1) return null;
   switch (action) {
+    case 'recent':
+      return hasKeys(value, ['version']) ? { action } : null;
     case 'list':
       if (hasKeys(value, ['version'])) return { action };
       return hasKeys(value, ['version', 'includeComment']) && value.includeComment === true

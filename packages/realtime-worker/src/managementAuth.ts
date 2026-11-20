@@ -99,7 +99,7 @@ export const verifyManagementAssertion = async (input: {
     /^\/api\/management\/document-claims\/claim-v1-[0-9a-f]{64}\/(?:promote|owner-session|public-policy\/(?:read|update)|public-comments\/moderate)$/u.test(
       url.pathname,
     ) ||
-    /^\/api\/management\/documents\/doc-v(?:0|[1-9][0-9]{0,7})-[0-9a-f]{64}\/named-edit\/(?:issue|list|revoke|session)$/u.test(
+    /^\/api\/management\/documents\/doc-v(?:0|[1-9][0-9]{0,7})-[0-9a-f]{64}\/named-edit\/(?:issue|list|revoke|session|recent)$/u.test(
       url.pathname,
     );
   if (input.request.method !== 'POST' || url.search.length !== 0 || (!isV1Route && !isV2Route)) {

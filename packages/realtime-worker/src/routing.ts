@@ -135,7 +135,7 @@ export const parseRealtimeRoute = (url: URL): RealtimeRoute => {
   }
 
   const namedEditMatch =
-    /^\/api\/management\/documents\/(doc-v(?:0|[1-9][0-9]{0,7})-[0-9a-f]{64})\/named-edit\/(issue|list|revoke|session)$/u.exec(
+    /^\/api\/management\/documents\/(doc-v(?:0|[1-9][0-9]{0,7})-[0-9a-f]{64})\/named-edit\/(issue|list|revoke|session|recent)$/u.exec(
       url.pathname,
     );
   if (namedEditMatch && url.search === '') {
