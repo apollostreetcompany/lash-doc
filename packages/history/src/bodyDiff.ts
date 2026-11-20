@@ -57,73 +57,104 @@ function readInlineText(children: readonly unknown[], start: number) {
   return { text: pieces.join(''), runs, next };
 }
 
-function marksIn(runs: readonly MarkRun[], from: number, to: number) {
-  if (from === to) return [];
-  const styles: Array<{ style: string; length: number }> = [];
+function stylesIn(runs: readonly MarkRun[], from: number, to: number) {
+  const styles: string[] = [];
   for (const run of runs) {
     if (run.from >= to) break;
-    if (run.to > from) {
-      styles.push({ style: run.style, length: Math.min(run.to, to) - Math.max(run.from, from) });
-    }
+    if (run.to > from) styles.push(run.style);
   }
   return styles;
 }
 
-const sameStyles = (
-  before: ReturnType<typeof marksIn>,
-  after: ReturnType<typeof marksIn>,
-  compareLength: boolean,
-) =>
-  before.length === after.length &&
-  before.every(
-    ({ style, length }, index) =>
-      style === after[index].style && (!compareLength || length === after[index].length),
-  );
+function retainedStyleChanged(
+  before: readonly MarkRun[],
+  after: readonly MarkRun[],
+  beforeStart: number,
+  afterStart: number,
+  length: number,
+): boolean {
+  if (!length) return false;
+  const beforeEnd = beforeStart + length;
+  let next = 0;
+  for (const run of before) {
+    if (run.from >= beforeEnd) break;
+    if (run.to <= beforeStart) continue;
+    const start = afterStart + Math.max(run.from, beforeStart) - beforeStart;
+    const end = afterStart + Math.min(run.to, beforeEnd) - beforeStart;
+    while (next < after.length && after[next].to <= start) next += 1;
+    for (let index = next; index < after.length && after[index].from < end; index += 1) {
+      if (after[index].style !== run.style) return true;
+    }
+  }
+  return false;
+}
+
+function containsInOrder(text: string, retained: string): boolean {
+  if (retained.length > text.length) return false;
+  let next = 0;
+  for (let index = 0; index < text.length && next < retained.length; index += 1) {
+    if (text[index] === retained[next]) next += 1;
+  }
+  return next === retained.length;
+}
 
 function inlineFormattingChanged(
   before: ReturnType<typeof readInlineText>,
   after: ReturnType<typeof readInlineText>,
 ) {
-  // Identical marks around one edited run remain the same even if a repeated
-  // character makes the text-only alignment cross a mark boundary.
-  let editedRuns = 0;
-  if (
+  const pairedStyles =
     before.runs.length === after.runs.length &&
-    before.runs.every((run, index) => {
-      const next = after.runs[index];
-      if (run.style !== next.style) return false;
-      if (before.text.slice(run.from, run.to) !== after.text.slice(next.from, next.to)) {
-        editedRuns += 1;
-      }
-      return editedRuns <= 1;
-    })
-  )
-    return false;
+    before.runs.every((run, index) => run.style === after.runs[index].style);
+  if (pairedStyles && before.runs.length < 2) return false;
+  if (pairedStyles && before.text.length !== after.text.length) {
+    const [shorter, longer] =
+      before.text.length < after.text.length ? [before, after] : [after, before];
+    const sameStyleLengthEdits = shorter.runs.every(({ from, to }, index) => {
+      const run = longer.runs[index];
+      return containsInOrder(longer.text.slice(run.from, run.to), shorter.text.slice(from, to));
+    });
+    if (sameStyleLengthEdits) return false;
+  }
+  // Prefer matching text inside the same style before looking across run boundaries.
+  // With repeating text a flat prefix can otherwise consume a typed character in another run.
+  const previousRuns =
+    pairedStyles && before.text !== after.text
+      ? before.runs.flatMap((run, index) => {
+          const next = after.runs[index];
+          const { prefix, suffix } = textDiffEdges(
+            before.text.slice(run.from, run.to),
+            after.text.slice(next.from, next.to),
+          );
+          const from = run.from + prefix;
+          const to = run.to - suffix;
+          return from < to ? [{ from, to, style: run.style }] : [];
+        })
+      : before.runs;
   const { prefix, suffix } = textDiffEdges(before.text, after.text);
   const beforeEnd = before.text.length - suffix;
   const afterEnd = after.text.length - suffix;
   if (
-    !sameStyles(marksIn(before.runs, 0, prefix), marksIn(after.runs, 0, prefix), true) ||
-    !sameStyles(
-      marksIn(before.runs, beforeEnd, before.text.length),
-      marksIn(after.runs, afterEnd, after.text.length),
-      true,
-    )
+    retainedStyleChanged(previousRuns, after.runs, 0, 0, prefix) ||
+    retainedStyleChanged(previousRuns, after.runs, beforeEnd, afterEnd, suffix)
   )
     return true;
 
-  if (afterEnd === prefix) return false;
-  const inserted = marksIn(after.runs, prefix, afterEnd);
+  if (pairedStyles || afterEnd === prefix) return false;
+  const inserted = stylesIn(after.runs, prefix, afterEnd);
   if (beforeEnd > prefix) {
     // Replacing words inside the same formatting does not change their style.
-    return !sameStyles(marksIn(before.runs, prefix, beforeEnd), inserted, false);
+    const deleted = stylesIn(before.runs, prefix, beforeEnd);
+    return (
+      deleted.length !== inserted.length ||
+      deleted.some((style, index) => style !== inserted[index])
+    );
   }
 
   // An insertion may inherit marks from either side of its old caret position.
   const nearbyStyles = new Set(
     before.runs.filter(({ from, to }) => from <= prefix && to >= prefix).map(({ style }) => style),
   );
-  return inserted.some(({ style }) => style !== '' && !nearbyStyles.has(style));
+  return inserted.some((style) => style !== '' && !nearbyStyles.has(style));
 }
 
 export function mixedBodyFormattingChanged(before: unknown, after: unknown): boolean {

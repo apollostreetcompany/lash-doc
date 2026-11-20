@@ -83,15 +83,39 @@ describe('diff-deterministic', () => {
       false,
     ],
     [
-      'typing next to a repeated marked character',
-      savedBody(paragraph(text('aa'), text('a', bold))),
-      savedBody(paragraph(text('aaa'), text('a', bold))),
+      'typing in both runs of repeated characters',
+      savedBody(paragraph(text('aa'), text('aa', bold))),
+      savedBody(paragraph(text('aaa'), text('aaa', bold))),
+      false,
+    ],
+    [
+      'typing around retained text inside an existing marked run',
+      savedBody(paragraph(text('a'), text('aa', bold))),
+      savedBody(paragraph(text('aa'), text('baab', bold))),
+      false,
+    ],
+    [
+      'typing in one run and replacing a repeated character in the next',
+      savedBody(paragraph(text('aa', bold), text('aa'))),
+      savedBody(paragraph(text('aaa', bold), text('ab'))),
       false,
     ],
     [
       'moving a mark boundary while appending text',
       savedBody(paragraph(text('First', bold), text(' draft'))),
       savedBody(paragraph(text('Fir', bold), text('st draft!'))),
+      true,
+    ],
+    [
+      'extending bold over existing wording while typing more',
+      savedBody(paragraph(text('alpha', bold), text(' beta'))),
+      savedBody(paragraph(text('alpha beta', bold), text(' today'))),
+      true,
+    ],
+    [
+      'moving a repeated-text mark boundary and typing in a separate paragraph',
+      savedBody(paragraph(text('aa '), text('aa', bold)), paragraph(text('Draft'))),
+      savedBody(paragraph(text('a'), text('a aa', bold)), paragraph(text('Draft now'))),
       true,
     ],
     [
@@ -164,8 +188,12 @@ describe('diff-deterministic', () => {
 
   it('keeps adjacent suggestion attribution and leaves composite wording unattributed', async () => {
     const docId = createDocumentId('multi-author-diff');
-    const store = createHistoryStore();
-    let parent = await hashCanonical(EMPTY_HISTORY_DOC);
+    let clock = 0;
+    const store = createHistoryStore({
+      now: () => new Date(1_800_000_000_000 + clock++).toISOString(),
+    });
+    const baseline = await hashCanonical(EMPTY_HISTORY_DOC);
+    let parent = baseline;
     const save = async (author: string, wording: string, intent: 'edit' | 'suggest' = 'edit') => {
       const entry = await store.append(
         {
@@ -188,7 +216,14 @@ describe('diff-deterministic', () => {
     const second = await save('bea', 'A revised draft.');
     const third = await save('cy', 'Our revised draft.', 'suggest');
     expect((await store.diff(docId, second.resultSha, third.resultSha)).spans).toMatchObject([
-      { kind: 'deleted', text: 'A', entryId: second.id, authorId: 'bea' },
+      {
+        kind: 'deleted',
+        text: 'A',
+        entryId: third.id,
+        authorId: 'cy',
+        intent: 'suggest',
+        ts: third.ts,
+      },
       { kind: 'inserted', text: 'Our', entryId: third.id, authorId: 'cy', intent: 'suggest' },
       { kind: 'unchanged' },
     ]);
@@ -199,9 +234,33 @@ describe('diff-deterministic', () => {
       { kind: 'inserted', from: 0, to: 11, text: 'Our revised', id: expect.any(String) },
     ]);
 
-    await save('dee', 'Unrelated draft.');
-    await save('eli', 'Our revised draft.');
-    const ambiguous = await store.diff(docId, second.resultSha, third.resultSha);
-    expect(ambiguous.spans.find(({ kind }) => kind === 'inserted')).not.toHaveProperty('authorId');
+    const restore = async (sha: string) => {
+      const restored = await store.restore(
+        docId,
+        sha,
+        { type: 'user', id: 'dee' },
+        { ua: 'vitest' },
+        { commitGuard: () => true },
+      );
+      if (!restored.ok) throw new Error(restored.reason);
+      expect(restored.entry.resultSha).toBe(sha);
+    };
+    const unqualified = async (from: string, to: string) => {
+      const comparison = await store.diff(docId, from, to);
+      const textSpans = comparison.spans.filter(
+        ({ kind }) => kind === 'inserted' || kind === 'deleted',
+      );
+      expect(textSpans.length).toBeGreaterThan(0);
+      expect(textSpans.every((span) => !('entryId' in span))).toBe(true);
+      expect(computeDiff(from, to, await store.list(docId))).toEqual(comparison);
+    };
+
+    await restore(baseline);
+    await unqualified(baseline, first.resultSha);
+    await unqualified(third.resultSha, baseline);
+    await restore(third.resultSha);
+    await unqualified(second.resultSha, third.resultSha);
+    await restore(first.resultSha);
+    await unqualified(first.resultSha, second.resultSha);
   });
 });

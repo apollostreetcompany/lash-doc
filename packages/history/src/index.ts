@@ -998,7 +998,7 @@ export const createHistoryStore = (config: CreateHistoryStoreConfig = {}): Histo
         toSha,
         from === undefined ? undefined : { sha: fromSha, doc: from },
       );
-      return diffStates(fromSha, toSha, from, to, state.entries);
+      return diffStates(fromSha, toSha, from, to, state.entries, state.baseSha);
     },
     async restore(docId, targetSha, actor, audit, options) {
       const preparedDocId = docId;
@@ -1061,18 +1061,17 @@ type DiffSpanInput =
 const spanId = (span: DiffSpanInput, index: number): string =>
   `span:${index}:${canonicalize(span)}`;
 
-const materializeVersions = (entries: HistoryEntry[], baseline: HistoryDocumentState): Map<string, unknown> => {
+const materializeVersions = (entries: HistoryEntry[], baseline: HistoryDocumentState) => {
   const states = new Map<string, unknown>();
   let state: unknown = cloneJson(baseline);
   const sorted = [...entries].sort((a, b) => a.seq - b.seq);
-  if (sorted[0]) {
-    states.set(sorted[0].parentSha, cloneJson(state));
-  }
+  const baseSha = sorted[0]?.parentSha;
+  if (baseSha !== undefined) states.set(baseSha, cloneJson(state));
   for (const entry of sorted) {
     state = replayHistoryOps(state, entry.ops);
     states.set(entry.resultSha, cloneJson(state));
   }
-  return states;
+  return { states, baseSha };
 };
 
 export const computeDiff = (
@@ -1081,9 +1080,30 @@ export const computeDiff = (
   entries: HistoryEntry[],
   baseline: HistoryDocumentState = EMPTY_HISTORY_DOC,
 ): DiffJSON => {
-  const states = materializeVersions(entries, baseline);
-  return diffStates(fromSha, toSha, states.get(fromSha), states.get(toSha), entries);
+  const { states, baseSha } = materializeVersions(entries, baseline);
+  return diffStates(fromSha, toSha, states.get(fromSha), states.get(toSha), entries, baseSha);
 };
+
+function uniquelyAdjacentEdit(
+  fromSha: string,
+  toSha: string,
+  entries: readonly HistoryEntry[],
+  baseSha: string | undefined,
+): HistoryEntry | undefined {
+  // The initial baseline is also a version when a later restore reuses its hash.
+  let fromCount = Number(fromSha === baseSha);
+  let toCount = Number(toSha === baseSha);
+  let target: HistoryEntry | undefined;
+  for (const entry of entries) {
+    if (entry.resultSha === fromSha) fromCount += 1;
+    if (entry.resultSha === toSha) {
+      target = entry;
+      toCount += 1;
+    }
+    if (fromCount > 1 || toCount > 1) return undefined;
+  }
+  return fromCount === 1 && toCount === 1 && target?.parentSha === fromSha ? target : undefined;
+}
 
 const diffStates = (
   fromSha: string,
@@ -1091,6 +1111,7 @@ const diffStates = (
   fromDoc: unknown,
   toDoc: unknown,
   entries: readonly HistoryEntry[],
+  baseSha: string | undefined,
 ): DiffJSON => {
   if (fromDoc === undefined || toDoc === undefined) {
     throw new Error('computeDiff: unknown from/to version');
@@ -1098,14 +1119,14 @@ const diffStates = (
 
   const { text: before, body: beforeBody } = toHistoryState(fromDoc, true);
   const { text: after, body: afterBody } = toHistoryState(toDoc, true);
-  const toEntry = entries.find((entry) => entry.resultSha === toSha);
-  // Restores can reuse a content hash. An unqualified hash cannot identify the actor.
-  const adjacent =
-    toEntry?.parentSha === fromSha &&
-    !entries.some((entry) => entry !== toEntry && entry.resultSha === toSha);
-  const fromEntry = adjacent
-    ? entries.find((entry) => entry.seq === toEntry.seq - 1 && entry.resultSha === fromSha)
-    : undefined;
+  const edit = uniquelyAdjacentEdit(fromSha, toSha, entries, baseSha);
+  const attribution = edit && {
+    entryId: edit.id,
+    authorId: edit.actor.id,
+    actorType: edit.actor.type,
+    intent: edit.intent,
+    ts: edit.ts,
+  };
   const spans: DiffSpan[] = [];
   const { prefix, suffix } = textDiffEdges(before, after);
 
@@ -1124,15 +1145,7 @@ const diffStates = (
       from: prefix,
       to: prefix,
       text: deleted,
-      ...(adjacent
-        ? {
-            entryId: fromEntry?.id,
-            authorId: fromEntry?.actor.id,
-            actorType: fromEntry?.actor.type,
-            intent: fromEntry?.intent,
-            ts: fromEntry?.ts,
-          }
-        : {}),
+      ...attribution,
     });
   }
 
@@ -1143,16 +1156,8 @@ const diffStates = (
       from: prefix,
       to: prefix + inserted.length,
       text: inserted,
-      ...(adjacent
-        ? {
-            entryId: toEntry.id,
-            opIndex: 0,
-            authorId: toEntry.actor.id,
-            actorType: toEntry.actor.type,
-            intent: toEntry.intent,
-            ts: toEntry.ts,
-          }
-        : {}),
+      ...attribution,
+      ...(edit ? { opIndex: 0 } : {}),
     });
   }
 
