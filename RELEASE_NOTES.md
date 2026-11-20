@@ -28,6 +28,8 @@ runs in workspaces configured for accounts and collaboration.
   first saved version when you immediately leave and reopen it. An older
   version stays selected while you review it, even as new versions arrive.
   Long version lists scroll inside the panel so the selected change stays in view.
+  On a phone, **Back to latest** returns directly to your live draft. Press
+  Escape to go back to the version list.
 - Search covers every title in a large library, including older titles stored
   only in the document list. **Show more documents** lets you browse further
   by keyboard.
