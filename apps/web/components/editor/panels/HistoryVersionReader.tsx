@@ -123,17 +123,20 @@ function OpenHistoryVersion({
   sha,
   load,
   onClose,
+  onReturnToDocument,
   triggerRef,
 }: {
   sequence: number;
   sha: string;
   load: LoadHistoryVersion;
   onClose(): void;
+  onReturnToDocument?: () => void;
   triggerRef: RefObject<HTMLButtonElement | null>;
 }) {
   const titleId = useId();
   const dialogRef = useRef<HTMLDialogElement>(null);
   const titleRef = useRef<HTMLHeadingElement>(null);
+  const returnFocusToHistory = useRef(true);
   const [read, setRead] = useState<VersionRead>({ phase: 'loading' });
 
   useLayoutEffect(() => {
@@ -144,7 +147,9 @@ function OpenHistoryVersion({
     titleRef.current?.focus({ preventScroll: true });
     return () => {
       if (dialog.open) dialog.close();
-      if (trigger?.isConnected) trigger.focus({ preventScroll: true });
+      if (returnFocusToHistory.current && trigger?.isConnected) {
+        trigger.focus({ preventScroll: true });
+      }
     };
   }, [triggerRef]);
 
@@ -179,7 +184,16 @@ function OpenHistoryVersion({
           <h2 id={titleId} ref={titleRef} tabIndex={-1}>
             Version {sequence}
           </h2>
-          <button className="history-filter-button" type="button" onClick={onClose}>
+          <button
+            className="history-filter-button"
+            type="button"
+            onClick={() => {
+              // The mobile drawer restores focus to its own opener when it closes.
+              returnFocusToHistory.current = !onReturnToDocument;
+              onClose();
+              onReturnToDocument?.();
+            }}
+          >
             Back to latest
           </button>
         </header>
@@ -199,10 +213,12 @@ export function HistoryVersionReader({
   sequence,
   sha,
   load,
+  onReturnToDocument,
 }: {
   sequence: number;
   sha: string;
   load: LoadHistoryVersion;
+  onReturnToDocument?: () => void;
 }) {
   const triggerRef = useRef<HTMLButtonElement>(null);
   const [opening, setOpening] = useState<{ load: LoadHistoryVersion } | null>(null);
@@ -224,6 +240,7 @@ export function HistoryVersionReader({
           load={load}
           triggerRef={triggerRef}
           onClose={() => setOpening(null)}
+          onReturnToDocument={onReturnToDocument}
         />
       ) : null}
     </>

@@ -9,6 +9,7 @@ import { getAiSelection, isAiSelectionCurrent, type AiSelection } from '../../..
 import {
   canUseWritingModel,
   checkWritingModelAvailability,
+  InvalidWritingModelResponseError,
   markWritingModelAvailable,
   MAX_AI_QUESTION_LENGTH,
   MAX_AI_REVISION_LENGTH,
@@ -26,6 +27,7 @@ export interface AIPanelProps {
   open?: boolean;
   revisionFocusRequest?: number;
   showTestControls?: boolean;
+  requestDocumentNavigation?: (navigateToTarget: () => boolean) => void;
   onApplyPatch: (
     patch: EditPatch,
     selection: AiSelection,
@@ -60,10 +62,22 @@ type PanelResult = (
   | { kind: 'revision' | 'fixture-applied'; revision: Revision }
   | { kind: 'answer'; answer: Source & { text: string } }
   | { kind: 'fallback'; rationale: string }
+  | { kind: 'model-failure'; source: Source }
 ) & { status: string; jumpTarget?: string };
 
 const IDLE = { phase: 'idle' } as const;
 const NO_RESULT = { kind: 'notice', status: '' } as const;
+
+function focusSource(editor: Editor, source: Source) {
+  return editor.chain().focus().setTextSelection(source.selection.pmRange).run();
+}
+
+function canFocusSource({ selection: { document, pmRange } }: Source) {
+  return (
+    document.resolve(pmRange.from).parent.inlineContent &&
+    document.resolve(pmRange.to).parent.inlineContent
+  );
+}
 
 function revisionContext(currentText: string, { from, to }: AiSelection['plaintextRange']) {
   const paragraphStart = from > 0 ? currentText.lastIndexOf('\n', from - 1) + 1 : 0;
@@ -86,6 +100,7 @@ export function AIPanel({
   open = true,
   revisionFocusRequest,
   showTestControls = false,
+  requestDocumentNavigation,
   onApplyPatch,
 }: AIPanelProps) {
   // Read the owner synchronously in event handlers. React renders only its phase.
@@ -302,11 +317,16 @@ export function AIPanel({
         `${leadingSpace}${response.revision}${trailingSpace}`,
         response.rationale,
       );
-    } catch {
+    } catch (error) {
       if (operation.current === generation && !controller.signal.aborted) {
-        setStatus(
-          'The on-device model couldn’t complete this request. Try again with a shorter excerpt.',
-        );
+        setPanelResult({
+          kind: 'model-failure',
+          source,
+          status:
+            error instanceof InvalidWritingModelResponseError
+              ? 'The on-device model returned a reply Lash couldn’t use. Your draft is unchanged.'
+              : 'The on-device model couldn’t complete this request. Your draft is unchanged.',
+        });
       }
     } finally {
       if (operation.current === generation) transition(IDLE);
@@ -370,9 +390,24 @@ export function AIPanel({
       setStatus('The draft changed after this answer. Select the excerpt to ask again.');
       return;
     }
-    const { from, to } = source.selection.pmRange;
-    editor.chain().focus().setTextSelection({ from, to }).run();
+    focusSource(editor, source);
     setPanelResult((current) => ({ ...current, jumpTarget: source.selection.text }));
+  };
+
+  const returnToSource = (source: Source) => {
+    if (!editor) return;
+    const canReturn = () =>
+      !editor.isDestroyed && editor.isEditable && editor.state.doc === source.selection.document;
+    if (!canReturn()) {
+      setStatus(
+        'The draft changed or is no longer editable. Select the passage again to continue.',
+      );
+      return;
+    }
+    // On phones the original draft can change while the drawer closes.
+    const navigate = () => canReturn() && focusSource(editor, source);
+    if (requestDocumentNavigation) requestDocumentNavigation(navigate);
+    else navigate();
   };
 
   const visibleRevision =
@@ -536,6 +571,15 @@ export function AIPanel({
       >
         {status || guidance}
       </p>
+      {panelResult.kind === 'model-failure' && editor && canFocusSource(panelResult.source) ? (
+        <button
+          type="button"
+          className="ai-action-button"
+          onClick={() => returnToSource(panelResult.source)}
+        >
+          Return to selected passage
+        </button>
+      ) : null}
       {availability === 'timed-out' ? (
         <button type="button" className="ai-action-button" onClick={checkWritingModelAvailability}>
           Check again

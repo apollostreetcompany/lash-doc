@@ -7,7 +7,9 @@ import { Editor, type JSONContent } from '@tiptap/core';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { AIPanel, type AIPanelProps } from '../../../../apps/web/components/editor/panels/AIPanel';
+import { completeMobileRailDocumentNavigation } from '../../../../apps/web/components/shell/AppShell';
 import { getAiSelection, prepareAiReplacement } from '../../../../apps/web/lib/aiSelection';
+import { createMobileRailActionCoordinator } from '../../../../apps/web/lib/mobileRailActionCoordinator';
 import * as React from '../../../../apps/web/node_modules/react';
 import { createRoot, type Root } from '../../../../apps/web/node_modules/react-dom/client';
 
@@ -102,6 +104,23 @@ const readStagedPatch = (container: HTMLElement) => {
   return JSON.parse(serialized ?? 'null') as EditPatch;
 };
 
+const returnButton = (container: HTMLElement) =>
+  [...container.querySelectorAll('button')].find(
+    (button) => button.textContent === 'Return to selected passage',
+  );
+
+const runNativeRevision = async (container: HTMLElement) => {
+  const improve = container.querySelector<HTMLButtonElement>('[data-testid="ai-improve-button"]');
+  expect(improve?.disabled).toBe(false);
+  await React.act(async () => improve?.click());
+};
+
+const attachEditorForFocus = (editor: Editor) => {
+  document.body.append(editor.view.dom.parentElement!);
+  // jsdom does not report selection geometry for ProseMirror's scroll command.
+  vi.spyOn(editor.view, 'coordsAtPos').mockReturnValue({ top: 0, bottom: 0, left: 0, right: 0 });
+};
+
 afterEach(async () => {
   while (mountedRoots.length) {
     const root = mountedRoots.pop();
@@ -128,6 +147,169 @@ describe('AIPanel exact selection scope', () => {
     );
     expect(container.querySelector('[data-testid="ai-review"]')).toBeNull();
     expect(container.querySelector('[data-testid="ai-improve-button"]')).toBeNull();
+    expect(onApplyPatch).not.toHaveBeenCalled();
+  });
+
+  it('explains a malformed model reply and returns to the exact original passage without editing', async () => {
+    vi.useFakeTimers();
+    const selected = 'The exact phrase';
+    const editor = createEditor(`<p>${selected}, then <strong>${selected}</strong>.</p>`);
+    attachEditorForFocus(editor);
+    const original = findOccurrencePmRange(editor, selected, 1);
+    const draft = editor.state.doc;
+    editor.commands.setTextSelection(original);
+    const raw = 'This native echo must stay hidden.';
+    const destroy = vi.fn();
+    const prompt = vi.fn(async (_payload: string) => raw);
+    vi.stubGlobal('LanguageModel', {
+      availability: async () => 'available',
+      create: async () => ({ prompt, destroy }),
+    });
+    const { container, onApplyPatch } = await renderPanel(editor, editor.getText(), false);
+    await runNativeRevision(container);
+
+    expect(JSON.parse(prompt.mock.calls[0][0]).selectedText).toBe(selected);
+    expect(container.querySelector('[data-testid="ai-status"]')?.textContent).toBe(
+      'The on-device model returned a reply Lash couldn’t use. Your draft is unchanged.',
+    );
+    expect(container.textContent).not.toContain(raw);
+    expect(container.querySelector('[data-testid="ai-review"]')).toBeNull();
+    expect(destroy).toHaveBeenCalledOnce();
+
+    editor.commands.setTextSelection(findOccurrencePmRange(editor, selected, 0));
+    const action = returnButton(container);
+    expect(action).toBeDefined();
+    action?.focus();
+    await React.act(async () => action?.click());
+    await React.act(async () => vi.advanceTimersByTimeAsync(32));
+    expect(editor.state.selection).toMatchObject(original);
+    expect(document.activeElement).toBe(editor.view.dom);
+    expect(editor.state.doc).toBe(draft);
+    expect(onApplyPatch).not.toHaveBeenCalled();
+  });
+
+  it('describes a native operation failure without blaming the excerpt', async () => {
+    const editor = createEditor('<p>A draft sentence.</p>');
+    editor.commands.setTextSelection(findOccurrencePmRange(editor, 'draft', 0));
+    vi.stubGlobal('LanguageModel', {
+      availability: async () => 'available',
+      create: vi.fn().mockRejectedValue(new Error('Native session failed')),
+    });
+    const { container, onApplyPatch } = await renderPanel(editor, editor.getText(), false);
+    await runNativeRevision(container);
+
+    expect(container.querySelector('[data-testid="ai-status"]')?.textContent).toBe(
+      'The on-device model couldn’t complete this request. Your draft is unchanged.',
+    );
+    expect(onApplyPatch).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    'unchanged',
+    'edited before returning',
+    'edited while closing',
+    'locked while closing with no opener',
+    'edited while another control takes focus',
+    'unchanged while another control takes focus',
+  ])('returns through the mobile drawer only for the original source (%s)', async (change) => {
+    vi.useFakeTimers();
+    const editor = createEditor('<p>A <strong>draft</strong> sentence.</p>');
+    attachEditorForFocus(editor);
+    const canvas = document.createElement('main');
+    canvas.tabIndex = -1;
+    canvas.setAttribute('inert', '');
+    const opener = document.createElement('button');
+    const otherControl = document.createElement('button');
+    canvas.append(editor.view.dom.parentElement!, otherControl);
+    document.body.append(opener, canvas);
+    const original = findOccurrencePmRange(editor, 'draft', 0);
+    editor.commands.setTextSelection(original);
+    vi.stubGlobal('LanguageModel', {
+      availability: async () => 'available',
+      create: async () => ({
+        prompt: async () => JSON.stringify({ revision: 'sample' }),
+        destroy: vi.fn(),
+      }),
+    });
+    const coordinator = createMobileRailActionCoordinator();
+    const requestDocumentNavigation = vi.fn((navigateToTarget: () => boolean) => {
+      coordinator.queue({
+        documentId: docId,
+        run: () =>
+          completeMobileRailDocumentNavigation(navigateToTarget, {
+            canvas,
+            rail: container,
+            opener,
+          }),
+        cancel: vi.fn(),
+      });
+    });
+    const { container, onApplyPatch, render } = await renderPanel(editor, editor.getText(), false, {
+      requestDocumentNavigation,
+    });
+    await runNativeRevision(container);
+
+    const editDraft = () => {
+      editor.commands.insertContentAt(1, 'New ');
+      editor.commands.setTextSelection(1);
+    };
+    editor.commands.setTextSelection(1);
+    if (change === 'edited before returning') editDraft();
+    const action = returnButton(container);
+    expect(action).toBeDefined();
+    action?.focus();
+    await React.act(async () => action?.click());
+
+    if (change === 'edited before returning') {
+      expect(requestDocumentNavigation).not.toHaveBeenCalled();
+      expect(container.querySelector('[data-testid="ai-status"]')?.textContent).toContain(
+        'The draft changed',
+      );
+      expect(editor.state.selection.empty).toBe(true);
+      return;
+    }
+
+    expect(requestDocumentNavigation).toHaveBeenCalledOnce();
+    expect(
+      coordinator.notifyRelease({
+        documentId: docId,
+        canvasAvailable: false,
+        bodyScrollLocked: true,
+      }),
+    ).toBe(false);
+    expect(document.activeElement).toBe(action);
+    expect(editor.state.selection.empty).toBe(true);
+    await render({ open: false });
+    canvas.removeAttribute('inert');
+    if (change.startsWith('edited while')) editDraft();
+    if (change === 'locked while closing with no opener') {
+      editor.setEditable(false);
+      opener.remove();
+    }
+    const newerFocus = change.endsWith('another control takes focus');
+    if (newerFocus) otherControl.focus();
+    const draft = editor.state.doc;
+    expect(
+      coordinator.notifyRelease({
+        documentId: docId,
+        canvasAvailable: true,
+        bodyScrollLocked: false,
+      }),
+    ).toBe(true);
+    await React.act(async () => vi.advanceTimersByTimeAsync(32));
+    if (change === 'unchanged') {
+      expect(editor.state.selection).toMatchObject(original);
+      expect(document.activeElement).toBe(editor.view.dom);
+    } else {
+      expect(editor.state.selection.empty).toBe(true);
+      const fallback = newerFocus
+        ? otherControl
+        : change === 'locked while closing with no opener'
+          ? canvas
+          : opener;
+      expect(document.activeElement).toBe(fallback);
+    }
+    expect(editor.state.doc).toBe(draft);
     expect(onApplyPatch).not.toHaveBeenCalled();
   });
 

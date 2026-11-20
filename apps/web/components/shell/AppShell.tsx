@@ -26,6 +26,33 @@ const isAvailable = (element: HTMLElement) => {
   return true;
 };
 
+const focusReturnTarget = (opener: HTMLElement | null, fallback: HTMLElement) => {
+  if (opener && opener !== opener.ownerDocument.body && isAvailable(opener)) {
+    const previous = opener.ownerDocument.activeElement;
+    opener.focus({ preventScroll: true });
+    const active = opener.ownerDocument.activeElement;
+    if (active === opener || active !== previous) return;
+  }
+  fallback.focus({ preventScroll: true });
+};
+
+export function completeMobileRailDocumentNavigation(
+  navigateToTarget: () => boolean | void,
+  {
+    canvas,
+    rail,
+    opener,
+  }: { canvas: HTMLElement; rail: HTMLElement | null; opener: HTMLElement | null },
+) {
+  const ownerDocument = canvas.ownerDocument;
+  const closingRailOwnsFocus = () => {
+    const active = ownerDocument.activeElement;
+    return active === ownerDocument.body || Boolean(active && rail?.contains(active));
+  };
+  if (!isAvailable(canvas) || !closingRailOwnsFocus()) return;
+  if (navigateToTarget() === false && closingRailOwnsFocus()) focusReturnTarget(opener, canvas);
+}
+
 const focusableDescendants = (container: HTMLElement) =>
   Array.from(container.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR)).filter(
     (element) => element.tabIndex >= 0 && isAvailable(element),
@@ -104,13 +131,10 @@ export function AppShell({
       setSubtreeUnavailable(navigation, mobileViewport);
       setSubtreeUnavailable(activity, mobileViewport);
       if (previous && (previous.kind === 'sidebar' || restoreMobileDrawerFocus)) {
-        const trigger = previous.trigger;
         const desktopNavigation = !mobileViewport && previous.kind === 'sidebar' && navigation;
-        const returnTarget =
-          trigger && isAvailable(trigger)
-            ? trigger
-            : (desktopNavigation && focusableDescendants(desktopNavigation)[0]) || canvas;
-        returnTarget.focus({ preventScroll: true });
+        const fallback =
+          (desktopNavigation && focusableDescendants(desktopNavigation)[0]) || canvas;
+        focusReturnTarget(previous.trigger, fallback);
       }
       return;
     }

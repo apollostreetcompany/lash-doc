@@ -193,7 +193,7 @@ import {
   type RealtimeSuggestionResolutionRecord,
   type RealtimeSnapshot,
 } from '../../lib/realtimeCollaboration';
-import { AppShell } from '../shell/AppShell';
+import { AppShell, completeMobileRailDocumentNavigation } from '../shell/AppShell';
 import { Icon } from '../shell/Icon';
 import { RightRail, type RailTab, type RailTabConfig } from '../shell/RightRail';
 import { Sidebar } from '../shell/Sidebar';
@@ -1304,16 +1304,22 @@ function ResolvedDocumentWorkspace({
     dispatchChrome({ type: 'close-rail', restoreFocus: true });
   }, [cancelPendingMobileRailAction]);
 
-  const handleChatDocumentNavigation = useCallback(
-    (navigateToTarget: () => void) => {
+  const handleDocumentNavigation = useCallback(
+    (navigateToTarget: () => boolean | void) => {
       if (mobileRailOpen && getWorkspaceViewport() === 'mobile') {
         // The document target owns focus once the modal and scroll lock are gone.
-        queueMobileRailAfterClose(navigateToTarget);
+        const canvas = document.getElementById('lash-main');
+        if (!canvas) return;
+        const rail = canvas.parentElement?.querySelector<HTMLElement>('#lash-rail') ?? null;
+        const opener = mobileRailFocusRequest.trigger;
+        queueMobileRailAfterClose(() =>
+          completeMobileRailDocumentNavigation(navigateToTarget, { canvas, rail, opener }),
+        );
       } else {
         navigateToTarget();
       }
     },
-    [mobileRailOpen, queueMobileRailAfterClose],
+    [mobileRailFocusRequest.trigger, mobileRailOpen, queueMobileRailAfterClose],
   );
 
   const openActivityPanel = useCallback(
@@ -3937,7 +3943,7 @@ function ResolvedDocumentWorkspace({
               realtimeStore={chatRealtimeStore}
               actorId={realtimeEnabled ? realtimeSnapshot.actorId : undefined}
               runDocumentMutation={runDocumentMetadataMutation}
-              requestDocumentNavigation={handleChatDocumentNavigation}
+              requestDocumentNavigation={handleDocumentNavigation}
               suggestionComposer={
                 <>
                   {suggestionAuthoring.kind === 'notice' ? (
@@ -4045,6 +4051,7 @@ function ResolvedDocumentWorkspace({
           loadVersion={
             !realtimeEnabled && !namedComment && canEditDocument ? loadHistoryVersion : undefined
           }
+          onReturnToDocument={mobileRailOpen ? closeActivityRail : undefined}
           loadSavedHistoryPreview={
             !realtimeEnabled &&
             historyAvailability === 'body-history-diverged' &&
@@ -4090,6 +4097,7 @@ function ResolvedDocumentWorkspace({
                 railJumpRequest?.id === 'ai' ? railJumpRequest.requestId : undefined
               }
               showTestControls={syntheticAiFixtureEnabled}
+              requestDocumentNavigation={handleDocumentNavigation}
               onApplyPatch={handleApplyAiPatch}
             />
           )}

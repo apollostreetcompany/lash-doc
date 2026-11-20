@@ -86,6 +86,31 @@ describe('reading a local History version', () => {
     vi.unstubAllGlobals();
   });
 
+  it('returns focus to History on dismissal and lets the drawer own explicit return', async () => {
+    const documentOpener = document.createElement('button');
+    host.before(documentOpener);
+    const onReturnToDocument = vi.fn(() => documentOpener.focus());
+    try {
+      await render({ loadVersion: async () => ({ text: 'Saved prose' }), onReturnToDocument });
+      const trigger = button('Read version');
+      await React.act(async () => trigger.click());
+      const dialog = host.querySelector('dialog');
+      expect(dialog?.open).toBe(true);
+      await React.act(async () => dialog?.dispatchEvent(new Event('cancel', { cancelable: true })));
+      expect(host.querySelector('dialog')).toBeNull();
+      expect(onReturnToDocument).not.toHaveBeenCalled();
+      expect(document.activeElement).toBe(trigger);
+
+      await React.act(async () => trigger.click());
+      await React.act(async () => button('Back to latest').click());
+      expect(host.querySelector('dialog')).toBeNull();
+      expect(onReturnToDocument).toHaveBeenCalledOnce();
+      expect(document.activeElement).toBe(documentOpener);
+    } finally {
+      documentOpener.remove();
+    }
+  });
+
   it('reads the full formatted body without fetching or exposing stored reference attributes', async () => {
     const schema = getSchema(createLashEditorExtensions());
     const doc = schema.nodeFromJSON({

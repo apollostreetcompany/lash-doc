@@ -58,7 +58,7 @@ test('reads the full earlier kickoff draft by keyboard and touch without restori
 
   await expect(editor).toBeEditable();
   await button('New document').click();
-  await expect(page).toHaveURL(/\/doc\/doc-/);
+  await expect(page).toHaveURL(/\/(?:doc\/|\?doc=)doc-/);
   await title.fill('Project kickoff — Comparison');
   await editor.click();
   await button('Heading 1').click();
@@ -130,6 +130,15 @@ test('reads the full earlier kickoff draft by keyboard and touch without restori
   await expect(versions).toHaveCount(firstCount + 2);
   await expectKickoffBody(editor, latest);
 
+  await readVersion.press('Enter');
+  await expect(reader).toBeVisible();
+  await page.keyboard.press('Tab');
+  await expect(backToLatest).toBeFocused();
+  await page.keyboard.press('Enter');
+  await expect(reader).toBeHidden();
+  await expect(readVersion).toBeFocused();
+  await expect(history).toBeVisible();
+
   await page.setViewportSize({ width: 390, height: 844 });
   await openHistory.tap();
   await earlierRow.tap();
@@ -140,13 +149,28 @@ test('reads the full earlier kickoff draft by keyboard and touch without restori
     body: await page.screenshot({ animations: 'disabled' }),
     contentType: 'image/png',
   });
-  await backToLatest.tap();
+  await page.keyboard.press('Escape');
   await expect(reader).toBeHidden();
   await expect(readVersion).toBeFocused();
-  await expect(versions).toHaveCount(firstCount + 2);
-  await button('Close activity panel').tap();
+  await expect(history).toBeVisible();
+
+  await readVersion.tap();
+  await expect(reader).toBeVisible();
+  await backToLatest.tap();
+  await expect(reader).toBeHidden();
+  await expect(history).toBeHidden();
+  await expect(openHistory).toBeFocused();
+  await expect(editor).toBeInViewport();
   await expect(editor).toBeEditable();
   await expectKickoffBody(editor, latest);
+  await testInfo.attach('latest-draft-phone', {
+    body: await page.screenshot({ animations: 'disabled' }),
+    contentType: 'image/png',
+  });
+
+  await openHistory.tap();
+  await expect(versions).toHaveCount(firstCount + 2);
+  await button('Close activity panel').tap();
 
   await page.reload();
   await expect(title).toHaveValue('Project kickoff — Comparison');

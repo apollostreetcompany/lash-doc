@@ -28,6 +28,8 @@ runs in workspaces configured for accounts and collaboration.
   first saved version when you immediately leave and reopen it. An older
   version stays selected while you review it, even as new versions arrive.
   Long version lists scroll inside the panel so the selected change stays in view.
+  On a phone, **Back to latest** returns directly to your live draft. Press
+  Escape to go back to the version list.
 - Search covers every title in a large library, including older titles stored
   only in the document list. **Show more documents** lets you browse further
   by keyboard.
@@ -71,6 +73,9 @@ restore an earlier version, and revoke the invitation.
 - **Revise a selection.** On browsers with a ready on-device language model,
   writers can review the proposed wording in context, edit it, and apply it
   to the selected passage. The interface reports when the model is unavailable.
+  If the model returns an unusable reply, Lash explains what happened and keeps
+  the draft unchanged. **Return to selected passage** reselects the original
+  words if the draft is still current.
 - **Run locally.** `make dev-collab` starts a two-account workspace with a local
   inbox. See the [setup and walkthrough](README.md).
 
