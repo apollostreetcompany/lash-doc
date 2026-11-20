@@ -275,8 +275,9 @@ export function HistoryPanel({
           return matchesTimeFilter(entry, timeFilter);
         })
       : [];
-  const selectedEntry =
-    visibleEntries.find((entry) => entry.id === selectedEntryId) ?? visibleEntries.at(-1) ?? null;
+  const requestedIndex = visibleEntries.findIndex((entry) => entry.id === selectedEntryId);
+  const selectedVersionIndex = requestedIndex < 0 ? visibleEntries.length - 1 : requestedIndex;
+  const selectedEntry = visibleEntries[selectedVersionIndex] ?? null;
   const selectedVersionId = selectedEntry?.id;
   const fromSha = selectedEntry?.parentSha;
   const toSha = selectedEntry?.resultSha;
@@ -284,7 +285,7 @@ export function HistoryPanel({
   useLayoutEffect(() => {
     const list = versionListRef.current;
     const selected = selectedVersionRef.current;
-    if (!selectedVersionId || !list || !selected) return;
+    if (selectedVersionIndex < 0 || !list || !selected) return;
     const listBounds = list.getBoundingClientRect();
     const selectedBounds = selected.getBoundingClientRect();
     // Scroll the version list itself to avoid moving the rail or writing surface.
@@ -293,7 +294,7 @@ export function HistoryPanel({
     } else if (selectedBounds.bottom > listBounds.bottom) {
       list.scrollTop += Math.ceil(selectedBounds.bottom - listBounds.bottom);
     }
-  }, [selectedVersionId]);
+  }, [selectedVersionId, selectedVersionIndex]);
 
   useEffect(() => {
     if (!fromSha || !toSha) return;

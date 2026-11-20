@@ -26,6 +26,9 @@ test('keeps an older version comparison in view with a long device history', asy
   const restore = page.getByRole('button', { name: 'Restore', exact: true });
   const versionCount = 14;
   const comparisonVersion = 8;
+  const firstRecentVersion = 11;
+  const today = Date.now();
+  await page.clock.setFixedTime(today - 8 * 24 * 60 * 60 * 1000);
   await editor.click();
   await page.keyboard.insertText('The team reviewed the draft.');
   await expect(versions).toHaveCount(1);
@@ -34,6 +37,7 @@ test('keeps an older version comparison in view with a long device history', asy
   await expect(restore).toBeInViewport({ ratio: 1 });
 
   for (let version = 2; version <= versionCount; version += 1) {
+    if (version === firstRecentVersion) await page.clock.setFixedTime(today);
     await page.keyboard.insertText(` Note ${version}.`);
     await expect(versions).toHaveCount(version);
   }
@@ -64,6 +68,20 @@ test('keeps an older version comparison in view with a long device history', asy
   await expect(target).toHaveAttribute('aria-pressed', 'true');
   await expect(changedText).toHaveText(`Note ${comparisonVersion}.`);
   expect(await listPosition()).toBe(inspectedPosition);
+
+  const recentFilter = page.getByRole('button', { name: 'Last 7 days', exact: true });
+  await recentFilter.click();
+  await expect(versions).toHaveCount(versionCount + 2 - firstRecentVersion);
+  const recentTarget = versions.filter({
+    has: page.getByText(`Version ${firstRecentVersion}`, { exact: true }),
+  });
+  await recentTarget.click();
+  await expect(recentTarget).toHaveAttribute('aria-pressed', 'true');
+  await recentFilter.click();
+  await expect(versions).toHaveCount(versionCount + 1);
+  await expect(recentTarget).toHaveAttribute('aria-pressed', 'true');
+  await expect(recentTarget).toBeInViewport({ ratio: 1 });
+  await expect(recentFilter).toBeFocused();
 
   const phone = await browser.newContext({
     baseURL,
