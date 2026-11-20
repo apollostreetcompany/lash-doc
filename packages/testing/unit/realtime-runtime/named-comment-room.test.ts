@@ -250,11 +250,6 @@ describe('named Comment room scope', () => {
         expect(await current.json()).toEqual({ ok: true, version: 1, title: TITLE });
         expect((await readRecent(request)).status).toBe(200);
         expect(encodeComment).toHaveBeenCalledTimes(role === 'comment' ? 1 : 0);
-        const invalid = await readRecent(
-          await recentRequest(ROOM_ID, '{"version":1,"extra":true}'),
-        );
-        expect(invalid.status).toBe(400);
-        expect(await invalid.json()).toEqual({ ...denied, error: 'invalid-request' });
 
         Y.applyUpdate(remote, Y.encodeStateAsUpdate(fixture.doc));
         const latestTitle = 'Renamed by the owner';
@@ -268,20 +263,30 @@ describe('named Comment room scope', () => {
         });
         expect(encodeComment).toHaveBeenCalledTimes(role === 'comment' ? 2 : 0);
 
-        await expectDenied(await recentRequest(`doc-v1-${'b'.repeat(64)}`));
-        fixture.db
-          .prepare("UPDATE document_projection_v1 SET snapshot_sha256 = 'mismatched'")
-          .run();
-        await expectDenied(request);
-        fixture.db.prepare("UPDATE document_projection_v1 SET snapshot_sha256 = 'matching'").run();
-        fixture.db.prepare('INSERT INTO owner_session_control_v1 VALUES (1, 0, 1)').run();
-        await expectDenied(request);
-        fixture.db
-          .prepare('UPDATE owner_session_control_v1 SET frozen = 1, block_new_sessions = 0')
-          .run();
-        await expectDenied(request);
-        fixture.db.prepare('DELETE FROM owner_session_control_v1').run();
-        if (role === 'comment') {
+        // Request and room authority checks happen before recipient role lookup.
+        if (role === 'edit') {
+          const invalid = await readRecent(
+            await recentRequest(ROOM_ID, '{"version":1,"extra":true}'),
+          );
+          expect(invalid.status).toBe(400);
+          expect(await invalid.json()).toEqual({ ...denied, error: 'invalid-request' });
+
+          await expectDenied(await recentRequest(`doc-v1-${'b'.repeat(64)}`));
+          fixture.db
+            .prepare("UPDATE document_projection_v1 SET snapshot_sha256 = 'mismatched'")
+            .run();
+          await expectDenied(request);
+          fixture.db
+            .prepare("UPDATE document_projection_v1 SET snapshot_sha256 = 'matching'")
+            .run();
+          fixture.db.prepare('INSERT INTO owner_session_control_v1 VALUES (1, 0, 1)').run();
+          await expectDenied(request);
+          fixture.db
+            .prepare('UPDATE owner_session_control_v1 SET frozen = 1, block_new_sessions = 0')
+            .run();
+          await expectDenied(request);
+          fixture.db.prepare('DELETE FROM owner_session_control_v1').run();
+        } else {
           const paragraph = remote.getXmlFragment('content').get(0) as Y.XmlElement;
           await applyRemoteChange('remote-private-reference', () => {
             const chip = new Y.XmlElement<Record<string, string | null>>('chip');
