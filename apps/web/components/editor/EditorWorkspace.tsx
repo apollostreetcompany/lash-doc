@@ -822,6 +822,7 @@ function ResolvedDocumentWorkspace({
   const [docTitle, setDocTitle] = useState(DEFAULT_DOC_TITLE);
   const [documents, setDocuments] = useState<LashDocumentRecord[]>([]);
   const [documentIndexNeedsRetry, setDocumentIndexNeedsRetry] = useState(false);
+  const [documentCreateError, setDocumentCreateError] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(true);
   const [activeTableCell, setActiveTableCell] = useState<ActiveCell | null>(null);
   const [historyEntries, setHistoryEntries] = useState<HistoryEntry[]>([]);
@@ -915,7 +916,12 @@ function ResolvedDocumentWorkspace({
 
   const refreshDocuments = useCallback(() => {
     const storage = browserLocalStorage();
-    setDocuments(storage ? listDocuments(storage) : []);
+    try {
+      setDocuments(storage ? listDocuments(storage) : []);
+    } catch {
+      setDocuments([]);
+      setDocumentIndexNeedsRetry(true);
+    }
   }, []);
 
   // Cross-tab sync: when another tab creates a document or renames one, the
@@ -1154,8 +1160,10 @@ function ResolvedDocumentWorkspace({
     }
     try {
       setDocuments(upsertDocument(storage, { id: activeDocumentId, title: storedTitle }));
+      setDocumentIndexNeedsRetry(false);
     } catch {
       setDocuments([]);
+      setDocumentIndexNeedsRetry(true);
     }
   }, [activeDocumentId, canEditDocument, realtimeDoc]);
 
@@ -4040,9 +4048,15 @@ function ResolvedDocumentWorkspace({
     const nextDocumentId = createNewDocumentId();
     const storage = browserLocalStorage();
     if (storage) {
-      upsertDocument(storage, { id: nextDocumentId, title: DEFAULT_DOC_TITLE });
+      try {
+        upsertDocument(storage, { id: nextDocumentId, title: DEFAULT_DOC_TITLE });
+      } catch {
+        setDocumentCreateError(true);
+        return;
+      }
       refreshDocuments();
     }
+    setDocumentCreateError(false);
     navigateDocument(documentWorkspacePath(nextDocumentId, staticPreview));
   }, [navigateDocument, refreshDocuments, staticPreview]);
 
@@ -4764,6 +4778,12 @@ function ResolvedDocumentWorkspace({
                       Return to device draft
                     </button>
                   </div>
+                ) : null}
+
+                {documentCreateError ? (
+                  <p className="lash-local-body-notice" data-kind="save-error" role="alert">
+                    Couldn’t create a document in this browser. Try again.
+                  </p>
                 ) : null}
 
                 {!realtimeEnabled && documentIndexNeedsRetry ? (

@@ -157,7 +157,8 @@ export function DocumentsWorkspace({ staticPreview = false }: { staticPreview?: 
           {registry === null ? <p className={styles.notice}>Loading documents…</p> : null}
           {registry === 'unavailable' ? (
             <p className={styles.notice} role="alert">
-              Couldn’t load the documents in this browser.
+              Couldn’t load the documents in this browser. If you have a document link, try opening
+              it directly.
             </p>
           ) : null}
           <p role="status" className="sr-only">

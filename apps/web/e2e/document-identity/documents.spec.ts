@@ -27,6 +27,63 @@ test('finds and reopens an older title in a large document library', async ({ pa
   );
 });
 
+test('keeps an unreadable document list while a draft opened by its link stays editable', async ({
+  page,
+}) => {
+  const path = '/doc/device-inventory-recovery';
+  const legacyTitle = 'Earlier draft title';
+  const originalBody = 'Original device copy.';
+  const editedBody = 'The edited device copy stays here.';
+  const raw = ` [ {"id":"device-inventory-recovery","title":"${legacyTitle}"}, {"unexpected":true} ] `;
+  const editor = page.getByRole('textbox', { name: 'Document editor' });
+  const title = page.getByRole('textbox', { name: 'Document title' });
+  const expectRawRegistry = async () =>
+    expect(await page.evaluate(() => localStorage.getItem('lash:documents'))).toBe(raw);
+
+  await page.goto(path);
+  await expect(editor).toBeEditable();
+  await editor.fill(originalBody);
+  await expect(page.getByTestId('autosave-indicator')).toHaveAttribute('data-status', 'saved');
+  await page.evaluate((value) => localStorage.setItem('lash:documents', value), raw);
+
+  await page.goto('/documents');
+  await expect(page.getByRole('alert')).toContainText(
+    'Couldn’t load the documents in this browser.',
+  );
+  await page.getByRole('button', { name: 'New document', exact: true }).click();
+  await expect(
+    page.getByText('Couldn’t create a document in this browser. Try again.'),
+  ).toBeVisible();
+  await expect(page).toHaveURL(/\/documents$/u);
+  await expectRawRegistry();
+
+  await page.goto(path);
+  await expect(editor).toHaveText(originalBody);
+  await expect(title).toHaveValue(legacyTitle);
+  const indexNotice = page.getByTestId('document-index-notice');
+  await expect(indexNotice).toContainText('Lash couldn’t update the document list.');
+  await page.getByTestId('new-document-button').click();
+  await expect(
+    page.getByText('Couldn’t create a document in this browser. Try again.'),
+  ).toBeVisible();
+  await expect(page).toHaveURL(new RegExp(`${path}$`, 'u'));
+  await expectRawRegistry();
+
+  await title.fill('Renamed device draft');
+  await editor.fill(editedBody);
+  await expect(page.getByTestId('autosave-indicator')).toHaveAttribute('data-status', 'saved');
+  await expect(indexNotice).toBeVisible();
+  await expect(page.getByTestId('local-body-notice')).toHaveCount(0);
+  await expectRawRegistry();
+
+  await page.reload();
+  await expect(editor).toHaveText(editedBody);
+  await expect(editor).toBeEditable();
+  await expect(title).toHaveValue('Renamed device draft');
+  await expect(indexNotice).toBeVisible();
+  await expectRawRegistry();
+});
+
 async function openDocuments(page: Page, compact: boolean) {
   if (compact) await page.getByRole('button', { name: 'Open navigation menu' }).click();
   const link = page.getByRole('link', { name: 'Documents', exact: true });
