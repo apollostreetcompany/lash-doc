@@ -154,7 +154,7 @@ test('a named Comment reviewer proposes an exact edit without edit or History ac
   const ownerEmail = `comment-owner-${marker}@example.test`;
   const reviewerEmail = `comment-reviewer-${marker}@example.test`;
   const documentTitle = `Release wording ${marker}`;
-  const privatePrior = `Confidential draft ${marker}`;
+  const privatePrior = `Confidential draft ${marker}.`;
   const reviewerContext = await browser.newContext({ baseURL });
 
   try {
