@@ -371,6 +371,16 @@ const setPickerOpen = (dom: HTMLElement, open: boolean) => {
   }
 };
 
+const revealPickerOption = (menu: HTMLElement, selected: HTMLElement) => {
+  if (menu.scrollHeight <= menu.clientHeight) return;
+  // Scroll the listbox without moving the document or the table.
+  const option = selected.getBoundingClientRect();
+  const top = menu.getBoundingClientRect().top + menu.clientTop;
+  const bottom = top + menu.clientHeight;
+  if (option.top < top) menu.scrollTop -= top - option.top;
+  else if (option.bottom > bottom) menu.scrollTop += option.bottom - bottom;
+};
+
 const setPickerActiveIndex = (dom: HTMLElement, index: number) => {
   dom.dataset.activeIndex = String(index);
   const { options, menu } = getPickerElements(dom);
@@ -384,11 +394,7 @@ const setPickerActiveIndex = (dom: HTMLElement, index: number) => {
     const selected = options[index];
     if (selected) {
       menu.setAttribute('aria-activedescendant', selected.id);
-      // Scroll only the listbox when there are more options than can fit.
-      const option = selected.getBoundingClientRect();
-      const bounds = menu.getBoundingClientRect();
-      if (option.top < bounds.top) menu.scrollTop -= bounds.top - option.top;
-      if (option.bottom > bounds.bottom) menu.scrollTop += option.bottom - bounds.bottom;
+      revealPickerOption(menu, selected);
     }
   }
 };
@@ -437,13 +443,25 @@ const trackPickerPosition = (view: EditorView, dom: HTMLElement) => {
     const gap = 6;
     const below = bottom - margin - anchor.bottom - gap;
     const above = anchor.top - gap - y - margin;
-    menu.style.maxWidth = `${Math.max(0, right - x - margin * 2)}px`;
+    const maxWidth = `${Math.max(0, Math.floor(right - x - margin * 2))}px`;
+    const widthChanged = menu.style.maxWidth !== maxWidth;
+    if (widthChanged) menu.style.maxWidth = maxWidth;
     const height = menu.scrollHeight + menu.offsetHeight - menu.clientHeight;
     const placeBelow = below >= height || below >= above;
-    const space = Math.max(0, placeBelow ? below : above);
-    menu.style.maxHeight = `${space}px`;
-    menu.style.top = `${placeBelow ? anchor.bottom + gap : anchor.top - gap - Math.min(height, space)}px`;
-    menu.style.left = `${Math.max(x + margin, Math.min(anchor.left, right - menu.offsetWidth - margin))}px`;
+    const space = Math.max(0, Math.floor(placeBelow ? below : above));
+    const maxHeight = `${space}px`;
+    const heightChanged = menu.style.maxHeight !== maxHeight;
+    if (heightChanged) menu.style.maxHeight = maxHeight;
+    const originY = placeBelow ? anchor.bottom + gap : anchor.top - gap - Math.min(height, space);
+    const top = `${Math.round(originY)}px`;
+    const originX = Math.max(x + margin, Math.min(anchor.left, right - menu.offsetWidth - margin));
+    const left = `${Math.round(originX)}px`;
+    if (menu.style.top !== top) menu.style.top = top;
+    if (menu.style.left !== left) menu.style.left = left;
+    if (widthChanged || heightChanged) {
+      const selected = menu.querySelector<HTMLButtonElement>('[aria-selected="true"]');
+      if (selected) revealPickerOption(menu, selected);
+    }
   };
   const schedule = () => {
     if (frame === null) frame = window.requestAnimationFrame(position);
