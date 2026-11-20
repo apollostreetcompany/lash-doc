@@ -40,6 +40,7 @@ type IssuedInvite = { invite: NamedEditInvite; url: string };
 
 function InviteDelivery({ issued }: { issued: IssuedInvite }) {
   const [copyPhase, setCopyPhase] = useState<'idle' | 'copying' | 'copied' | 'failed'>('idle');
+  const inviteLinkRef = useRef<HTMLInputElement | null>(null);
   const copy = async () => {
     setCopyPhase('copying');
     try {
@@ -48,6 +49,12 @@ function InviteDelivery({ issued }: { issued: IssuedInvite }) {
     } catch {
       setCopyPhase('failed');
     }
+  };
+  const selectInviteLink = () => {
+    const field = inviteLinkRef.current;
+    if (!field) return;
+    field.focus();
+    field.select();
   };
   return (
     <div className={styles.delivery}>
@@ -63,7 +70,24 @@ function InviteDelivery({ issued }: { issued: IssuedInvite }) {
         {copyPhase === 'copied' ? 'Invite link copied.' : ''}
       </span>
       {copyPhase === 'failed' ? (
-        <p role="alert">Couldn’t copy the invite link. Try again.</p>
+        <>
+          <p role="alert">Couldn’t copy the invite link automatically. Copy it manually.</p>
+          <label className={styles.field}>
+            Invite link
+            <input
+              ref={inviteLinkRef}
+              autoComplete="off"
+              inputMode="none"
+              readOnly
+              spellCheck={false}
+              type="text"
+              value={issued.url}
+            />
+          </label>
+          <button type="button" onClick={selectInviteLink}>
+            Select invite link
+          </button>
+        </>
       ) : null}
     </div>
   );
