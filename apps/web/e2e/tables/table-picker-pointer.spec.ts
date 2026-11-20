@@ -49,7 +49,9 @@ test('a readable 100×20 table scrolls locally and keeps its status options clic
           content: [
             {
               type: 'paragraph',
-              content: [{ type: 'text', text: row < 98 ? 'Cell text' : `R${row + 1}C${column + 1}` }],
+              content: [
+                { type: 'text', text: row < 98 ? 'Cell text' : `R${row + 1}C${column + 1}` },
+              ],
             },
           ],
         })),
