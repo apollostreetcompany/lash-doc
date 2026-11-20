@@ -4294,6 +4294,12 @@ textarea.history-diff {
     min-height: 44px;
   }
 
+  .lash-document-status .lash-autosave-indicator {
+    flex: 1 1 0;
+    min-width: 0;
+    max-width: max-content;
+  }
+
   .lash-share-button-label {
     display: none;
   }

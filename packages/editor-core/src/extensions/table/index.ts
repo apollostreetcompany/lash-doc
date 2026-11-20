@@ -7,7 +7,7 @@ import type { Node as ProseMirrorNode } from '@tiptap/pm/model';
 import { Plugin, PluginKey } from '@tiptap/pm/state';
 import type { EditorState } from '@tiptap/pm/state';
 import { CellSelection } from '@tiptap/pm/tables';
-import type { EditorView } from '@tiptap/pm/view';
+import type { EditorView, ViewMutationRecord } from '@tiptap/pm/view';
 
 import {
   applyMatrixToSelection,
@@ -103,6 +103,7 @@ let cellCounter = 0;
 type NodeViewInstance = {
   dom: HTMLTableCellElement;
   contentDOM: HTMLElement;
+  ignoreMutation: (mutation: ViewMutationRecord) => boolean;
   update: (node: ProseMirrorNode) => boolean;
   destroy: () => void;
 };
@@ -300,6 +301,15 @@ const createCellNodeView = (
   return {
     dom,
     contentDOM,
+    ignoreMutation(mutation) {
+      if (mutation.type === 'selection') return false;
+      // The picker owns its controls and the attributes on the content wrapper.
+      // Treating these writes as edits redraws the cell, which reopens its picker.
+      return (
+        !contentDOM.contains(mutation.target) ||
+        (mutation.type === 'attributes' && mutation.target === contentDOM)
+      );
+    },
     destroy() {
       control.removeEventListener('click', onControlClick);
       cleanupOptionListeners();

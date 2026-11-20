@@ -80,7 +80,7 @@ test.describe('invite access UX', () => {
     }
 
     const presence = page.getByTestId('realtime-presence-bar');
-    await expect(presence).toHaveText('On this device');
+    await expect(presence.getByTestId('invite-access-status')).toHaveText('On this device');
     await expect(presence.getByTestId('collaboration-empty-state')).toHaveCount(0);
     await expect(
       presence.getByRole('button', { name: 'Invite collaborator', exact: true }),

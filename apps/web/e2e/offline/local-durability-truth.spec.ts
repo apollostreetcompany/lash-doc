@@ -27,7 +27,7 @@ test.describe('local durability truth', () => {
       'data-enabled',
       'false',
     );
-    await expect(page.getByTestId('realtime-presence-bar')).toHaveText('On this device');
+    await expect(page.getByTestId('invite-access-status')).toHaveText('On this device');
     await expect(page.getByTestId('remote-collaborator')).toHaveCount(0);
     await expect(page.getByTestId('collaboration-empty-state')).toHaveCount(0);
 
