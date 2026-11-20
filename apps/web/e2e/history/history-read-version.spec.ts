@@ -1,4 +1,4 @@
-import { expect, test, type Locator } from '@playwright/test';
+import { expect, test, type Locator, type Page } from '@playwright/test';
 
 const original = 'We will publish the beta on Tuesday.';
 const revised = 'We will share the beta on Tuesday.';
@@ -12,6 +12,27 @@ async function expectKickoffBody(body: Locator, sentence: string) {
     'Confirm support coverage',
   ]);
   await expect(body.locator(':scope > ul > li > ul > li')).toHaveText('Review launch metrics');
+}
+
+async function clickAtTextOffset(page: Page, paragraph: Locator, offset: number) {
+  await paragraph.scrollIntoViewIfNeeded();
+  const point = await paragraph.evaluate((element, textOffset) => {
+    const text = element.firstChild;
+    if (!(text instanceof Text)) throw new Error('Expected the plain kickoff paragraph.');
+    const caret = document.createRange();
+    caret.setStart(text, textOffset);
+    caret.collapse(true);
+    const bounds = caret.getBoundingClientRect();
+    return { x: bounds.left + 0.5, y: bounds.top + bounds.height / 2 };
+  }, offset);
+  await page.mouse.click(point.x, point.y);
+  const actualOffset = await paragraph.evaluate((element) => {
+    const selection = window.getSelection();
+    return selection?.isCollapsed && selection.focusNode === element.firstChild
+      ? selection.focusOffset
+      : null;
+  });
+  expect(actualOffset).toBe(offset);
 }
 
 test.use({ hasTouch: true, viewport: { width: 1440, height: 900 } });
@@ -55,9 +76,7 @@ test('reads the full earlier kickoff draft by keyboard and touch without restori
   await button('Close activity panel').click();
 
   const paragraph = editor.locator(':scope > p').first();
-  await paragraph.click({ position: { x: 4, y: 8 } });
-  await page.keyboard.press('Home');
-  for (const _ of 'We will ') await page.keyboard.press('ArrowRight');
+  await clickAtTextOffset(page, paragraph, 'We will '.length);
   for (const _ of 'publish the beta') await page.keyboard.press('Shift+ArrowRight');
   expect(await page.evaluate(() => window.getSelection()?.toString())).toBe('publish the beta');
   await page.keyboard.insertText('share the beta');
@@ -67,9 +86,7 @@ test('reads the full earlier kickoff draft by keyboard and touch without restori
   await expect(versions).toHaveCount(firstCount + 1);
   await button('Close activity panel').click();
 
-  await paragraph.click({ position: { x: 4, y: 8 } });
-  await page.keyboard.press('Home');
-  for (const _ of revised) await page.keyboard.press('ArrowRight');
+  await clickAtTextOffset(page, paragraph, revised.length);
   await page.keyboard.insertText(' Draft review starts this afternoon.');
   await expect(paragraph).toHaveText(latest);
   await expect(saved).toHaveText(/^All changes saved/);
