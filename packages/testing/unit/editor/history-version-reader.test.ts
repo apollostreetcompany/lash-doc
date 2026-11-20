@@ -106,6 +106,11 @@ describe('reading a local History version', () => {
     });
     const trigger = button('Read previous draft · Version 2');
     expect(trigger.getAttribute('aria-label')).toBe('Read previous draft, Version 2');
+    expect(
+      host.querySelector(
+        'button[aria-label^="Read previous draft,"], [data-testid="history-version"]',
+      ),
+    ).toBe(trigger);
     expect(host.querySelector('[data-testid="history-selected-version"]')?.textContent).toBe(
       'Version 5',
     );

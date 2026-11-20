@@ -118,7 +118,12 @@ test('reads the full earlier kickoff draft by keyboard and touch without restori
   const contents = reader.getByRole('article', { name: 'Version contents' });
   const backToLatest = reader.getByRole('button', { name: 'Back to latest', exact: true });
   await expect(history.getByTestId('history-selected-version')).toHaveText(latestVersion);
-  await readPrevious.press('Enter');
+  const authorship = history.getByRole('button', { name: 'Show authorship in document' });
+  await authorship.focus();
+  await expect(authorship).toBeFocused();
+  await page.keyboard.press('Tab');
+  await expect(readPrevious).toBeFocused();
+  await page.keyboard.press('Enter');
   await expect(reader).toBeVisible();
   await expectKickoffBody(contents, revised);
   await expect(contents).not.toContainText('Draft review starts this afternoon.');

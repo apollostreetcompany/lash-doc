@@ -357,6 +357,19 @@ export function HistoryPanel({
   const diffDescriptionId = selectedEntry
     ? `history-diff-announcement-${selectedEntry.id}`
     : undefined;
+  const versionReader =
+    readSelectedVersion && readEntry ? (
+      <div className="history-diff-actions">
+        <HistoryVersionReader
+          key={previousDraft ? 'previous-draft' : `${readEntry.id}:${readEntry.resultSha}`}
+          load={readSelectedVersion}
+          previousDraft={Boolean(previousDraft)}
+          sequence={readEntry.seq}
+          sha={readEntry.resultSha}
+          onReturnToDocument={onReturnToDocument}
+        />
+      </div>
+    ) : null;
 
   return (
     <section className="lash-history-panel" data-testid="history-panel" aria-label="History">
@@ -429,6 +442,8 @@ export function HistoryPanel({
           Version history is unavailable for this access link.
         </p>
       ) : null}
+
+      {previousDraft ? versionReader : null}
 
       {historyVerified ? (
         <div className="history-filter-controls" data-testid="history-filter-controls">
@@ -531,18 +546,7 @@ export function HistoryPanel({
             <span data-testid="history-selected-version">Version {selectedEntry.seq}</span>
             <span>{selectedEntry.actor.type === 'ai' ? 'AI' : selectedEntry.actor.id}</span>
           </div>
-          {readSelectedVersion && readEntry ? (
-            <div className="history-diff-actions">
-              <HistoryVersionReader
-                key={previousDraft ? 'previous-draft' : `${readEntry.id}:${readEntry.resultSha}`}
-                load={readSelectedVersion}
-                previousDraft={Boolean(previousDraft)}
-                sequence={readEntry.seq}
-                sha={readEntry.resultSha}
-                onReturnToDocument={onReturnToDocument}
-              />
-            </div>
-          ) : null}
+          {previousDraft ? null : versionReader}
           {selectedEntry.intent === 'suggest' ? (
             <div className="history-suggestion-status" data-testid="history-suggestion-status">
               {selectedSuggestionResolution?.action === 'rejected'
