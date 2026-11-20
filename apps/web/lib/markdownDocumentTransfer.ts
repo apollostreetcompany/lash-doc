@@ -244,10 +244,12 @@ export const createMarkdownDownloadPlan = (input: {
   doc: LocalBodyDocJson;
   title: string;
   documentId: string;
+  mode?: 'share-copy';
 }): MarkdownDownloadPlan => {
   const result = serializeDocToMarkdownFile(input.doc, {
     title: input.title,
     documentId: input.documentId,
+    mode: input.mode,
   });
   if (result.blockedReasons.length) {
     return {

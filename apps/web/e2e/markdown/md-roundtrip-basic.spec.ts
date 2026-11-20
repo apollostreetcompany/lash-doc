@@ -1,4 +1,5 @@
 import { expect, test, type FileChooser, type Page } from '@playwright/test';
+import { readFile } from 'node:fs/promises';
 import path from 'path';
 
 const fixturePath = path.join(__dirname, 'fixtures', 'basic.md');
@@ -92,28 +93,26 @@ test.describe('safe Markdown document transfer', () => {
     await expect(page.getByRole('heading', { level: 1, name: 'Project Plan' })).toBeVisible();
 
     await downloadButton.click();
+    let downloadCount = 0;
+    page.on('download', () => {
+      downloadCount += 1;
+    });
     const downloadDialog = page.getByRole('dialog', { name: 'Download Markdown' });
     await expect(downloadDialog).toContainText(
       'Markdown includes the document title and supported body formatting. Comments, suggestions, version history, authorship, chat, collaborators, and access details are not included. Your Lash document will not change.',
     );
     await downloadDialog.getByRole('button', { name: 'Cancel', exact: true }).click();
     await expect(downloadDialog).toHaveCount(0);
-    expect(
-      await page.evaluate(
-        () => (window as Window & { __lashLastExport?: string }).__lashLastExport,
-      ),
-    ).toBeUndefined();
+    expect(downloadCount).toBe(0);
 
     await downloadButton.click();
     const downloadPromise = page.waitForEvent('download');
     await downloadDialog.getByRole('button', { name: 'Download Markdown', exact: true }).click();
     const download = await downloadPromise;
     expect(download.suggestedFilename()).toBe('basic.md');
-    const downloadedPath = await download.path();
-    if (!downloadedPath) throw new Error('Downloaded Markdown path was unavailable.');
-    const exported = await page.evaluate(
-      () => (window as Window & { __lashLastExport?: string }).__lashLastExport ?? '',
-    );
+    expect(downloadCount).toBe(1);
+    const bytes = await readFile(await download.path());
+    const exported = bytes.toString('utf8');
     expect(exported.startsWith('<!-- lash-markdown:v1 -->\n\n# basic\n\n')).toBe(true);
     expect(exported).toContain('# Project Plan');
     expect(exported).toContain('- [x] Ship schema');
@@ -123,7 +122,7 @@ test.describe('safe Markdown document transfer', () => {
     await chooseMarkdownFile(page, {
       name: download.suggestedFilename(),
       mimeType: 'text/markdown',
-      buffer: Buffer.from(exported, 'utf8'),
+      buffer: bytes,
     });
     await expect(importDialog).toContainText('Lash Markdown v1');
     await expect(importDialog.getByText('basic', { exact: true })).toBeVisible();

@@ -89,6 +89,8 @@ import {
 import { LocalBodyRecoveryNotice, type LocalBodyNotice } from './panels/LocalBodyRecoveryNotice';
 import { MarkdownIO } from './panels/MarkdownIO';
 import {
+  createMarkdownShareFile,
+  downloadMarkdownFile,
   MarkdownTransferDialog,
   type MarkdownTransferDialogState,
 } from './panels/MarkdownTransferDialog';
@@ -783,6 +785,7 @@ function ResolvedDocumentWorkspace({
     | 'allowsInviteIssuance'
     | 'captureInviteIssuance'
     | 'checkAccountCopy'
+    | 'getResolution'
     | 'getSnapshot'
     | 'openAccountCopy'
     | 'promoteOwnerDocument'
@@ -2949,6 +2952,58 @@ function ResolvedDocumentWorkspace({
     ],
   );
 
+  const deviceCopyEditor =
+    resolution.kind === 'local' &&
+    resolution.routeDocumentId === activeDocumentId &&
+    accessSnapshot.phase === 'local-ready' &&
+    localBodyState === 'ready' &&
+    editor &&
+    !editor.isDestroyed &&
+    hydratedLocalEditorRef.current === editor
+      ? editor
+      : null;
+  const canShareCopy = useCallback(
+    (source: object) =>
+      deviceCopyEditor === source &&
+      !deviceCopyEditor.isDestroyed &&
+      hydratedLocalEditorRef.current === deviceCopyEditor &&
+      inviteIssuanceAuthority.getResolution() === resolution &&
+      inviteIssuanceAuthority.getSnapshot().phase === 'local-ready' &&
+      resolution.authority.getSnapshot().bodyWrite,
+    [deviceCopyEditor, inviteIssuanceAuthority, resolution],
+  );
+  const shareCopy = markdownDialogState?.kind === 'share-copy' ? markdownDialogState : null;
+  const shareCopyOpen = Boolean(shareCopy && canShareCopy(shareCopy.source));
+
+  useLayoutEffect(() => {
+    if (shareCopy && !shareCopyOpen) {
+      setMarkdownDialogState((current) => (current === shareCopy ? null : current));
+    }
+  }, [shareCopy, shareCopyOpen]);
+
+  const openShareCopy = useCallback(
+    (trigger: HTMLElement | null) => {
+      if (!deviceCopyEditor || !canShareCopy(deviceCopyEditor) || promotionInFlightRef.current) {
+        return false;
+      }
+      const plan = createMarkdownDownloadPlan({
+        doc: deviceCopyEditor.getJSON(),
+        title: docTitle,
+        documentId: activeDocumentId,
+        mode: 'share-copy',
+      });
+      markdownTriggerRef.current = trigger;
+      setMarkdownDialogState({
+        kind: 'share-copy',
+        plan,
+        nativeFile: createMarkdownShareFile(plan),
+        source: deviceCopyEditor,
+      });
+      return true;
+    },
+    [activeDocumentId, canShareCopy, deviceCopyEditor, docTitle],
+  );
+
   const handleExportMarkdown = useCallback(
     (trigger: HTMLButtonElement) => {
       if (!editor) return;
@@ -2975,21 +3030,7 @@ function ResolvedDocumentWorkspace({
     if (!state) return;
     if (state.kind === 'download') {
       if (state.plan.status !== 'ready') return;
-      const { filename, markdown } = state.plan;
-      (
-        window as Window & {
-          __lashLastExport?: string;
-        }
-      ).__lashLastExport = markdown;
-      const blob = new Blob([markdown], { type: 'text/markdown;charset=utf-8' });
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement('a');
-      link.href = url;
-      link.download = filename;
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      URL.revokeObjectURL(url);
+      downloadMarkdownFile(state.plan);
       setMarkdownDialogState(null);
       window.requestAnimationFrame(() =>
         markdownTriggerRef.current?.focus({ preventScroll: true }),
@@ -4122,6 +4163,7 @@ function ResolvedDocumentWorkspace({
     (trigger?: HTMLElement | null) => {
       cancelPendingMobileRailAction();
       if (runtimeMode !== 'development-loopback') {
+        if (staticPreview && openShareCopy(trigger ?? null)) return;
         shareTriggerRef.current = trigger ?? null;
         setOwnerShare((current) => {
           if (current.phase !== 'closed') return current;
@@ -4138,7 +4180,7 @@ function ResolvedDocumentWorkspace({
           return staticPreview
             ? {
                 phase: 'unavailable',
-                detail: 'Account saving and sharing aren’t available in this preview.',
+                detail: 'This document isn’t ready to share a copy. Return to it and try again.',
               }
             : { phase: 'checking-account' };
         });
@@ -4152,6 +4194,7 @@ function ResolvedDocumentWorkspace({
       docTitle,
       editor,
       openActivityPanel,
+      openShareCopy,
       ownerBacked,
       runtimeMode,
       staticPreview,
@@ -4636,7 +4679,7 @@ function ResolvedDocumentWorkspace({
       shareExpanded={
         runtimeMode === 'development-loopback'
           ? railVisible && activeTab === 'share'
-          : shareDialogOpen
+          : shareDialogOpen || shareCopyOpen
       }
       settingsExpanded={documentSettingsOpen}
       shareControlsPresent={railOpen}
@@ -4913,6 +4956,13 @@ function ResolvedDocumentWorkspace({
         documentTitle={docTitle.trim() || DEFAULT_DOC_TITLE}
         onClose={closeOwnerShareDialog}
         onPrimary={handleOwnerSharePrimary}
+        onShareCopy={
+          !staticPreview && deviceCopyEditor
+            ? () => {
+                if (openShareCopy(shareTriggerRef.current)) setOwnerShare({ phase: 'closed' });
+              }
+            : undefined
+        }
         onCreateDeviceDraft={
           ownerShare.phase === 'promotion-recovery' && ownerShare.mayCreateDeviceDraft
             ? () => void createSeparateDeviceDraft()
@@ -4948,8 +4998,9 @@ function ResolvedDocumentWorkspace({
         signInHref={staticPreview ? undefined : signInHref}
       />
       <MarkdownTransferDialog
-        state={markdownDialogState}
+        state={shareCopy && !shareCopyOpen ? null : markdownDialogState}
         returnFocusTo={markdownTriggerRef.current}
+        canShareCopy={canShareCopy}
         onClose={closeMarkdownDialog}
         onConfirm={() => void confirmMarkdownTransfer()}
         onRetryOpen={retryOpeningImportedDocument}

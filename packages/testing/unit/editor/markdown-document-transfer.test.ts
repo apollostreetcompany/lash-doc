@@ -905,6 +905,101 @@ describe('Markdown browser file intake', () => {
 });
 
 describe('Markdown download preflight', () => {
+  it('shares only visible table contents and leaves the ordinary backup intact', () => {
+    const cell = (text: string, attrs?: Record<string, unknown>, type = 'tableCell') => ({
+      type,
+      attrs: { colspan: 1, rowspan: 1, colwidth: null, ...attrs },
+      content: [{ type: 'paragraph', content: [{ type: 'text', text }] }],
+    });
+    const row = (...content: ReturnType<typeof cell>[]) => ({ type: 'tableRow', content });
+    const source = {
+      title: '計画',
+      documentId: 'internal-source',
+      doc: {
+        type: 'doc',
+        content: [
+          {
+            type: 'table',
+            content: [
+              row(cell('State', undefined, 'tableHeader'), cell('Owner', undefined, 'tableHeader')),
+              row(
+                cell('Private old prose', {
+                  cellType: 'status',
+                  options: ['Private unused option', 'Open'],
+                  value: 'Open',
+                }),
+                cell('Marie', { cellType: 'text', value: 'Private stale text value' }),
+              ),
+              row(
+                cell('Private old status', { cellType: 'status', value: 'Private invalid value' }),
+                cell('Private old select', {
+                  cellType: 'select',
+                  options: [null, 'Next', 'Hidden'],
+                }),
+              ),
+            ],
+          },
+        ],
+      },
+    };
+    const original = structuredClone(source.doc);
+    const backupBefore = createMarkdownDownloadPlan(source);
+    const copy = createMarkdownDownloadPlan({ ...source, mode: 'share-copy' });
+
+    expect(copy).toMatchObject({ status: 'ready', normalizedTitle: '計画' });
+    if (copy.status !== 'ready' || backupBefore.status !== 'ready') {
+      throw new Error('Expected downloadable copies');
+    }
+    expect(copy.markdown).toBe(
+      '<!-- lash-markdown:v1 -->\n\n# 計画\n\n' +
+        '| State | Owner |\n| ----- | ----- |\n| Open  | Marie |\n| Todo  | Next  |\n',
+    );
+    expect(copy.filename).toBe('lash-document.md');
+    expect(parseMarkdownFileToDoc(copy.markdown)).toMatchObject({
+      ok: true,
+      title: '計画',
+      doc: {
+        content: [
+          {
+            type: 'table',
+            content: [
+              row(cell('State', undefined, 'tableHeader'), cell('Owner', undefined, 'tableHeader')),
+              row(cell('Open'), cell('Marie')),
+              row(cell('Todo'), cell('Next')),
+            ],
+          },
+        ],
+      },
+    });
+    expect(backupBefore.markdown).toContain('Private old prose');
+    expect(backupBefore.markdown).toContain('Private stale text value');
+    expect(backupBefore.filename).toBe('lash-internal-source.md');
+    expect(createMarkdownDownloadPlan(source)).toEqual(backupBefore);
+    expect(source.doc).toEqual(original);
+  });
+
+  it('caps share copies at the exact UTF-8 intake limit', () => {
+    const input = { title: 'Project', documentId: 'source-doc' };
+    const smallCopy = createMarkdownDownloadPlan({ ...input, doc: paragraphDoc('a') });
+    if (smallCopy.status !== 'ready') throw new Error('Expected a downloadable baseline');
+    const contentLimit = MARKDOWN_FILE_MAX_BYTES - markdownBytes(smallCopy.markdown).length + 1;
+    const content = '界'.repeat(Math.floor(contentLimit / 3)) + 'a'.repeat(contentLimit % 3);
+    const exact = createMarkdownDownloadPlan({
+      ...input,
+      doc: paragraphDoc(content),
+      mode: 'share-copy',
+    });
+    if (exact.status !== 'ready') throw new Error('Expected a copy at the import limit');
+    expect(markdownBytes(exact.markdown).length).toBe(MARKDOWN_FILE_MAX_BYTES);
+
+    const over = { ...input, doc: paragraphDoc(`${content}a`) };
+    expect(createMarkdownDownloadPlan({ ...over, mode: 'share-copy' })).toMatchObject({
+      status: 'blocked',
+      reasons: ['This copy exceeds the 2,000,000-byte Markdown import limit.'],
+    });
+    expect(createMarkdownDownloadPlan(over).status).toBe('ready');
+  });
+
   it('returns deterministic simplification warnings before any download side effect', () => {
     const plan = createMarkdownDownloadPlan({
       title: 'Project',

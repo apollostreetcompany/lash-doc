@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
+import { readFile } from 'node:fs/promises';
 
 import { documentEditor, pasteText } from '../chips/document-chip-journey';
 
@@ -10,18 +11,23 @@ const edit = async (page: Page, title: string, body: string) => {
   await expect(page.getByTestId('autosave-indicator')).toHaveAttribute('data-status', 'saved');
 };
 
-test('creates, finds and reopens drafts using only static files', async ({ page }) => {
-  const unavailableRequests: string[] = [];
+const watchUnavailableRequests = (page: Page, unavailableRequests: string[]) => {
   page.on('request', (request) => {
     const url = new URL(request.url());
-    if (
-      url.origin === new URL(page.url()).origin &&
-      /^\/(?:api|auth|doc|join|public)\//.test(url.pathname)
-    ) {
-      unavailableRequests.push(url.pathname);
+    if (/^\/(?:api|auth|doc|join|public)(?:\/|$)/.test(url.pathname)) {
+      unavailableRequests.push(url.href);
     }
   });
   page.on('websocket', (socket) => unavailableRequests.push(socket.url()));
+};
+
+test('creates, finds, reopens and shares a draft using only static files', async ({
+  browser,
+  baseURL,
+  page,
+}) => {
+  const unavailableRequests: string[] = [];
+  watchUnavailableRequests(page, unavailableRequests);
 
   await page.goto('/?realtime=on');
   await edit(page, 'Original draft', 'First browser-local notes.');
@@ -54,12 +60,96 @@ test('creates, finds and reopens drafts using only static files', async ({ page 
   await page
     .getByRole('combobox', { name: 'Open document' })
     .selectOption({ label: 'Original draft' });
-  await expect(documentEditor(page)).toContainText('First browser-local notes.');
-  await page.getByRole('button', { name: 'Share document' }).click();
-  const share = page.getByRole('dialog', { name: /Share/ });
-  await expect(share).toContainText('Account saving and sharing aren’t available in this preview.');
+  const senderEditor = documentEditor(page);
+  const formattedText = 'Café notes for the next writer.';
+  await expect(senderEditor).toContainText('First browser-local notes.');
+  const senderUrl = page.url();
+  await senderEditor.press('End');
+  await page.keyboard.press('Enter');
+  await page.keyboard.press('ControlOrMeta+B');
+  await page.keyboard.insertText(formattedText);
+  await expect(senderEditor.locator('strong')).toHaveText(formattedText);
+  await expect(page.getByTestId('autosave-indicator')).toHaveAttribute('data-status', 'saved');
+
+  const shareButton = page.getByRole('button', { name: 'Share document', exact: true });
+  await shareButton.focus();
+  await page.keyboard.press('Enter');
+  const share = page.getByRole('dialog', { name: 'Share a copy', exact: true });
+  await expect(share).toBeVisible();
+  await expect(share).toContainText(/comments, suggestions, version history.*are not included/i);
   await expect(share.getByRole('link', { name: /Sign in/ })).toHaveCount(0);
-  await share.getByRole('button', { name: 'Done' }).click();
+  const pendingDownload = page.waitForEvent('download');
+  await share.getByRole('button', { name: 'Download Markdown', exact: true }).click();
+  const download = await pendingDownload;
+  expect(download.suggestedFilename()).toBe('original-draft.md');
+  const markdown = await readFile(await download.path());
+  expect(markdown).toEqual(
+    Buffer.from(
+      `<!-- lash-markdown:v1 -->\n\n# Original draft\n\nFirst browser-local notes.\n\n**${formattedText}**\n`,
+      'utf8',
+    ),
+  );
+  await expect(share).toBeHidden();
+  await expect(shareButton).toBeFocused();
+
+  const recipient = await browser.newContext({
+    baseURL,
+    viewport: { width: 390, height: 844 },
+    isMobile: true,
+    hasTouch: true,
+  });
+  try {
+    const recipientPage = await recipient.newPage();
+    watchUnavailableRequests(recipientPage, unavailableRequests);
+    await recipientPage.goto('/?realtime=on');
+    const recipientEditor = documentEditor(recipientPage);
+    await expect(recipientEditor).toHaveAttribute('contenteditable', 'true');
+    await expect(recipientEditor).not.toContainText(formattedText);
+    const fileChooser = recipientPage.waitForEvent('filechooser');
+    await recipientPage.getByRole('button', { name: 'Import Markdown', exact: true }).tap();
+    await (
+      await fileChooser
+    ).setFiles({
+      name: download.suggestedFilename(),
+      mimeType: 'text/markdown',
+      buffer: markdown,
+    });
+    const importDialog = recipientPage.getByRole('dialog', {
+      name: 'Import Markdown as new document',
+    });
+    await importDialog.getByRole('button', { name: 'Create new document', exact: true }).tap();
+    await expect(recipientPage).toHaveURL(/\/\?doc=doc-[a-z0-9-]+$/);
+    expect(recipientPage.url()).not.toBe(senderUrl);
+    const recipientTitle = recipientPage.getByRole('textbox', { name: 'Document title' });
+    await expect(recipientTitle).toHaveValue('Original draft');
+    await expect(recipientEditor).toContainText('First browser-local notes.');
+    await expect(recipientEditor.locator('strong')).toHaveText(formattedText);
+
+    const recipientEdit = 'Extra notes from the recipient.';
+    await recipientTitle.fill('Recipient draft');
+    await recipientEditor.press('End');
+    await recipientPage.keyboard.press('Enter');
+    await recipientPage.keyboard.insertText(recipientEdit);
+    await expect(recipientPage.getByTestId('autosave-indicator')).toHaveAttribute(
+      'data-status',
+      'saved',
+    );
+    await recipientPage.reload();
+    await expect(recipientTitle).toHaveValue('Recipient draft');
+    await expect(recipientEditor).toContainText(recipientEdit);
+    await expect(recipientEditor.getByText(formattedText, { exact: true })).toBeVisible();
+
+    await page.reload();
+    await expect(page).toHaveURL(senderUrl);
+    await expect(page.getByRole('textbox', { name: 'Document title' })).toHaveValue(
+      'Original draft',
+    );
+    await expect(senderEditor).toContainText('First browser-local notes.');
+    await expect(senderEditor.locator('strong')).toHaveText(formattedText);
+    await expect(senderEditor).not.toContainText(recipientEdit);
+  } finally {
+    await recipient.close();
+  }
 
   await page.getByRole('button', { name: 'Document settings' }).click();
   const settings = page.getByRole('dialog', { name: 'Document settings' });

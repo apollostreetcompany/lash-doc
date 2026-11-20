@@ -6,6 +6,10 @@ Open the [public Documents page](https://lash-9xx.pages.dev/documents/) to
 write, find drafts and read earlier versions in this browser. Named sharing
 runs in workspaces configured for accounts and collaboration.
 
+- To give someone a separate copy of a device draft, open **Share** and download
+  the Markdown file. They can choose **Import Markdown** in their own Lash
+  editor. Each writer keeps their own edits. Browsers that support
+  sharing this file can also open their system share sheet.
 - If a save to your account is interrupted, keep writing in the device draft.
   **Check account copy** verifies the existing save. When Lash confirms it,
   you can choose which copy to open. You can also make a separate device

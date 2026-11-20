@@ -25,6 +25,8 @@ import { unified } from 'unified';
 import { safeChipHref } from '../extensions/chip';
 import { isEmbeddedRasterImage } from '../extensions/image-source';
 import { visibleMentionLabel } from '../schema/mentions';
+import { sanitizeCellType } from '../table/types';
+import { resolveOptions } from '../table/utils';
 
 export interface MarkdownImportResult {
   doc: JSONContent;
@@ -59,6 +61,7 @@ export type MarkdownFileParseResult =
 export interface MarkdownFileSerializeOptions {
   title: string;
   documentId?: string;
+  mode?: 'share-copy';
 }
 
 export interface MarkdownFileSerializeResult {
@@ -1189,6 +1192,7 @@ export const parseMarkdownFileToDoc = (markdown: string): MarkdownFileParseResul
 };
 
 type FileExportPreflight = {
+  shareCopy: boolean;
   warnings: Set<string>;
   blockedReasons: Set<string>;
   visited: WeakSet<object>;
@@ -1552,24 +1556,47 @@ const sanitizeNodeForFile = (
       if (attrs.colwidth != null) {
         preflight.warnings.add('Table-cell column widths are omitted from Markdown.');
       }
-      const cellType = attrs.cellType;
-      const hasSpecialCell = typeof cellType === 'string' && cellType !== 'text';
-      if (hasSpecialCell || attrs.value || (Array.isArray(attrs.options) && attrs.options.length)) {
+      const cellType = sanitizeCellType(attrs.cellType);
+      const sharePicker = preflight.shareCopy && node.type === 'tableCell' && cellType !== 'text';
+      const legacyCellAttributes =
+        !preflight.shareCopy &&
+        ((typeof attrs.cellType === 'string' && attrs.cellType !== 'text') ||
+          attrs.value ||
+          (Array.isArray(attrs.options) && attrs.options.length));
+      if (sharePicker || legacyCellAttributes) {
         preflight.warnings.add('Status/select table-cell semantics are exported as plain text.');
       }
-      const content = sanitizeChildren('tableCell');
+      // Check the source children even when the picker hides them from readers.
+      let content = sanitizeChildren('tableCell');
       if (!content.length) {
         preflight.blockedReasons.add(`Document node “${node.type}” must contain a paragraph.`);
       }
-      if (content.length > 1) {
-        preflight.warnings.add(
-          'Table cells with multiple blocks were flattened into a single line because Markdown tables cannot represent multi-block cells.',
-        );
-      }
       const value = typeof attrs.value === 'string' ? attrs.value : '';
-      const contentText = visibleTextForSanitizedNodes(content);
-      if (value && !contentText.includes(value)) {
-        content.push({ type: 'paragraph', content: [{ type: 'text', text: value }] });
+      if (sharePicker) {
+        const providedOptions = Array.isArray(attrs.options)
+          ? attrs.options.filter((option): option is string => typeof option === 'string')
+          : [];
+        const options = resolveOptions(cellType, providedOptions);
+        const displayValue = options.includes(value) ? value : (options[0] ?? '');
+        content = [
+          {
+            type: 'paragraph',
+            content: displayValue ? [{ type: 'text', text: displayValue }] : [],
+          },
+        ];
+      } else {
+        if (content.length > 1) {
+          preflight.warnings.add(
+            'Table cells with multiple blocks were flattened into a single line because Markdown tables cannot represent multi-block cells.',
+          );
+        }
+        if (
+          !preflight.shareCopy &&
+          value &&
+          !visibleTextForSanitizedNodes(content).includes(value)
+        ) {
+          content.push({ type: 'paragraph', content: [{ type: 'text', text: value }] });
+        }
       }
       return {
         type: node.type,
@@ -1600,8 +1627,10 @@ const sanitizeNodeForFile = (
 
 const prepareDocumentForMarkdownFile = (
   doc: JSONContent,
+  shareCopy: boolean,
 ): { doc: JSONContent; warnings: string[]; blockedReasons: string[] } => {
   const preflight: FileExportPreflight = {
+    shareCopy,
     warnings: new Set(),
     blockedReasons: new Set(),
     visited: new WeakSet(),
@@ -1634,10 +1663,11 @@ export const serializeDocToMarkdownFile = (
   let filename = 'untitled-document.md';
   let warnings: string[] = [];
   try {
+    const shareCopy = options.mode === 'share-copy';
     const requestedTitle = options.title;
     normalizedTitle = normalizeMarkdownTitle(requestedTitle, normalizedTitle);
-    filename = filenameForTitle(normalizedTitle, options.documentId);
-    const prepared = prepareDocumentForMarkdownFile(doc);
+    filename = filenameForTitle(normalizedTitle, shareCopy ? undefined : options.documentId);
+    const prepared = prepareDocumentForMarkdownFile(doc, shareCopy);
     if (requestedTitle !== normalizedTitle) {
       prepared.warnings.unshift('Document title was normalized for safe Markdown export.');
     }
@@ -1679,12 +1709,15 @@ export const serializeDocToMarkdownFile = (
       ? serializedBody.markdown.replace(/\r\n?/gu, '\n').replace(/\n+$/u, '\n')
       : '';
     const markdown = `${LASH_MARKDOWN_V1_MARKER}\n\n${titleMarkdown}${bodyMarkdown ? `\n${bodyMarkdown}` : ''}`;
+    const exceedsImportLimit = shareCopy && utf8ByteLength(markdown) > MARKDOWN_FILE_MAX_BYTES;
     return {
-      markdown,
+      markdown: exceedsImportLimit ? '' : markdown,
       normalizedTitle,
       filename,
       warnings: [...warningSet],
-      blockedReasons: [],
+      blockedReasons: exceedsImportLimit
+        ? ['This copy exceeds the 2,000,000-byte Markdown import limit.']
+        : [],
     };
   } catch {
     return {

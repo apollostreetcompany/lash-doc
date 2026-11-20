@@ -58,6 +58,7 @@ export interface OwnerShareDialogProps {
   onClose(): void;
   onPrimary(): void;
   onCreateDeviceDraft?(): void;
+  onShareCopy?(): void;
   onManagePublicAccess?(): void;
   open: boolean;
   phase: OwnerShareDialogPhase;
@@ -127,6 +128,7 @@ export function OwnerShareDialog({
   onClose,
   onPrimary,
   onCreateDeviceDraft,
+  onShareCopy,
   onManagePublicAccess,
   open,
   phase,
@@ -178,7 +180,7 @@ export function OwnerShareDialog({
               ? 'Sign in to save this document to your account. Signing in does not move it by itself.'
               : phase === 'checking-account'
                 ? detail || 'Checking account…'
-                : 'This document is only on this device. Save it to your account before sharing.';
+                : 'This document is only on this device. Save it to your account to invite people.';
 
   return (
     <dialog
@@ -265,6 +267,11 @@ export function OwnerShareDialog({
         </div>
 
         <footer className="lash-owner-share-footer">
+          {onShareCopy && (phase === 'signed-out' || phase === 'ready') ? (
+            <button className="lash-owner-share-manage" onClick={onShareCopy} type="button">
+              Share a copy
+            </button>
+          ) : null}
           {phase === 'device-draft' ? (
             <a className="lash-owner-share-manage" href={signInHref}>
               Sign in to check
