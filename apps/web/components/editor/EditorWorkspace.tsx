@@ -4051,6 +4051,7 @@ function ResolvedDocumentWorkspace({
           loadVersion={
             !realtimeEnabled && !namedComment && canEditDocument ? loadHistoryVersion : undefined
           }
+          onReturnToDocument={mobileRailOpen ? closeActivityRail : undefined}
           loadSavedHistoryPreview={
             !realtimeEnabled &&
             historyAvailability === 'body-history-diverged' &&

@@ -58,6 +58,7 @@ export interface HistoryPanelProps {
   restoreNotice?: string;
   loadSavedHistoryPreview?: LoadSavedHistoryPreview;
   loadVersion?: LoadHistoryVersion;
+  onReturnToDocument?: () => void;
   loadDiff: LoadHistoryDiff;
   onSelect: (entryId: string) => void;
   onRestore: (entry: HistoryEntry) => void;
@@ -250,6 +251,7 @@ export function HistoryPanel({
   restoreNotice,
   loadSavedHistoryPreview,
   loadVersion,
+  onReturnToDocument,
   loadDiff,
   onSelect,
   onRestore,
@@ -516,6 +518,7 @@ export function HistoryPanel({
                 load={readSelectedVersion}
                 sequence={selectedEntry.seq}
                 sha={selectedEntry.resultSha}
+                onReturnToDocument={onReturnToDocument}
               />
             </div>
           ) : null}
