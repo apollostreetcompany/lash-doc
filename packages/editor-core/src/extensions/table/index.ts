@@ -104,23 +104,38 @@ type NodeViewInstance = {
   dom: HTMLTableCellElement;
   contentDOM: HTMLElement;
   ignoreMutation: (mutation: ViewMutationRecord) => boolean;
+  stopEvent: (event: Event) => boolean;
   update: (node: ProseMirrorNode) => boolean;
   destroy: () => void;
 };
 
-const updateCellValue = (view: EditorView, pos: number, value: string) => {
-  const { state, dispatch } = view;
-  const node = state.doc.nodeAt(pos);
-  if (!node) {
-    return;
-  }
-  const cellInfo = { pos, node } as const;
-  const tr = state.tr;
-  setCellAttributes(tr, cellInfo, { value });
-  dispatch(tr);
+const createTextCellNodeView = ({
+  node: initialNode,
+  HTMLAttributes,
+}: NodeViewRendererProps): Pick<NodeViewInstance, 'dom' | 'contentDOM' | 'update'> => {
+  const dom = document.createElement('td');
+  let node = initialNode;
+  const syncAttributes = (target: ProseMirrorNode) => {
+    applyBaseAttributes(dom, HTMLAttributes, target);
+    dom.dataset.cellType = 'text';
+    dom.dataset.cellValue = typeof target.attrs.value === 'string' ? target.attrs.value : '';
+    delete dom.dataset.cellOptions;
+  };
+  syncAttributes(node);
+  return {
+    dom,
+    contentDOM: dom,
+    update(updatedNode) {
+      if (updatedNode.type !== node.type || sanitizeCellType(updatedNode.attrs.cellType) !== 'text')
+        return false;
+      if (!node.sameMarkup(updatedNode)) syncAttributes(updatedNode);
+      node = updatedNode;
+      return true;
+    },
+  };
 };
 
-const createCellNodeView = (
+const createPickerCellNodeView = (
   props: NodeViewRendererProps,
   defaultStatusOptions: string[],
   defaultSelectOptions: string[],
@@ -139,23 +154,30 @@ const createCellNodeView = (
 
   const contentDOM = document.createElement('div');
   contentDOM.className = 'lash-table-cell-content';
+  contentDOM.dataset.hiddenContent = 'true';
+  contentDOM.style.display = 'none';
   wrapper.append(contentDOM);
 
   const control = document.createElement('button');
   control.type = 'button';
+  control.contentEditable = 'false';
   control.className = 'lash-table-cell-control';
   control.dataset.role = 'table-cell-control';
   control.dataset.controlId = `control-${cellId}`;
   control.setAttribute('aria-haspopup', 'listbox');
   control.setAttribute('aria-expanded', 'false');
-  control.tabIndex = -1;
+  control.tabIndex = 0;
   wrapper.append(control);
 
   const menu = document.createElement('ul');
   menu.className = 'lash-table-cell-menu';
+  menu.contentEditable = 'false';
   menu.hidden = true;
+  menu.tabIndex = -1;
   menu.setAttribute('role', 'listbox');
+  menu.setAttribute('aria-label', 'Cell options');
   menu.id = `${cellId}-picker`;
+  if (typeof menu.showPopover === 'function') menu.setAttribute('popover', 'manual');
   wrapper.append(menu);
 
   control.setAttribute('aria-controls', menu.id);
@@ -176,6 +198,8 @@ const createCellNodeView = (
       item.className = 'lash-table-cell-menu-item';
       const optionButton = document.createElement('button');
       optionButton.type = 'button';
+      optionButton.tabIndex = -1;
+      optionButton.id = `${menu.id}-option-${index}`;
       optionButton.className = 'lash-table-cell-menu-option';
       optionButton.dataset.optionIndex = String(index);
       optionButton.dataset.optionValue = option;
@@ -197,20 +221,15 @@ const createCellNodeView = (
     wrapper.dataset.cellType = cellType;
     wrapper.classList.toggle('lash-table-cell--status', cellType === 'status');
     wrapper.classList.toggle('lash-table-cell--select', cellType === 'select');
-    wrapper.classList.toggle('lash-table-cell--text', cellType === 'text');
     const providedOptions = Array.isArray(attrs.options)
       ? attrs.options.filter((item) => typeof item === 'string')
       : [];
     const fallbackOptions =
-      cellType === 'status'
-        ? providedOptions.length
-          ? providedOptions
-          : defaultStatusOptions
-        : cellType === 'select'
-          ? providedOptions.length
-            ? providedOptions
-            : defaultSelectOptions
-          : [];
+      providedOptions.length > 0
+        ? providedOptions
+        : cellType === 'status'
+          ? defaultStatusOptions
+          : defaultSelectOptions;
     const optionsChanged =
       currentOptions.length !== fallbackOptions.length ||
       currentOptions.some((option, index) => option !== fallbackOptions[index]);
@@ -227,29 +246,15 @@ const createCellNodeView = (
     }
 
     const rawValue = typeof attrs.value === 'string' ? attrs.value : '';
-    const displayValue =
-      cellType === 'text'
-        ? rawValue
-        : currentOptions.includes(rawValue)
-          ? rawValue
-          : (currentOptions[0] ?? '');
+    const displayValue = currentOptions.includes(rawValue) ? rawValue : (currentOptions[0] ?? '');
     dom.dataset.cellValue = displayValue;
     wrapper.dataset.cellValue = displayValue;
     control.textContent = displayValue;
-    control.hidden = cellType === 'text';
-    control.tabIndex = cellType === 'text' ? -1 : 0;
-    if (cellType !== 'text') {
-      contentDOM.setAttribute('data-hidden-content', 'true');
-      contentDOM.style.display = 'none';
-    } else {
-      contentDOM.removeAttribute('data-hidden-content');
-      contentDOM.style.display = '';
-    }
   };
 
   const handleToggleRequest = () => {
     const { view } = props;
-    if (!view) {
+    if (!view.editable) {
       return;
     }
     const pos = typeof props.getPos === 'function' ? props.getPos() : null;
@@ -265,6 +270,9 @@ const createCellNodeView = (
         optionCount: currentOptions.length,
       } satisfies InteractionMeta),
     );
+    if (TABLE_INTERACTION_PLUGIN_KEY.getState(view.state)?.openCellPos === pos) {
+      menu.focus({ preventScroll: true });
+    }
   };
 
   function handleOptionClick(event: MouseEvent) {
@@ -272,20 +280,25 @@ const createCellNodeView = (
     const button = event.currentTarget as HTMLButtonElement | null;
     const optionValue = button?.dataset.optionValue ?? '';
     const { view } = props;
-    if (!view) {
-      return;
-    }
     const pos = typeof props.getPos === 'function' ? props.getPos() : null;
-    if (typeof pos !== 'number') {
+    if (
+      !view.editable ||
+      typeof pos !== 'number' ||
+      TABLE_INTERACTION_PLUGIN_KEY.getState(view.state)?.openCellPos !== pos
+    )
       return;
-    }
-    updateCellValue(view, pos, optionValue);
-    view.dispatch(
-      view.state.tr.setMeta(TABLE_INTERACTION_PLUGIN_KEY, {
-        type: 'close',
-      } satisfies InteractionMeta),
-    );
+    const target = pickerCellAt(view.state.doc, pos);
+    if (target?.options.includes(optionValue))
+      commitCellValue(view, { pos, node: target.node }, optionValue);
   }
+
+  const onMenuKeydown = (event: KeyboardEvent) => {
+    const { view } = props;
+    const pos = props.getPos();
+    if (typeof pos !== 'number') return;
+    const target = pickerCellAt(view.state.doc, pos);
+    if (target) handleCellKeydown(view, event, { pos, node: target.node });
+  };
 
   const onControlClick = (event: MouseEvent) => {
     event.preventDefault();
@@ -293,6 +306,7 @@ const createCellNodeView = (
   };
 
   control.addEventListener('click', onControlClick);
+  menu.addEventListener('keydown', onMenuKeydown);
 
   syncFromNode(node);
 
@@ -301,6 +315,12 @@ const createCellNodeView = (
   return {
     dom,
     contentDOM,
+    stopEvent(event) {
+      return (
+        event.target instanceof Node &&
+        (control.contains(event.target) || menu.contains(event.target))
+      );
+    },
     ignoreMutation(mutation) {
       if (mutation.type === 'selection') return false;
       // The picker owns its controls and the attributes on the content wrapper.
@@ -312,10 +332,14 @@ const createCellNodeView = (
     },
     destroy() {
       control.removeEventListener('click', onControlClick);
+      menu.removeEventListener('keydown', onMenuKeydown);
       cleanupOptionListeners();
     },
     update(updatedNode: ProseMirrorNode) {
-      if (updatedNode.type.name !== node.type.name) {
+      if (
+        updatedNode.type !== node.type ||
+        sanitizeCellType(updatedNode.attrs.cellType) === 'text'
+      ) {
         return false;
       }
       const attrsChanged = !node.sameMarkup(updatedNode);
@@ -345,8 +369,28 @@ const setPickerOpen = (dom: HTMLElement, open: boolean) => {
     control.dataset.active = open ? 'true' : 'false';
   }
   if (menu) {
-    menu.hidden = !open;
+    if (open) {
+      menu.hidden = false;
+      if (menu.isConnected && typeof menu.showPopover === 'function') menu.showPopover();
+    } else {
+      const restoreFocus = menu.contains(menu.ownerDocument.activeElement);
+      if (menu.isConnected && typeof menu.hidePopover === 'function') menu.hidePopover();
+      menu.hidden = true;
+      if (restoreFocus && control?.isConnected && !control.hidden) {
+        control.focus({ preventScroll: true });
+      }
+    }
   }
+};
+
+const revealPickerOption = (menu: HTMLElement, selected: HTMLElement) => {
+  if (menu.scrollHeight <= menu.clientHeight) return;
+  // Scroll the listbox without moving the document or the table.
+  const option = selected.getBoundingClientRect();
+  const top = menu.getBoundingClientRect().top + menu.clientTop;
+  const bottom = top + menu.clientHeight;
+  if (option.top < top) menu.scrollTop -= top - option.top;
+  else if (option.bottom > bottom) menu.scrollTop += option.bottom - bottom;
 };
 
 const setPickerActiveIndex = (dom: HTMLElement, index: number) => {
@@ -359,7 +403,107 @@ const setPickerActiveIndex = (dom: HTMLElement, index: number) => {
   });
   if (menu) {
     menu.dataset.activeIndex = String(index);
+    const selected = options[index];
+    if (selected) {
+      menu.setAttribute('aria-activedescendant', selected.id);
+      revealPickerOption(menu, selected);
+    }
   }
+};
+
+const trackPickerPosition = (view: EditorView, dom: HTMLElement) => {
+  const { control, menu } = getPickerElements(dom);
+  const owner = dom.ownerDocument;
+  const window = owner.defaultView;
+  if (!window || !control || !menu) return null;
+  const viewport = window.visualViewport;
+  const table = dom.closest('table');
+  let frame: number | null = null;
+
+  const close = () => {
+    view.dispatch(
+      view.state.tr.setMeta(TABLE_INTERACTION_PLUGIN_KEY, {
+        type: 'close',
+      } satisfies InteractionMeta),
+    );
+  };
+  const position = () => {
+    frame = null;
+    if (!control.isConnected || !view.editable) {
+      close();
+      return;
+    }
+    const anchor = control.getBoundingClientRect();
+    const x = viewport?.offsetLeft ?? 0;
+    const y = viewport?.offsetTop ?? 0;
+    const right = x + (viewport?.width ?? window.innerWidth);
+    const bottom = y + (viewport?.height ?? window.innerHeight);
+    const clip = table?.getBoundingClientRect();
+    // Zero-sized boxes occur in non-rendering mounts, such as editor unit tests.
+    if (!anchor.width || !anchor.height) return;
+    if (
+      anchor.right <= Math.max(x, clip?.left ?? x) ||
+      anchor.left >= Math.min(right, clip?.right ?? right) ||
+      anchor.bottom <= Math.max(y, clip?.top ?? y) ||
+      anchor.top >= Math.min(bottom, clip?.bottom ?? bottom)
+    ) {
+      close();
+      return;
+    }
+
+    const margin = 8;
+    const gap = 6;
+    const below = bottom - margin - anchor.bottom - gap;
+    const above = anchor.top - gap - y - margin;
+    const maxWidth = `${Math.max(0, Math.floor(right - x - margin * 2))}px`;
+    const widthChanged = menu.style.maxWidth !== maxWidth;
+    if (widthChanged) menu.style.maxWidth = maxWidth;
+    const height = menu.scrollHeight + menu.offsetHeight - menu.clientHeight;
+    const placeBelow = below >= height || below >= above;
+    const space = Math.max(0, Math.floor(placeBelow ? below : above));
+    const maxHeight = `${space}px`;
+    const heightChanged = menu.style.maxHeight !== maxHeight;
+    if (heightChanged) menu.style.maxHeight = maxHeight;
+    const originY = placeBelow ? anchor.bottom + gap : anchor.top - gap - Math.min(height, space);
+    const top = `${Math.round(originY)}px`;
+    const originX = Math.max(x + margin, Math.min(anchor.left, right - menu.offsetWidth - margin));
+    const left = `${Math.round(originX)}px`;
+    if (menu.style.top !== top) menu.style.top = top;
+    if (menu.style.left !== left) menu.style.left = left;
+    if (widthChanged || heightChanged) {
+      const selected = menu.querySelector<HTMLButtonElement>('[aria-selected="true"]');
+      if (selected) revealPickerOption(menu, selected);
+    }
+  };
+  const schedule = () => {
+    if (frame === null) frame = window.requestAnimationFrame(position);
+  };
+  const dismissOutside = (event: PointerEvent) => {
+    if (
+      event.target instanceof Node &&
+      (control.contains(event.target) || menu.contains(event.target))
+    )
+      return;
+    close();
+  };
+
+  window.addEventListener('scroll', schedule, true);
+  window.addEventListener('resize', schedule);
+  viewport?.addEventListener('scroll', schedule);
+  viewport?.addEventListener('resize', schedule);
+  owner.addEventListener('pointerdown', dismissOutside, true);
+  schedule();
+  return {
+    schedule,
+    destroy() {
+      if (frame !== null) window.cancelAnimationFrame(frame);
+      window.removeEventListener('scroll', schedule, true);
+      window.removeEventListener('resize', schedule);
+      viewport?.removeEventListener('scroll', schedule);
+      viewport?.removeEventListener('resize', schedule);
+      owner.removeEventListener('pointerdown', dismissOutside, true);
+    },
+  };
 };
 
 const commitCellValue = (
@@ -369,18 +513,23 @@ const commitCellValue = (
 ) => {
   const tr = view.state.tr;
   setCellAttributes(tr, cell, { value });
-  view.dispatch(tr);
+  view.dispatch(
+    tr.setMeta(TABLE_INTERACTION_PLUGIN_KEY, { type: 'close' } satisfies InteractionMeta),
+  );
 };
 
-const handleCellKeydown = (view: EditorView, event: KeyboardEvent): boolean => {
-  if (event.defaultPrevented) {
+const handleCellKeydown = (
+  view: EditorView,
+  event: KeyboardEvent,
+  target?: { pos: number; node: ProseMirrorNode },
+): boolean => {
+  if (!view.editable || event.defaultPrevented || event.isComposing) {
     return false;
   }
-  const cells = collectSelectedCells(view.state as EditorState);
-  if (!cells.length) {
+  const cell = target ?? collectSelectedCells(view.state as EditorState)[0];
+  if (!cell) {
     return false;
   }
-  const cell = cells[0];
   const attrs = mergeCellAttrs(cell.node, cell.node.attrs) as LashTableCellAttrs &
     Record<string, unknown>;
   const cellType = sanitizeCellType(attrs.cellType);
@@ -443,22 +592,12 @@ const handleCellKeydown = (view: EditorView, event: KeyboardEvent): boolean => {
     event.preventDefault();
     const value = options[currentIndex] ?? options[0] ?? '';
     commitCellValue(view, cell, value);
-    view.dispatch(
-      view.state.tr.setMeta(TABLE_INTERACTION_PLUGIN_KEY, {
-        type: 'close',
-      } satisfies InteractionMeta),
-    );
     return true;
   }
 
   if (event.key === 'Tab') {
     const value = options[currentIndex] ?? options[0] ?? '';
     commitCellValue(view, cell, value);
-    view.dispatch(
-      view.state.tr.setMeta(TABLE_INTERACTION_PLUGIN_KEY, {
-        type: 'close',
-      } satisfies InteractionMeta),
-    );
     return false;
   }
 
@@ -608,35 +747,67 @@ export const createLashTableInteractionPlugin = () =>
       },
     },
     view(view) {
-      let rendered: { dom: HTMLElement; activeIndex: number; activeOption: Element | null } | null =
-        null;
-      const sync = (updatedView: EditorView) => {
+      let rendered: {
+        dom: HTMLElement;
+        activeIndex: number;
+        activeOption: Element | null;
+        placement: ReturnType<typeof trackPickerPosition>;
+      } | null = null;
+      const closeRendered = () => {
+        if (!rendered) return;
+        rendered.placement?.destroy();
+        setPickerOpen(rendered.dom, false);
+        rendered = null;
+      };
+      const sync = (updatedView: EditorView, previousState?: EditorState) => {
         const state = TABLE_INTERACTION_PLUGIN_KEY.getState(updatedView.state);
-        const dom = state?.kind === 'open' ? updatedView.nodeDOM(state.openCellPos) : null;
-        if (rendered && rendered.dom !== dom) setPickerOpen(rendered.dom, false);
-        if (state?.kind !== 'open' || !(dom instanceof HTMLElement)) {
-          rendered = null;
+        if (!updatedView.editable && state?.kind === 'open') {
+          if (rendered) {
+            closeRendered();
+            // A plugin view cannot dispatch inside its own update. Clear this
+            // picker after the current update without closing a newer one.
+            queueMicrotask(() => {
+              if (
+                !updatedView.isDestroyed &&
+                TABLE_INTERACTION_PLUGIN_KEY.getState(updatedView.state) === state
+              ) {
+                updatedView.dispatch(
+                  updatedView.state.tr.setMeta(TABLE_INTERACTION_PLUGIN_KEY, {
+                    type: 'close',
+                  } satisfies InteractionMeta),
+                );
+              }
+            });
+          }
           return;
         }
+        const dom = state?.kind === 'open' ? updatedView.nodeDOM(state.openCellPos) : null;
+        if (rendered?.dom !== dom) closeRendered();
+        if (state?.kind !== 'open' || !(dom instanceof HTMLElement)) return;
 
-        if (rendered?.dom !== dom) setPickerOpen(dom, true);
+        if (!rendered) {
+          setPickerOpen(dom, true);
+          rendered = {
+            dom,
+            activeIndex: -1,
+            activeOption: null,
+            placement: trackPickerPosition(updatedView, dom),
+          };
+        }
         const activeOption = dom.querySelector(
           `.lash-table-cell-menu-option[data-option-index="${state.activeIndex}"]`,
         );
-        if (
-          rendered?.dom !== dom ||
-          rendered.activeIndex !== state.activeIndex ||
-          rendered.activeOption !== activeOption
-        )
+        if (rendered.activeIndex !== state.activeIndex || rendered.activeOption !== activeOption) {
           setPickerActiveIndex(dom, state.activeIndex);
-        rendered = { dom, activeIndex: state.activeIndex, activeOption };
+          rendered.activeIndex = state.activeIndex;
+          rendered.activeOption = activeOption;
+        }
+        if (previousState?.doc !== updatedView.state.doc) rendered.placement?.schedule();
       };
       sync(view);
       return {
         update: sync,
-        destroy() {
-          if (rendered) setPickerOpen(rendered.dom, false);
-        },
+        destroy: closeRendered,
       };
     },
   });
@@ -684,7 +855,9 @@ const LashTableCell = BaseTableCellExtension.extend<{ table: LashTableOptions }>
     const defaultStatusOptions = tableOptions.defaultStatusOptions ?? cloneDefaultStatusOptions();
     const defaultSelectOptions = tableOptions.defaultSelectOptions ?? cloneDefaultSelectOptions();
     return (props) =>
-      createCellNodeView(props, [...defaultStatusOptions], [...defaultSelectOptions]);
+      sanitizeCellType(props.node.attrs.cellType) === 'text'
+        ? createTextCellNodeView(props)
+        : createPickerCellNodeView(props, [...defaultStatusOptions], [...defaultSelectOptions]);
   },
 });
 

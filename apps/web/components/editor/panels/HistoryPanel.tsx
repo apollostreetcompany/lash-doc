@@ -6,7 +6,7 @@
 import { entryHasHistoryBody } from '@lash/history';
 import type { DiffJSON, DiffSpan, HistoryEntry } from '@lash/types';
 import type { Editor } from '@tiptap/core';
-import { useEffect, useId, useState } from 'react';
+import { useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 
 import { HistoryVersionReader, type LoadHistoryVersion } from './HistoryVersionReader';
 
@@ -262,6 +262,8 @@ export function HistoryPanel({
   onRejectSuggestion,
 }: HistoryPanelProps) {
   const [loaded, setLoaded] = useState<HistoryComparison | null>(null);
+  const versionListRef = useRef<HTMLOListElement>(null);
+  const selectedVersionRef = useRef<HTMLButtonElement>(null);
   const historyVerified =
     availability === 'ready' ||
     availability === 'empty-baseline' ||
@@ -273,10 +275,27 @@ export function HistoryPanel({
           return matchesTimeFilter(entry, timeFilter);
         })
       : [];
-  const selectedEntry =
-    visibleEntries.find((entry) => entry.id === selectedEntryId) ?? visibleEntries.at(-1) ?? null;
+  const requestedIndex = visibleEntries.findIndex((entry) => entry.id === selectedEntryId);
+  const selectedVersionIndex = requestedIndex < 0 ? visibleEntries.length - 1 : requestedIndex;
+  const selectedEntry = visibleEntries[selectedVersionIndex] ?? null;
+  const selectedVersionId = selectedEntry?.id;
   const fromSha = selectedEntry?.parentSha;
   const toSha = selectedEntry?.resultSha;
+
+  useLayoutEffect(() => {
+    const list = versionListRef.current;
+    const selected = selectedVersionRef.current;
+    if (selectedVersionIndex < 0 || !list || !selected) return;
+    const listBounds = list.getBoundingClientRect();
+    const selectedBounds = selected.getBoundingClientRect();
+    // Scroll the version list itself to avoid moving the rail or writing surface.
+    if (selectedBounds.top < listBounds.top) {
+      list.scrollTop -= Math.ceil(listBounds.top - selectedBounds.top);
+    } else if (selectedBounds.bottom > listBounds.bottom) {
+      list.scrollTop += Math.ceil(selectedBounds.bottom - listBounds.bottom);
+    }
+  }, [selectedVersionId, selectedVersionIndex]);
+
   useEffect(() => {
     if (!fromSha || !toSha) return;
     let active = true;
@@ -326,7 +345,9 @@ export function HistoryPanel({
         </p>
       ) : null}
       {availability === 'body-saving-unavailable' ? (
-        <p className="history-empty">Version history is paused while local saving is unavailable.</p>
+        <p className="history-empty">
+          Version history is paused while local saving is unavailable.
+        </p>
       ) : null}
       {availability === 'body-history-diverged' ? (
         <p className="history-empty" role="status">
@@ -446,30 +467,18 @@ export function HistoryPanel({
         </span>
       ) : null}
 
-      {historyVerified && suggestionResolutions.length ? (
-        <ol className="suggestion-resolution-list" data-testid="suggestion-resolution-list">
-          {suggestionResolutions.map((record) => (
-            <li
-              key={record.id}
-              className="suggestion-resolution-row"
-              data-testid="suggestion-resolution-row"
-              data-entry-id={record.entryId}
-              data-action={record.action}
-            >
-              <span>{record.action} suggestion</span>
-              <span>{record.actorId}</span>
-            </li>
-          ))}
-        </ol>
-      ) : null}
-
       {historyVerified && visibleEntries.length ? (
-        <ol className="history-version-list" data-testid="history-version-list">
+        <ol
+          ref={versionListRef}
+          className="history-version-list"
+          data-testid="history-version-list"
+        >
           {visibleEntries.map((entry) => {
             const selected = selectedEntry?.id === entry.id;
             return (
               <li key={entry.id}>
                 <button
+                  ref={selected ? selectedVersionRef : undefined}
                   type="button"
                   className="history-version-button"
                   data-testid="history-version"
@@ -580,6 +589,23 @@ export function HistoryPanel({
             <p role="alert">{legacySuggestionError}</p>
           ) : null}
         </div>
+      ) : null}
+
+      {historyVerified && suggestionResolutions.length ? (
+        <ol className="suggestion-resolution-list" data-testid="suggestion-resolution-list">
+          {suggestionResolutions.map((record) => (
+            <li
+              key={record.id}
+              className="suggestion-resolution-row"
+              data-testid="suggestion-resolution-row"
+              data-entry-id={record.entryId}
+              data-action={record.action}
+            >
+              <span>{record.action} suggestion</span>
+              <span>{record.actorId}</span>
+            </li>
+          ))}
+        </ol>
       ) : null}
     </section>
   );

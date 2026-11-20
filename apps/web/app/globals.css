@@ -2225,8 +2225,20 @@ main[data-testid='lash-home'] > section {
   color: var(--color-text-secondary);
 }
 
-.lash-editor-content tbody tr:hover > td {
+.lash-editor-content tbody tr:hover > td:not(.selectedCell) {
   background: var(--color-rail-bg);
+}
+
+.lash-editor-content :is(td, th).selectedCell {
+  background: var(--color-info-bg);
+  outline: 2px solid var(--color-info);
+  outline-offset: -2px;
+}
+
+@media (forced-colors: active) {
+  .lash-editor-content :is(td, th).selectedCell {
+    outline-color: Highlight;
+  }
 }
 
 .lash-table-cell-wrapper {
@@ -2240,8 +2252,8 @@ main[data-testid='lash-home'] > section {
 }
 
 .lash-editor-content td[data-picker-open='true'] > .lash-table-cell-wrapper {
-  /* Raise the wrapper's stacking context above the cells in later rows. */
-  z-index: 1;
+  /* Let a fixed menu reach the viewport even without native popover support. */
+  contain: style;
 }
 
 .lash-table-cell-content[data-hidden-content='true'] {
@@ -2279,9 +2291,8 @@ main[data-testid='lash-home'] > section {
 }
 
 .lash-table-cell-menu {
-  position: absolute;
-  top: calc(100% + 6px);
-  left: 0;
+  position: fixed;
+  inset: auto;
   background: var(--color-paper);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-md);
@@ -2290,7 +2301,10 @@ main[data-testid='lash-home'] > section {
   display: flex;
   flex-direction: column;
   gap: 2px;
-  min-width: 10rem;
+  width: max-content;
+  max-width: calc(100vw - 16px);
+  min-width: min(10rem, calc(100vw - 16px));
+  overflow: auto;
   z-index: 20;
   box-shadow: var(--shadow-popover);
   margin: 0;
@@ -2313,6 +2327,7 @@ main[data-testid='lash-home'] > section {
   border: 0;
   color: var(--color-text-primary);
   text-align: left;
+  overflow-wrap: anywhere;
   padding: var(--space-2) var(--space-3);
   border-radius: var(--radius-sm);
   cursor: pointer;
@@ -2912,6 +2927,15 @@ li[data-type='taskItem'] > div p {
 }
 
 /* History */
+@media (min-width: 768px) {
+  .lash-rail:has(#rail-section-history[data-active='true'] .lash-history-panel) {
+    position: sticky;
+    top: var(--topbar-h);
+    align-self: start;
+    height: calc(100dvh - var(--topbar-h));
+  }
+}
+
 .history-filter-controls {
   display: flex;
   flex-wrap: wrap;
@@ -3051,10 +3075,15 @@ li[data-type='taskItem'] > div p {
 .history-version-list {
   list-style: none;
   margin: 0;
-  padding: 0;
+  padding: var(--space-1);
   display: flex;
   flex-direction: column;
   gap: 2px;
+  max-height: min(11rem, 23dvh);
+  overflow-y: auto;
+  overscroll-behavior-y: contain;
+  scroll-padding-block: var(--space-1);
+  scrollbar-gutter: stable;
 }
 
 .history-version-button {
@@ -3073,6 +3102,12 @@ li[data-type='taskItem'] > div p {
   font-size: var(--text-ui);
   text-align: left;
   transition: all var(--transition-fast);
+}
+
+@media (pointer: coarse) {
+  .history-version-button {
+    min-height: 44px;
+  }
 }
 
 .history-version-button:hover {

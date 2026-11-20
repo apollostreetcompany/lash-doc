@@ -2,6 +2,10 @@
 
 ## Writing and review
 
+Open the [public Documents page](https://lash-9xx.pages.dev/documents/) to
+write, find drafts and read earlier versions in this browser. Named sharing
+runs in workspaces configured for accounts and collaboration.
+
 - If a save to your account is interrupted, keep writing in the device draft.
   **Check account copy** verifies the existing save. When Lash confirms it,
   you can choose which copy to open. You can also make a separate device
@@ -13,9 +17,13 @@
 - The page, title and toolbar are readable as soon as the editor renders. On
   phones, closing History returns focus to its button. Widening the window
   releases the drawer so you can keep writing.
+- Drag across table cells or extend a range with the keyboard to see which
+  cells are selected. Status and select menus stay reachable at the edge of a
+  wide table.
 - Open **History** beside the document status. A new local draft keeps its
   first saved version when you immediately leave and reopen it. An older
   version stays selected while you review it, even as new versions arrive.
+  Long version lists scroll inside the panel so the selected change stays in view.
 - Search covers every title in a large library, including older titles stored
   only in the document list. **Show more documents** lets you browse further
   by keyboard.
