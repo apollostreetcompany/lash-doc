@@ -154,7 +154,7 @@ test.describe('safe Markdown document transfer', () => {
     await download.delete();
   });
 
-  test('keeps the named dialog flow keyboard-accessible and unclipped at 390x844', async ({
+  test('keeps a failed save and its import warning keyboard-accessible at 390x844', async ({
     page,
   }) => {
     await page.setViewportSize({ width: 390, height: 844 });
@@ -176,6 +176,18 @@ test.describe('safe Markdown document transfer', () => {
     await expect(downloadDialog).toHaveCount(0);
     await expect(downloadButton).toBeFocused();
 
+    await page.evaluate(() => {
+      const write = Storage.prototype.setItem;
+      Storage.prototype.setItem = function (key, value) {
+        if (this === localStorage && key === 'lash:body:markdown-mobile-source') {
+          throw new DOMException('Test device storage is full', 'QuotaExceededError');
+        }
+        write.call(this, key, value);
+      };
+    });
+    const editor = page.getByRole('textbox', { name: 'Document editor' });
+    await editor.fill('Keep these unsaved words.');
+    await expect(page.getByTestId('autosave-indicator')).toHaveAttribute('data-status', 'error');
     const before = await registryRaw(page);
     await chooseMarkdownFile(page, fixturePath);
     const importDialog = page.getByRole('dialog', { name: 'Import Markdown as new document' });
@@ -188,6 +200,7 @@ test.describe('safe Markdown document transfer', () => {
     await expect(importDialog).toHaveCount(0);
     await expect(importButton).toBeFocused();
     expect(await registryRaw(page)).toBe(before);
+    await expect(editor).toContainText('Keep these unsaved words.');
 
     const noOverflow = await page.evaluate(
       () => document.documentElement.scrollWidth <= document.documentElement.clientWidth,
