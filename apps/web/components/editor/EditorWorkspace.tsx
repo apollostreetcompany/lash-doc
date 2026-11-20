@@ -1304,7 +1304,7 @@ function ResolvedDocumentWorkspace({
     dispatchChrome({ type: 'close-rail', restoreFocus: true });
   }, [cancelPendingMobileRailAction]);
 
-  const handleChatDocumentNavigation = useCallback(
+  const handleDocumentNavigation = useCallback(
     (navigateToTarget: () => void) => {
       if (mobileRailOpen && getWorkspaceViewport() === 'mobile') {
         // The document target owns focus once the modal and scroll lock are gone.
@@ -3937,7 +3937,7 @@ function ResolvedDocumentWorkspace({
               realtimeStore={chatRealtimeStore}
               actorId={realtimeEnabled ? realtimeSnapshot.actorId : undefined}
               runDocumentMutation={runDocumentMetadataMutation}
-              requestDocumentNavigation={handleChatDocumentNavigation}
+              requestDocumentNavigation={handleDocumentNavigation}
               suggestionComposer={
                 <>
                   {suggestionAuthoring.kind === 'notice' ? (
@@ -4090,6 +4090,7 @@ function ResolvedDocumentWorkspace({
                 railJumpRequest?.id === 'ai' ? railJumpRequest.requestId : undefined
               }
               showTestControls={syntheticAiFixtureEnabled}
+              requestDocumentNavigation={handleDocumentNavigation}
               onApplyPatch={handleApplyAiPatch}
             />
           )}

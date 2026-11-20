@@ -71,6 +71,9 @@ restore an earlier version, and revoke the invitation.
 - **Revise a selection.** On browsers with a ready on-device language model,
   writers can review the proposed wording in context, edit it, and apply it
   to the selected passage. The interface reports when the model is unavailable.
+  If the model returns an unusable reply, Lash explains what happened and keeps
+  the draft unchanged. **Return to selected passage** reselects the original
+  words if the draft is still current.
 - **Run locally.** `make dev-collab` starts a two-account workspace with a local
   inbox. See the [setup and walkthrough](README.md).
 
