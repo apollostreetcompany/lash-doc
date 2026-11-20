@@ -189,12 +189,18 @@ describe('recent shared documents in a browser', () => {
 
   it('finds a temporarily missing share again until the visible library is signed out', async () => {
     rememberRecentSharedDocument(actor(1), seal(1));
+    let restoreShare!: (result: Response) => void;
     const fetcher = vi
       .fn()
       .mockResolvedValueOnce(response([]))
       .mockResolvedValueOnce(response())
       .mockResolvedValueOnce(response([]))
-      .mockResolvedValueOnce(response())
+      .mockImplementationOnce(
+        () =>
+          new Promise<Response>((resolve) => {
+            restoreShare = resolve;
+          }),
+      )
       .mockResolvedValueOnce(new Response(null, { status: 401 }));
     const publish = start(fetcher);
     await vi.advanceTimersByTimeAsync(30_000);
@@ -207,6 +213,10 @@ describe('recent shared documents in a browser', () => {
     await vi.advanceTimersByTimeAsync(15_000);
     expect(publish).toHaveBeenLastCalledWith({ kind: 'empty' }, false);
     await vi.advanceTimersByTimeAsync(15_000);
+    expect(fetcher).toHaveBeenCalledTimes(4);
+    expect(publish).toHaveBeenLastCalledWith({ kind: 'empty' }, false);
+    restoreShare(response());
+    await drain();
     expect(publish).toHaveBeenLastCalledWith({ kind: 'ready', documents: [shared] }, false);
 
     await vi.advanceTimersByTimeAsync(30_000);

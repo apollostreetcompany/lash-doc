@@ -245,7 +245,7 @@ export function watchRecentSharedDocuments(
       return;
     }
     const started = performance.now();
-    if (mode !== 'scheduled' || started >= expiresAt) {
+    if (mode !== 'scheduled' || (expiresAt > 0 && started >= expiresAt)) {
       clearExpiry();
       onChange({ kind: 'checking' }, false);
     }
