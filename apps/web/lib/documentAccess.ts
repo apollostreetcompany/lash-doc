@@ -12,6 +12,11 @@ import type {
   BrowserPromotionResult,
 } from './documentPromotion/browserClient';
 import {
+  createBrowserPendingPromotionStore,
+  type PendingPromotionRead,
+  type PendingPromotionStore,
+} from './documentPromotion/pendingPromotion';
+import {
   clearLegacyInviteCredential,
   clearRoomInviteCredentials,
   readInviteFragmentCredential,
@@ -65,6 +70,8 @@ export type DocumentAccessPhase =
   | 'unavailable'
   | 'destroyed';
 
+export const DEVICE_DRAFT_QUERY_PARAM = 'deviceDraft';
+
 export type DocumentAccessReason =
   | 'invalid'
   | 'expired'
@@ -106,6 +113,7 @@ export type DocumentAccessSnapshot = {
   attempt: number;
   recoveryExportAvailable: boolean;
   recoveryUpdateCount: number;
+  promotionRecovery?: 'device-draft' | 'account-copy-available' | 'account-copy-open';
 };
 
 export type LocalDocumentAccessResolution = {
@@ -177,6 +185,8 @@ export type DocumentAccessDependencies = {
   getActorId(): string;
   installRecoveryNavigationWarning(): () => void;
   navigateHome(): void;
+  pendingPromotionStore?: PendingPromotionStore | null;
+  preferDeviceDraft?: boolean;
   readFragmentCredential(): InviteFragmentCredential;
   readRuntime(): RealtimeRuntimeSelection;
   recoveryJournal: RealtimeRecoveryJournal | null;
@@ -191,6 +201,7 @@ export type DocumentAccessDependencies = {
 export type DocumentAccessController = {
   allowsInviteIssuance(ticket: InviteIssuanceTicket | null): boolean;
   captureInviteIssuance(): InviteIssuanceTicket | null;
+  checkAccountCopy(): Promise<void>;
   clearCredentialAndNavigate(): DestroyResult;
   discardBlockedRealtimeRecovery(confirmationId: string): boolean;
   discardRealtimeRecovery(): boolean;
@@ -199,6 +210,7 @@ export type DocumentAccessController = {
   getResolution(): DocumentAccessResolution | null;
   getSnapshot(): DocumentAccessSnapshot;
   getMutationAuthority(): DocumentMutationAuthority;
+  openAccountCopy(): Promise<OwnerCutoverResult>;
   promoteOwnerDocument(attempt: BrowserDocumentPromotionAttempt): Promise<OwnerCutoverResult>;
   exportRealtimeRecovery(): string | null;
   reconnectForTest(): void;
@@ -244,6 +256,7 @@ export type OwnerCutoverResult =
         | 'aborted'
         | 'candidate-failed'
         | 'cutover-in-progress'
+        | 'device-draft-preserved'
         | 'integrity-mismatch'
         | 'not-local-ready'
         | 'owner-session-failed'
@@ -259,6 +272,14 @@ export type OwnerCutoverResult =
 
 const retryDelays = [0, 250, 1_000] as const;
 const retainedBlockedRecoveryControllers = new Map<string, Set<BrowserDocumentAccessController>>();
+
+type PendingAccountCopy = Readonly<{
+  remoteDocumentId: string;
+  pending: Extract<PendingPromotionRead, { state: 'pending' }>;
+}>;
+type OwnerReopenIntent =
+  | { kind: 'automatic' | 'check-account-copy' }
+  | { kind: 'open-account-copy'; copy: PendingAccountCopy };
 
 export const createInitialDocumentAccessSnapshot = (): DocumentAccessSnapshot => ({
   phase: 'checking',
@@ -663,6 +684,7 @@ class BrowserDocumentAccessController implements DocumentAccessController {
   private ownerCutoverAbortController: AbortController | null = null;
   private ownerCutoverPromise: Promise<OwnerCutoverResult> | null = null;
   private ownerCutoverKind: 'promotion' | 'reopen' | null = null;
+  private pendingAccountCopy: PendingAccountCopy | null = null;
   private destroyed = false;
   private recoveryKey: string | null = null;
   private recoverySeal: RealtimeRecoverySeal | null = null;
@@ -699,6 +721,20 @@ class BrowserDocumentAccessController implements DocumentAccessController {
 
   getMutationAuthority() {
     return this.authority;
+  }
+
+  async checkAccountCopy() {
+    if (!this.abortController || this.snapshot.phase !== 'local-ready') return;
+    await this.runOwnerReopen(this.generation, this.abortController.signal, { kind: 'check-account-copy' });
+  }
+
+  async openAccountCopy(): Promise<OwnerCutoverResult> {
+    const copy = this.pendingAccountCopy;
+    if (!copy || !this.abortController || this.snapshot.phase !== 'local-ready') {
+      return { ok: false, reason: 'not-local-ready', retryable: false };
+    }
+    return (await this.runOwnerReopen(this.generation, this.abortController.signal, { kind: 'open-account-copy', copy })) ??
+      { ok: false, reason: 'cutover-in-progress', retryable: true };
   }
 
   promoteOwnerDocument(
@@ -1114,8 +1150,14 @@ class BrowserDocumentAccessController implements DocumentAccessController {
         runtime,
       };
       if (runtime.mode === 'configured') {
-        await this.runOwnerReopen(epoch, signal);
-        return;
+        const pending = this.dependencies.preferDeviceDraft
+          ? this.dependencies.pendingPromotionStore?.read(this.documentId)
+          : null;
+        if (!pending || pending.state === 'absent') {
+          await this.runOwnerReopen(epoch, signal);
+          return;
+        }
+        this.keepDeviceDraft();
       }
       this.publish({
         ...this.snapshot,
@@ -1444,11 +1486,16 @@ class BrowserDocumentAccessController implements DocumentAccessController {
     attempt: BrowserDocumentPromotionAttempt,
     signal: AbortSignal,
   ): Promise<OwnerCutoverResult> {
+    const store = this.dependencies.pendingPromotionStore;
     let promotion: BrowserPromotionResult;
     try {
       const submitted: unknown = await attempt.submit({
         fetcher: this.dependencies.fetcher,
         signal,
+        ...(store === undefined ? {} : {
+          beforeSend: async (proof) =>
+            proof.localDocumentId === this.documentId && !!store && store.record(proof, signal),
+        }),
       });
       promotion =
         isPlainObject(submitted) &&
@@ -1465,6 +1512,8 @@ class BrowserDocumentAccessController implements DocumentAccessController {
     }
     if (!promotion.ok) {
       this.restoreLocalCutoverAuthority();
+      const pending = store?.read(this.documentId);
+      if (!signal.aborted && pending && pending.state !== 'absent') return this.keepDeviceDraft();
       return {
         ok: false,
         reason: 'promotion-failed',
@@ -1485,10 +1534,18 @@ class BrowserDocumentAccessController implements DocumentAccessController {
         },
       };
     }
-    return this.runOwnerCandidate(promotion.receipt, signal);
+    const result = await this.runOwnerCandidate(promotion.receipt, signal);
+    if (!result.ok && !signal.aborted && store?.read(this.documentId).state === 'pending') {
+      return this.keepDeviceDraft();
+    }
+    return result;
   }
 
-  private async runOwnerReopen(epoch: number, signal: AbortSignal) {
+  private async runOwnerReopen(
+    epoch: number,
+    signal: AbortSignal,
+    intent: OwnerReopenIntent = { kind: 'automatic' },
+  ) {
     if (
       !this.isCurrent(epoch, signal) ||
       this.ownerCutoverPromise ||
@@ -1497,7 +1554,7 @@ class BrowserDocumentAccessController implements DocumentAccessController {
     ) {
       return null;
     }
-    const promise = this.runOwnerCandidate(null, signal).finally(() => {
+    const promise = this.runOwnerCandidate(null, signal, intent).finally(() => {
       if (this.ownerCutoverPromise === promise) {
         this.ownerCutoverPromise = null;
         this.ownerCutoverKind = null;
@@ -1524,11 +1581,15 @@ class BrowserDocumentAccessController implements DocumentAccessController {
   private async runOwnerCandidate(
     receipt: BrowserPromotionReceipt | null,
     signal: AbortSignal,
+    intent: OwnerReopenIntent = { kind: 'automatic' },
   ): Promise<OwnerCutoverResult> {
     const generation = this.generation;
     const localResolution = this.resolution?.kind === 'local' ? this.resolution : null;
     let candidate: OwnerRealtimeCandidateResources | null = null;
     let committed = false;
+    let preserveDeviceDraft = false;
+    const store = this.dependencies.pendingPromotionStore;
+    const openCopy = intent.kind === 'open-account-copy' ? intent.copy : null;
     try {
       if (
         !localResolution ||
@@ -1537,6 +1598,14 @@ class BrowserDocumentAccessController implements DocumentAccessController {
       ) {
         return { ok: false, reason: 'aborted', retryable: false };
       }
+      const pending = store?.read(this.documentId);
+      if (
+        pending?.state === 'unverified' ||
+        (receipt && store && pending?.state !== 'pending') ||
+        (intent.kind === 'check-account-copy' && pending?.state !== 'pending') ||
+        (openCopy && (pending?.state !== 'pending' || pending.raw !== openCopy.pending.raw))
+      ) return this.keepDeviceDraft();
+
       const actorId = this.dependencies.getActorId();
       const sessionResult = await this.dependencies.requestOwnerSession({
         actorId,
@@ -1547,6 +1616,7 @@ class BrowserDocumentAccessController implements DocumentAccessController {
         return { ok: false, reason: 'aborted', retryable: false };
       }
       if (!sessionResult.ok) {
+        if (pending?.state === 'pending') this.keepDeviceDraft();
         return {
           ok: false,
           reason: 'owner-session-failed',
@@ -1558,11 +1628,31 @@ class BrowserDocumentAccessController implements DocumentAccessController {
         !isExactOwnerRealtimeSession(session, {
           actorId,
           routeDocumentId: this.documentId,
-          remoteDocumentId: receipt?.room.roomId,
-          promotionSnapshotSha256: receipt?.snapshotSha256,
+          remoteDocumentId: openCopy?.remoteDocumentId ?? receipt?.room.roomId,
+          promotionSnapshotSha256: pending?.state === 'pending'
+            ? pending.marker.snapshotSha256
+            : receipt?.snapshotSha256,
         })
       ) {
+        if (pending?.state === 'pending') return this.keepDeviceDraft();
         return { ok: false, reason: 'owner-session-invalid', retryable: false };
+      }
+      if (pending?.state === 'pending' && store) {
+        if (receipt && receipt.snapshotSha256 !== pending.marker.snapshotSha256) {
+          return this.keepDeviceDraft();
+        }
+        if (intent.kind === 'check-account-copy') {
+          return this.keepDeviceDraft(
+            store.isCurrent(pending) ? { pending, remoteDocumentId: session.remoteDocumentId } : undefined,
+          );
+        }
+        const unchanged = openCopy || await store.verifyUnchanged(pending);
+        if (!this.isOwnerCutoverCurrent(generation, signal, localResolution)) {
+          return { ok: false, reason: 'aborted', retryable: false };
+        }
+        if (!unchanged) {
+          return this.keepDeviceDraft();
+        }
       }
 
       this.authority.enterRemoteHydrating(session.remoteDocumentId);
@@ -1628,6 +1718,31 @@ class BrowserDocumentAccessController implements DocumentAccessController {
       if (receipt && !this.ownerProjectionMatches(candidate, receipt)) {
         return { ok: false, reason: 'integrity-mismatch', retryable: true };
       }
+      if (pending?.state === 'pending' && store) {
+        const stillUnchanged = await store.verifyUnchanged(pending);
+        if (!this.isOwnerCutoverCurrent(generation, signal, localResolution)) {
+          return { ok: false, reason: 'aborted', retryable: false };
+        }
+        if (!openCopy && !stillUnchanged) return this.keepDeviceDraft();
+
+        // A different account could have signed in while the candidate hydrated.
+        try {
+          await refreshOwnerSession(this.documentId, signal);
+        } catch {
+          if (this.isOwnerCutoverCurrent(generation, signal, localResolution)) {
+            return this.keepDeviceDraft();
+          }
+          return { ok: false, reason: 'aborted', retryable: false };
+        }
+        if (!this.isOwnerCutoverCurrent(generation, signal, localResolution)) {
+          return { ok: false, reason: 'aborted', retryable: false };
+        }
+        const unchanged = stillUnchanged?.() ?? false;
+        if (!(openCopy ? store.isCurrent(pending) : unchanged)) return this.keepDeviceDraft();
+        preserveDeviceDraft = !!openCopy && !unchanged;
+      } else if (store && store.read(this.documentId).state !== 'absent') {
+        return this.keepDeviceDraft();
+      }
       if (!candidate.provider.commitAuthorityOwnership()) {
         return { ok: false, reason: 'candidate-failed', retryable: false };
       }
@@ -1672,6 +1787,7 @@ class BrowserDocumentAccessController implements DocumentAccessController {
       };
       this.authority.enterRemoteReady({ canWrite: true });
       this.enableInviteIssuance('edit');
+      this.pendingAccountCopy = null;
       this.publish({
         ...this.snapshot,
         phase: 'remote-ready',
@@ -1688,8 +1804,10 @@ class BrowserDocumentAccessController implements DocumentAccessController {
         syncState: providerSnapshot.syncState,
         reason: null,
         retryable: false,
+        promotionRecovery: preserveDeviceDraft ? 'account-copy-open' : undefined,
       });
       committed = true;
+      if (!preserveDeviceDraft && pending?.state === 'pending') store?.clear(pending);
       return {
         ok: true,
         routeDocumentId: this.documentId,
@@ -1722,6 +1840,15 @@ class BrowserDocumentAccessController implements DocumentAccessController {
         this.restoreLocalCutoverAuthority(localResolution);
       }
     }
+  }
+
+  private keepDeviceDraft(copy?: PendingAccountCopy): OwnerCutoverResult {
+    this.pendingAccountCopy = copy ?? null;
+    this.publish({
+      ...this.snapshot,
+      promotionRecovery: copy ? 'account-copy-available' : 'device-draft',
+    });
+    return { ok: false, reason: 'device-draft-preserved', retryable: false };
   }
 
   private ownerProjectionMatches(
@@ -2155,6 +2282,15 @@ export const createBrowserDocumentAccessDependencies = (
     };
   },
   navigateHome,
+  pendingPromotionStore: (() => {
+    const storage = browserLocalStorage();
+    return storage ? createBrowserPendingPromotionStore(storage) : null;
+  })(),
+  preferDeviceDraft: (() => {
+    if (typeof window === 'undefined') return false;
+    const [value, duplicate] = new URLSearchParams(window.location.search).getAll(DEVICE_DRAFT_QUERY_PARAM);
+    return value === '1' && duplicate === undefined;
+  })(),
   readFragmentCredential: () =>
     typeof window === 'undefined'
       ? { state: 'absent' }

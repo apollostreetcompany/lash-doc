@@ -174,7 +174,7 @@ describe('editor workspace typing', () => {
 });
 
 describe('editor workspace Share', () => {
-  it('retries the exact promotion for an unchanged draft and keeps a newer edit local', async () => {
+  it('retries before dispatch and checks the original account route after a lost response', async () => {
     const dialogPrototype = HTMLDialogElement.prototype;
     dialogPrototype.showModal = function () {
       this.open = true;
@@ -184,7 +184,11 @@ describe('editor workspace Share', () => {
     };
 
     const promotionPath = `/api/documents/${documentId}/promote`;
+    const ownerSessionPath = `/api/documents/${documentId}/owner-session`;
+    const markerKey = `lash:pending-promotion:v1:${documentId}`;
+    const sourceBodyKey = `lash:body:${documentId}`;
     const submissions: Array<{ body: string; fail: (reason: Error) => void }> = [];
+    let accountChecks = 0;
     vi.stubGlobal('fetch', async (input: RequestInfo | URL, init?: RequestInit) => {
       if (String(input) === '/api/account/session') {
         return new Response(null, {
@@ -197,20 +201,27 @@ describe('editor workspace Share', () => {
           submissions.push({ body: String(init.body), fail });
         });
       }
+      if (String(input) === ownerSessionPath && init?.method === 'POST') {
+        accountChecks += 1;
+        return Response.json(
+          { version: 1, ok: false, error: 'document-unavailable', retryable: false },
+          { status: 404 },
+        );
+      }
       throw new Error(`Unexpected request: ${String(input)}`);
     });
 
     const editor = await getReadyEditor();
-    await React.act(async () => {
-      editor.commands.setContent('<p>Send the <strong>launch brief</strong>.</p>');
+    const setTitle = (value: string) => {
       const title = container.querySelector<HTMLInputElement>(
         '[data-testid="lash-doc-title-input"]',
       );
-      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set?.call(
-        title,
-        'Launch brief',
-      );
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set?.call(title, value);
       title?.dispatchEvent(new Event('input', { bubbles: true }));
+    };
+    await React.act(async () => {
+      editor.commands.setContent('<p>Send the <strong>launch brief</strong>.</p>');
+      setTitle('Launch brief');
     });
 
     const getDialog = () => container.querySelector<HTMLDialogElement>('dialog[open]');
@@ -222,28 +233,56 @@ describe('editor workspace Share', () => {
       if (!button) throw new Error(`Expected a Share action labeled ${name}`);
       return button;
     };
+    const waitForPhase = (phase: string) =>
+      vi.waitFor(async () => {
+        await React.act(async () => {});
+        expect(getDialog()?.dataset.phase).toBe(phase);
+      });
     const openShare = async (phase: string) => {
       await React.act(async () => findButton('topbar-share-button').click());
-      expect(getDialog()?.dataset.phase).toBe(phase);
+      await waitForPhase(phase);
     };
-    const failSubmission = async (name: string, requestCount: number) => {
+    const checkAccountCopy = async (expectedChecks: number) => {
       await React.act(async () => {
-        action(name).click();
+        action('Check account copy').click();
+        await vi.waitFor(() => expect(accountChecks).toBe(expectedChecks));
       });
-      expect(getDialog()?.dataset.phase).toBe('saving');
-      expect(action('Saving to your account…').disabled).toBe(true);
-      const submission = await vi.waitFor(() => {
-        expect(submissions).toHaveLength(requestCount);
-        return submissions[requestCount - 1]!;
-      });
-      await React.act(async () => submission.fail(new TypeError('Response unavailable')));
-      expect(getDialog()?.dataset.phase).toBe('retryable');
-      return submission.body;
+      await waitForPhase('device-draft');
+      expect(getDialog()?.textContent).toContain('Lash couldn’t verify an account copy.');
+      expect(submissions).toHaveLength(1);
     };
 
+    const setItem = Storage.prototype.setItem;
+    const failMarkerWrite = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(function (
+      this: Storage,
+      key,
+      value,
+    ) {
+      if (key === markerKey) throw new DOMException('Marker unavailable', 'QuotaExceededError');
+      setItem.call(this, key, value);
+    });
     await openShare('ready');
-    const firstBody = await failSubmission('Save to my account', 1);
-    expect(JSON.parse(firstBody)).toMatchObject({
+    await React.act(async () => {
+      action('Save to my account').click();
+      await vi.waitFor(() =>
+        expect(failMarkerWrite.mock.calls.some(([key]) => key === markerKey)).toBe(true),
+      );
+    });
+    await waitForPhase('unavailable');
+    expect(getDialog()?.textContent).toContain('Lash couldn’t verify the device draft.');
+    expect(submissions).toHaveLength(0);
+    expect(localStorage.getItem(markerKey)).toBeNull();
+
+    failMarkerWrite.mockRestore();
+    await React.act(async () => action('Close sharing').click());
+    await openShare('ready');
+    await React.act(async () => {
+      action('Save to my account').click();
+      await vi.waitFor(() => expect(submissions).toHaveLength(1));
+    });
+    expect(action('Saving to your account…').disabled).toBe(true);
+    const submission = submissions[0]!;
+    expect(JSON.parse(submission.body)).toMatchObject({
       idempotencyKey: expect.stringMatching(/^[A-Za-z0-9_-]{43}$/u),
       snapshot: {
         title: 'Launch brief',
@@ -262,18 +301,47 @@ describe('editor workspace Share', () => {
         },
       },
     });
-    expect(getDialog()?.textContent).toContain('Your document is still on this device.');
-    expect(await failSubmission('Try again', 2)).toBe(firstBody);
+    const pendingMarker = localStorage.getItem(markerKey);
+    expect(pendingMarker).toBeTruthy();
+    await React.act(async () => submission.fail(new TypeError('Response unavailable')));
+    await waitForPhase('device-draft');
+
+    // An unchanged draft already has a potentially dispatched write.
+    await checkAccountCopy(1);
+    expect(editor.state.doc.textContent).toBe('Send the launch brief.');
 
     await React.act(async () => action('Close sharing').click());
     await React.act(async () => {
-      editor.commands.setContent('<p>Keep this new local edit.</p>');
+      editor.commands.setContent('<p>Keep this <strong>new local edit</strong>.</p>');
+      setTitle('Later notes');
     });
-    await openShare('retryable');
-    await React.act(async () => action('Try again').click());
-    expect(getDialog()?.dataset.phase).toBe('unavailable');
-    expect(getDialog()?.textContent).toContain('An account copy may already exist');
+    await openShare('device-draft');
+    await checkAccountCopy(2);
     expect(editor.state.doc.textContent).toBe('Keep this new local edit.');
-    expect(submissions).toHaveLength(2);
+    const exactDeviceBody = editor.getJSON();
+    await React.act(async () => {
+      await vi.waitFor(() => {
+        const raw = localStorage.getItem(sourceBodyKey);
+        expect(raw && JSON.parse(raw).doc).toEqual(exactDeviceBody);
+      });
+    });
+    const sourceBody = localStorage.getItem(sourceBodyKey);
+
+    router.push.mockClear();
+    await React.act(async () => action('Create separate device draft').click());
+    await waitForPhase('device-copy-ready');
+    expect(action('Open separate draft').disabled).toBe(false);
+    const newPath = await vi.waitFor(() => {
+      expect(router.push).toHaveBeenCalledTimes(1);
+      return router.push.mock.lastCall?.[0] as string;
+    });
+    expect(newPath).toMatch(/^\/doc\/doc-/u);
+    const copyId = newPath.split('/').at(-1);
+    const copyBody = localStorage.getItem(`lash:body:${copyId}`);
+    expect(copyBody && JSON.parse(copyBody).doc).toEqual(exactDeviceBody);
+    expect(localStorage.getItem(`lash:title:${copyId}`)).toBe('Later notes');
+    expect(localStorage.getItem(sourceBodyKey)).toBe(sourceBody);
+    expect(localStorage.getItem(markerKey)).toBe(pendingMarker);
+    expect(submissions).toHaveLength(1);
   });
 });

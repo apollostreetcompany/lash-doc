@@ -506,15 +506,21 @@ export type MarkdownImportCommitResult =
       destinationId: string;
     }>;
 
-export interface CommitMarkdownImportOptions {
+export interface CommitNewDeviceDocumentOptions {
   storage: StrictStorage;
   sourceDocumentId: string;
-  plan: MarkdownImportPlan;
+  doc: LocalBodyDocJson;
+  title: string;
   createDocumentId(): string;
   createWriteId?(): string;
   now?: () => Date;
   validateSchema: LocalBodySchemaValidator;
   shouldCancelBeforeCommit?: () => boolean;
+}
+
+export interface CommitMarkdownImportOptions
+  extends Omit<CommitNewDeviceDocumentOptions, 'doc' | 'title'> {
+  plan: MarkdownImportPlan;
 }
 
 const failureCode = (
@@ -532,8 +538,8 @@ const failureCode = (
   return 'verification-failed';
 };
 
-export const commitMarkdownImport = (
-  options: CommitMarkdownImportOptions,
+export const commitNewDeviceDocument = (
+  options: CommitNewDeviceDocumentOptions,
 ): MarkdownImportCommitResult => {
   const registry = readStrictRegistry(options.storage);
   if (!registry.ok) return { status: 'failed', code: registry.code };
@@ -592,17 +598,18 @@ export const commitMarkdownImport = (
   const timestamp = now().toISOString();
   const record: LashDocumentRecord = {
     id: destinationId,
-    title: options.plan.title,
+    title: options.title,
     createdAt: timestamp,
     updatedAt: timestamp,
   };
   const nextRegistryRaw = JSON.stringify([record, ...registry.records]);
+  let wroteRegistry = false;
   let committed = false;
   try {
     const envelope = saveLocalDocumentBody({
       storage: options.storage,
       documentId: destinationId,
-      doc: options.plan.doc,
+      doc: options.doc,
       expected: null,
       savedAt: timestamp,
       createWriteId: options.createWriteId,
@@ -621,21 +628,25 @@ export const commitMarkdownImport = (
       loaded.state !== 'ready' ||
       loaded.envelope.revision !== envelope.revision ||
       loaded.envelope.writeId !== envelope.writeId ||
-      JSON.stringify(loaded.envelope.doc) !== JSON.stringify(options.plan.doc)
+      JSON.stringify(loaded.envelope.doc) !== JSON.stringify(options.doc)
     ) {
       throw new Error('Destination body verification failed.');
     }
 
-    options.storage.setItem(titleKey, options.plan.title);
-    if (options.storage.getItem(titleKey) !== options.plan.title) {
+    options.storage.setItem(titleKey, options.title);
+    if (options.storage.getItem(titleKey) !== options.title) {
       throw new Error('Destination title verification failed.');
     }
 
+    if (options.storage.getItem(DOCUMENT_REGISTRY_STORAGE_KEY) !== registry.raw) {
+      throw new Error('Document registry changed before commit.');
+    }
+    wroteRegistry = true;
     options.storage.setItem(DOCUMENT_REGISTRY_STORAGE_KEY, nextRegistryRaw);
     if (options.storage.getItem(primaryKey) !== expectedPrimaryRaw) {
       throw new Error('Destination body changed before registry commit.');
     }
-    if (options.storage.getItem(titleKey) !== options.plan.title) {
+    if (options.storage.getItem(titleKey) !== options.title) {
       throw new Error('Destination title changed before registry commit.');
     }
     // This exact registry readback is deliberately last: it is the
@@ -649,7 +660,7 @@ export const commitMarkdownImport = (
       destination: {
         id: destinationId,
         path: documentPath(destinationId),
-        title: options.plan.title,
+        title: options.title,
         bodyRevision: envelope.revision,
         bodyWriteId: envelope.writeId,
       },
@@ -658,8 +669,18 @@ export const commitMarkdownImport = (
     if (committed) {
       throw error;
     }
+    let registryRestored = true;
+    if (wroteRegistry) {
+      const current = readStrictRegistry(options.storage);
+      if (!current.ok) registryRestored = false;
+      else if (current.raw === nextRegistryRaw) {
+        registryRestored = restoreExact(options.storage, DOCUMENT_REGISTRY_STORAGE_KEY, registry.raw);
+      } else {
+        registryRestored = !current.records.some((entry) => entry.id === destinationId);
+      }
+    }
+    if (!registryRestored) return { status: 'cleanup-unverified', destinationId };
     const restored = [
-      restoreExact(options.storage, DOCUMENT_REGISTRY_STORAGE_KEY, registry.raw),
       restoreExact(options.storage, titleKey, titlePreimage.value),
       restoreExact(options.storage, primaryKey, primaryPreimage.value),
       restoreExact(options.storage, backupKey, backupPreimage.value),
@@ -670,6 +691,9 @@ export const commitMarkdownImport = (
     return { status: 'failed', code: failureCode(error) };
   }
 };
+
+export const commitMarkdownImport = ({ plan, ...options }: CommitMarkdownImportOptions) =>
+  commitNewDeviceDocument({ ...options, doc: plan.doc, title: plan.title });
 
 export type MarkdownImportSourceQuiescence =
   | Readonly<{

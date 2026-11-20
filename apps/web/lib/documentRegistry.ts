@@ -10,9 +10,10 @@ export interface LashDocumentRecord {
 }
 
 const MAX_DOCUMENT_ID_LENGTH = 96;
+const UNKNOWN_DATE = new Date(0).toISOString();
 
-export const normalizeDocumentId = (raw: string | undefined | null): string => {
-  const normalized = (raw ?? '')
+const canonicalizeDocumentId = (raw: string): string =>
+  raw
     .trim()
     .toLowerCase()
     .replace(/[^a-z0-9-]+/g, '-')
@@ -20,8 +21,8 @@ export const normalizeDocumentId = (raw: string | undefined | null): string => {
     .replace(/^-|-$/g, '')
     .slice(0, MAX_DOCUMENT_ID_LENGTH);
 
-  return normalized || DEFAULT_DOCUMENT_ID;
-};
+export const normalizeDocumentId = (raw: string | undefined | null): string =>
+  canonicalizeDocumentId(raw ?? '') || DEFAULT_DOCUMENT_ID;
 
 export const documentPath = (documentId: string) => `/doc/${normalizeDocumentId(documentId)}`;
 
@@ -38,57 +39,58 @@ const readTitleKey = (storage: Storage | undefined, id: string) => {
   }
 };
 
-const parseRegistry = (raw: string | null): LashDocumentRecord[] => {
-  if (!raw) return [];
-  try {
-    const parsed = JSON.parse(raw) as unknown;
-    if (!Array.isArray(parsed)) return [];
-    return parsed
-      .filter((item): item is Partial<LashDocumentRecord> & { id: string } =>
-        Boolean(item && typeof item === 'object' && typeof item.id === 'string'),
-      )
-      .map((item) => ({
-        id: normalizeDocumentId(item.id),
-        title: normalizeTitle(item.title),
-        createdAt: typeof item.createdAt === 'string' ? item.createdAt : new Date(0).toISOString(),
-        updatedAt: typeof item.updatedAt === 'string' ? item.updatedAt : new Date(0).toISOString(),
-      }))
-      .filter((item) => item.id);
-  } catch {
-    return [];
+const parseRegistryRows = (raw: string | null): unknown[] => {
+  if (raw === null) return [];
+  const rows: unknown = JSON.parse(raw);
+  if (!Array.isArray(rows)) throw new Error('The document list is unreadable.');
+  return rows;
+};
+
+const parseRegistryRecord = (row: unknown): LashDocumentRecord | null => {
+  if (!row || typeof row !== 'object' || !('id' in row) || typeof row.id !== 'string') return null;
+  const id = canonicalizeDocumentId(row.id);
+  const title = 'title' in row ? row.title : undefined;
+  if (!id || (title != null && typeof title !== 'string')) return null;
+  return {
+    id,
+    title: normalizeTitle(title),
+    createdAt:
+      'createdAt' in row && typeof row.createdAt === 'string' ? row.createdAt : UNKNOWN_DATE,
+    updatedAt:
+      'updatedAt' in row && typeof row.updatedAt === 'string' ? row.updatedAt : UNKNOWN_DATE,
+  };
+};
+
+const buildDocumentList = (storage: Storage | undefined, raw: string | null) => {
+  const byId = new Map<string, LashDocumentRecord>();
+  for (const row of parseRegistryRows(raw)) {
+    const record = parseRegistryRecord(row);
+    if (!record || byId.has(record.id)) throw new Error('The document list is unreadable.');
+    byId.set(record.id, record);
   }
-};
 
-const writeRegistry = (storage: Storage, records: LashDocumentRecord[]) => {
-  storage.setItem(DOCUMENT_REGISTRY_STORAGE_KEY, JSON.stringify(records));
-};
-
-export const listDocuments = (storage: Storage | undefined): LashDocumentRecord[] => {
-  const now = new Date(0).toISOString();
   const demo: LashDocumentRecord = {
     id: DEFAULT_DOCUMENT_ID,
-    title: normalizeTitle(readTitleKey(storage, DEFAULT_DOCUMENT_ID)),
-    createdAt: now,
-    updatedAt: now,
+    title: DEFAULT_DOC_TITLE,
+    createdAt: UNKNOWN_DATE,
+    updatedAt: UNKNOWN_DATE,
   };
+  if (!byId.has(demo.id)) byId.set(demo.id, demo);
 
-  if (!storage) return [demo];
-
-  const byId = new Map<string, LashDocumentRecord>();
-  byId.set(demo.id, demo);
-  for (const record of parseRegistry(storage.getItem(DOCUMENT_REGISTRY_STORAGE_KEY))) {
-    byId.set(record.id, {
+  return [...byId.values()]
+    .map((record) => ({
       ...record,
       title: normalizeTitle(readTitleKey(storage, record.id) ?? record.title),
+    }))
+    .sort((left, right) => {
+      if (left.id === DEFAULT_DOCUMENT_ID) return -1;
+      if (right.id === DEFAULT_DOCUMENT_ID) return 1;
+      return right.updatedAt.localeCompare(left.updatedAt);
     });
-  }
-
-  return [...byId.values()].sort((left, right) => {
-    if (left.id === DEFAULT_DOCUMENT_ID) return -1;
-    if (right.id === DEFAULT_DOCUMENT_ID) return 1;
-    return right.updatedAt.localeCompare(left.updatedAt);
-  });
 };
+
+export const listDocuments = (storage: Storage | undefined): LashDocumentRecord[] =>
+  buildDocumentList(storage, storage?.getItem(DOCUMENT_REGISTRY_STORAGE_KEY) ?? null);
 
 export const readDocumentTitle = (storage: Storage | undefined, documentId: string) => {
   if (!storage) return DEFAULT_DOC_TITLE;
@@ -96,10 +98,11 @@ export const readDocumentTitle = (storage: Storage | undefined, documentId: stri
   const title = readTitleKey(storage, id);
   if (title !== null) return normalizeTitle(title);
   try {
-    // Older drafts may only have their title in the document list.
-    const records = parseRegistry(storage.getItem(DOCUMENT_REGISTRY_STORAGE_KEY));
-    for (let i = records.length - 1; i >= 0; i--) {
-      if (records[i].id === id) return records[i].title;
+    // A direct link still opens a valid legacy title when an unrelated row is malformed.
+    const rows = parseRegistryRows(storage.getItem(DOCUMENT_REGISTRY_STORAGE_KEY));
+    for (let i = rows.length - 1; i >= 0; i--) {
+      const record = parseRegistryRecord(rows[i]);
+      if (record?.id === id) return record.title;
     }
   } catch {
     // A new or unavailable library can still open an untitled document.
@@ -143,7 +146,8 @@ export const upsertDocument = (
 
   const id = normalizeDocumentId(input.id);
   const now = new Date().toISOString();
-  const records = listDocuments(storage);
+  const raw = storage.getItem(DOCUMENT_REGISTRY_STORAGE_KEY);
+  const records = buildDocumentList(storage, raw);
   const existing = records.find((record) => record.id === id);
   const nextRecord: LashDocumentRecord = {
     id,
@@ -152,7 +156,10 @@ export const upsertDocument = (
     updatedAt: now,
   };
   const nextRecords = [nextRecord, ...records.filter((record) => record.id !== id)];
-  writeRegistry(storage, nextRecords);
+  if (storage.getItem(DOCUMENT_REGISTRY_STORAGE_KEY) !== raw) {
+    throw new Error('The document list changed before saving.');
+  }
+  storage.setItem(DOCUMENT_REGISTRY_STORAGE_KEY, JSON.stringify(nextRecords));
   return listDocuments(storage);
 };
 
