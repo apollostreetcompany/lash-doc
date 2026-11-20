@@ -29,7 +29,10 @@ test('creates, finds, reopens and shares a draft using only static files', async
   const unavailableRequests: string[] = [];
   watchUnavailableRequests(page, unavailableRequests);
 
-  await page.goto('/?realtime=on');
+  await page.goto('/documents/');
+  await expect(page.getByRole('heading', { name: 'Documents', exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'New document', exact: true }).click();
+  await expect(page).toHaveURL(/\/\?doc=doc-[a-z0-9-]+$/);
   await edit(page, 'Original draft', 'First browser-local notes.');
   await page.getByRole('button', { name: 'New document', exact: true }).click();
   await expect(page).toHaveURL(/\/\?doc=doc-[a-z0-9-]+$/);
