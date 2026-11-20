@@ -108,12 +108,22 @@ test('reads the full earlier kickoff draft by keyboard and touch without restori
   await expect(versions).toHaveCount(firstCount + 2);
 
   const earlierVersion = `Version ${firstCount + 1}`;
+  const latestVersion = `Version ${firstCount + 2}`;
+  const readPrevious = history.getByRole('button', {
+    name: `Read previous draft, ${earlierVersion}`,
+    exact: true,
+  });
   const earlierRow = history.getByRole('button', { name: new RegExp(`^${earlierVersion}\\b`) });
   const reader = page.getByRole('dialog', { name: earlierVersion, exact: true });
   const contents = reader.getByRole('article', { name: 'Version contents' });
   const backToLatest = reader.getByRole('button', { name: 'Back to latest', exact: true });
-  await earlierRow.click();
-  await readVersion.press('Enter');
+  await expect(history.getByTestId('history-selected-version')).toHaveText(latestVersion);
+  const authorship = history.getByRole('button', { name: 'Show authorship in document' });
+  await authorship.focus();
+  await expect(authorship).toBeFocused();
+  await page.keyboard.press('Tab');
+  await expect(readPrevious).toBeFocused();
+  await page.keyboard.press('Enter');
   await expect(reader).toBeVisible();
   await expectKickoffBody(contents, revised);
   await expect(contents).not.toContainText('Draft review starts this afternoon.');
@@ -124,25 +134,16 @@ test('reads the full earlier kickoff draft by keyboard and touch without restori
   });
   await page.keyboard.press('Tab');
   await expect(backToLatest).toBeFocused();
-  await page.keyboard.press('Escape');
-  await expect(reader).toBeHidden();
-  await expect(readVersion).toBeFocused();
-  await expect(versions).toHaveCount(firstCount + 2);
-  await expectKickoffBody(editor, latest);
-
-  await readVersion.press('Enter');
-  await expect(reader).toBeVisible();
-  await page.keyboard.press('Tab');
-  await expect(backToLatest).toBeFocused();
   await page.keyboard.press('Enter');
   await expect(reader).toBeHidden();
-  await expect(readVersion).toBeFocused();
-  await expect(history).toBeVisible();
+  await expect(readPrevious).toBeFocused();
+  await expect(versions).toHaveCount(firstCount + 2);
+  await expect(history.getByTestId('history-selected-version')).toHaveText(latestVersion);
+  await expectKickoffBody(editor, latest);
 
   await page.setViewportSize({ width: 390, height: 844 });
   await openHistory.tap();
-  await earlierRow.tap();
-  await readVersion.tap();
+  await readPrevious.tap();
   await expect(reader).toBeInViewport();
   await expectKickoffBody(contents, revised);
   await testInfo.attach('earlier-draft-phone', {
@@ -151,10 +152,10 @@ test('reads the full earlier kickoff draft by keyboard and touch without restori
   });
   await page.keyboard.press('Escape');
   await expect(reader).toBeHidden();
-  await expect(readVersion).toBeFocused();
+  await expect(readPrevious).toBeFocused();
   await expect(history).toBeVisible();
 
-  await readVersion.tap();
+  await readPrevious.tap();
   await expect(reader).toBeVisible();
   await backToLatest.tap();
   await expect(reader).toBeHidden();
@@ -170,7 +171,13 @@ test('reads the full earlier kickoff draft by keyboard and touch without restori
 
   await openHistory.tap();
   await expect(versions).toHaveCount(firstCount + 2);
-  await button('Close activity panel').tap();
+  await earlierRow.tap();
+  await expect(earlierRow).toHaveAttribute('aria-pressed', 'true');
+  await expect(readPrevious).toHaveCount(0);
+  await readVersion.tap();
+  await expectKickoffBody(contents, revised);
+  await backToLatest.tap();
+  await expect(history).toBeHidden();
 
   await page.reload();
   await expect(title).toHaveValue('Project kickoff — Comparison');

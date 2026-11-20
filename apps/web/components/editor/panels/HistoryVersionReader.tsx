@@ -213,15 +213,21 @@ export function HistoryVersionReader({
   sequence,
   sha,
   load,
+  previousDraft = false,
   onReturnToDocument,
 }: {
   sequence: number;
   sha: string;
   load: LoadHistoryVersion;
+  previousDraft?: boolean;
   onReturnToDocument?: () => void;
 }) {
   const triggerRef = useRef<HTMLButtonElement>(null);
-  const [opening, setOpening] = useState<{ load: LoadHistoryVersion } | null>(null);
+  const [opening, setOpening] = useState<{
+    sequence: number;
+    sha: string;
+    load: LoadHistoryVersion;
+  } | null>(null);
   return (
     <>
       <button
@@ -229,14 +235,15 @@ export function HistoryVersionReader({
         className={`history-filter-button ${styles.trigger}`}
         type="button"
         aria-haspopup="dialog"
-        onClick={() => setOpening({ load })}
+        aria-label={previousDraft ? `Read previous draft, Version ${sequence}` : undefined}
+        onClick={() => setOpening({ load, sequence, sha })}
       >
-        Read version
+        {previousDraft ? `Read previous draft · Version ${sequence}` : 'Read version'}
       </button>
       {opening?.load === load ? (
         <OpenHistoryVersion
-          sequence={sequence}
-          sha={sha}
+          sequence={opening.sequence}
+          sha={opening.sha}
           load={load}
           triggerRef={triggerRef}
           onClose={() => setOpening(null)}
