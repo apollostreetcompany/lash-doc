@@ -2927,6 +2927,15 @@ li[data-type='taskItem'] > div p {
 }
 
 /* History */
+@media (min-width: 768px) {
+  .lash-rail:has(#rail-section-history[data-active='true'] .lash-history-panel) {
+    position: sticky;
+    top: var(--topbar-h);
+    align-self: start;
+    height: calc(100dvh - var(--topbar-h));
+  }
+}
+
 .history-filter-controls {
   display: flex;
   flex-wrap: wrap;
@@ -3066,10 +3075,15 @@ li[data-type='taskItem'] > div p {
 .history-version-list {
   list-style: none;
   margin: 0;
-  padding: 0;
+  padding: var(--space-1);
   display: flex;
   flex-direction: column;
   gap: 2px;
+  max-height: min(11rem, 23dvh);
+  overflow-y: auto;
+  overscroll-behavior-y: contain;
+  scroll-padding-block: var(--space-1);
+  scrollbar-gutter: stable;
 }
 
 .history-version-button {
@@ -3088,6 +3102,12 @@ li[data-type='taskItem'] > div p {
   font-size: var(--text-ui);
   text-align: left;
   transition: all var(--transition-fast);
+}
+
+@media (pointer: coarse) {
+  .history-version-button {
+    min-height: 44px;
+  }
 }
 
 .history-version-button:hover {
