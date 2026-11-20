@@ -10,10 +10,46 @@ export type OwnerShareDialogPhase =
   | 'signed-out'
   | 'ready'
   | 'saving'
+  | 'device-draft'
+  | 'account-copy-available'
+  | 'checking-copy'
+  | 'opening-copy'
+  | 'creating-device-draft'
+  | 'device-copy-ready'
   | 'retryable'
   | 'blocked'
   | 'unavailable'
   | 'saved';
+
+const ACCOUNT_COPY_PRESENTATION: Partial<
+  Record<OwnerShareDialogPhase, { detail: string; action: string }>
+> = {
+  'device-draft': {
+    detail:
+      'Your edits are still in this device draft. You can check the earlier account-save attempt.',
+    action: 'Check account copy',
+  },
+  'account-copy-available': {
+    detail: 'Your edits are still in this device draft. You can open the verified account copy.',
+    action: 'Open account copy',
+  },
+  'checking-copy': {
+    detail: 'Checking the earlier account-save attempt…',
+    action: 'Checking account copy…',
+  },
+  'opening-copy': {
+    detail: 'Saving the device draft and opening the account copy…',
+    action: 'Opening account copy…',
+  },
+  'creating-device-draft': {
+    detail: 'Saving a separate device draft…',
+    action: 'Creating separate draft…',
+  },
+  'device-copy-ready': {
+    detail: 'The separate draft is saved on this device.',
+    action: 'Open separate draft',
+  },
+};
 
 export interface OwnerShareDialogProps {
   adjuncts: Readonly<{ comments: number; suggestions: number }>;
@@ -21,6 +57,7 @@ export interface OwnerShareDialogProps {
   documentTitle: string;
   onClose(): void;
   onPrimary(): void;
+  onCreateDeviceDraft?(): void;
   onManagePublicAccess?(): void;
   open: boolean;
   phase: OwnerShareDialogPhase;
@@ -89,6 +126,7 @@ export function OwnerShareDialog({
   documentTitle,
   onClose,
   onPrimary,
+  onCreateDeviceDraft,
   onManagePublicAccess,
   open,
   phase,
@@ -99,7 +137,11 @@ export function OwnerShareDialog({
   const dialogRef = useRef<HTMLDialogElement | null>(null);
   const primaryButtonRef = useRef<HTMLButtonElement | null>(null);
   const primaryLinkRef = useRef<HTMLAnchorElement | null>(null);
-  const pending = phase === 'saving';
+  const pending =
+    phase === 'saving' ||
+    phase === 'checking-copy' ||
+    phase === 'opening-copy' ||
+    phase === 'creating-device-draft';
 
   useEffect(() => {
     const dialog = dialogRef.current;
@@ -116,8 +158,10 @@ export function OwnerShareDialog({
 
   if (!open) return null;
 
-  const summary =
-    phase === 'saved'
+  const accountCopy = ACCOUNT_COPY_PRESENTATION[phase];
+  const summary = accountCopy
+    ? detail || accountCopy.detail
+    : phase === 'saved'
       ? ownerShareAccessSummary(publicAccess)
       : phase === 'blocked'
         ? `This document has ${adjuncts.comments} ${
@@ -203,9 +247,29 @@ export function OwnerShareDialog({
               ) : null}
             </section>
           ) : null}
+          {phase === 'device-draft' && onCreateDeviceDraft ? (
+            <div>
+              <p>
+                A separate draft copies the title and formatted document. Discussion, suggestions,
+                and version history stay with the original draft.
+              </p>
+              <button
+                className="lash-owner-share-manage"
+                onClick={onCreateDeviceDraft}
+                type="button"
+              >
+                Create separate device draft
+              </button>
+            </div>
+          ) : null}
         </div>
 
         <footer className="lash-owner-share-footer">
+          {phase === 'device-draft' ? (
+            <a className="lash-owner-share-manage" href={signInHref}>
+              Sign in to check
+            </a>
+          ) : null}
           {phase === 'signed-out' ? (
             <a ref={primaryLinkRef} className="lash-owner-share-primary" href={signInHref}>
               Sign in to continue
@@ -227,11 +291,12 @@ export function OwnerShareDialog({
               onClick={onPrimary}
               type="button"
             >
-              {phase === 'saving'
-                ? 'Saving to your account…'
-                : phase === 'retryable'
-                  ? 'Try again'
-                  : 'Save to my account'}
+              {accountCopy?.action ??
+                (phase === 'saving'
+                  ? 'Saving to your account…'
+                  : phase === 'retryable'
+                    ? 'Try again'
+                    : 'Save to my account')}
             </button>
           )}
         </footer>

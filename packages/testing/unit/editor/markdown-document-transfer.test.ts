@@ -29,6 +29,7 @@ import {
   MARKDOWN_IMPORT_NAVIGATION_WATCHDOG_MS,
   acknowledgeMarkdownImportDestination,
   commitMarkdownImport,
+  commitNewDeviceDocument,
   createMarkdownDownloadPlan,
   createMarkdownImportNavigationController,
   persistMarkdownImportHandoff,
@@ -1194,6 +1195,66 @@ describe('strict fresh-document commit', () => {
       status: 'cleanup-unverified',
       destinationId: 'import-doc',
     });
+  });
+});
+
+describe('separate device draft', () => {
+  const richBody = {
+    type: 'doc',
+    content: [{
+      type: 'paragraph',
+      content: [{ type: 'text', text: 'A formatted device draft', marks: [{ type: 'bold' }] }],
+    }],
+  };
+  const copy = (storage: MemoryStorage) => commitNewDeviceDocument({
+    storage,
+    sourceDocumentId: 'source-doc',
+    doc: richBody,
+    title: 'Source title',
+    createDocumentId: () => 'separate-draft',
+    createWriteId: () => 'separate-write',
+    validateSchema: () => undefined,
+  });
+
+  it('registers a new local identity with the exact body and title, preserving source records', () => {
+    const storage = new MemoryStorage();
+    seedSource(storage);
+    storage.values.set('lash:chat-threads:source-doc', '[{"id":"local-discussion"}]');
+    storage.values.set('lash:pending-promotion:v1:source-doc', 'pending-recovery');
+    const source = sourceSnapshot(storage);
+
+    expect(copy(storage)).toMatchObject({
+      status: 'committed',
+      destination: { id: 'separate-draft', path: '/doc/separate-draft', title: 'Source title' },
+    });
+    expect(sourceSnapshot(storage)).toEqual(source);
+    expect(storage.values.get(documentTitleStorageKey('separate-draft'))).toBe('Source title');
+    expect(loadLocalDocumentBody({
+      storage,
+      documentId: 'separate-draft',
+      validateSchema: () => undefined,
+    })).toMatchObject({ state: 'ready', envelope: { doc: richBody, revision: 1 } });
+    expect(storage.values.has('lash:chat-threads:separate-draft')).toBe(false);
+  });
+
+  it('does not overwrite another document added to the library while the copy is committing', () => {
+    const storage = new MemoryStorage();
+    seedSource(storage);
+    const source = sourceSnapshot(storage);
+    const updatedRegistry = JSON.stringify([existingRecord('another-device-draft'), existingRecord()]);
+    const set = storage.setItem.bind(storage);
+    storage.setItem = (key, value) => {
+      set(key, value);
+      if (key === documentTitleStorageKey('separate-draft')) {
+        storage.values.set(DOCUMENT_REGISTRY_STORAGE_KEY, updatedRegistry);
+      }
+    };
+
+    expect(copy(storage)).toMatchObject({ status: 'failed', code: 'verification-failed' });
+    expect(sourceSnapshot(storage)).toEqual(source);
+    expect(storage.values.get(DOCUMENT_REGISTRY_STORAGE_KEY)).toBe(updatedRegistry);
+    expect(storage.values.has(documentTitleStorageKey('separate-draft'))).toBe(false);
+    expect(storage.values.has(localDocumentBodyKey('separate-draft'))).toBe(false);
   });
 });
 

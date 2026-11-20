@@ -111,6 +111,7 @@ import { createBrowserImageUploader } from '../../lib/createBrowserImageUploader
 import {
   createBrowserDocumentAccessController,
   createInitialDocumentAccessSnapshot,
+  DEVICE_DRAFT_QUERY_PARAM,
   type DocumentAccessController,
   type DocumentAccessResolution,
   type DocumentAccessSnapshot,
@@ -162,6 +163,7 @@ import {
   MARKDOWN_IMPORT_NAVIGATION_WATCHDOG_MS,
   acknowledgeMarkdownImportDestination,
   commitMarkdownImport,
+  commitNewDeviceDocument,
   createMarkdownDownloadPlan,
   createMarkdownImportNavigationController,
   persistMarkdownImportHandoff,
@@ -235,8 +237,13 @@ type ShareAdjuncts = Readonly<{ comments: number; suggestions: number }>;
 
 type OwnerShareState =
   | { phase: 'closed' | 'checking-account' | 'ready' | 'signed-out' | 'saved' }
-  | { phase: 'saving'; request: object }
+  | {
+      phase: 'saving' | 'checking-copy' | 'opening-copy' | 'creating-device-draft';
+      request: object;
+    }
   | { phase: 'retryable' | 'unavailable'; detail?: string }
+  | { phase: 'promotion-recovery'; detail?: string; mayCreateDeviceDraft?: true }
+  | { phase: 'device-copy-ready'; path: string }
   | { phase: 'blocked'; adjuncts: ShareAdjuncts };
 
 type OwnerShareAttempt = {
@@ -773,7 +780,12 @@ function ResolvedDocumentWorkspace({
   documentId: string;
   inviteIssuanceAuthority: Pick<
     DocumentAccessController,
-    'allowsInviteIssuance' | 'captureInviteIssuance' | 'promoteOwnerDocument'
+    | 'allowsInviteIssuance'
+    | 'captureInviteIssuance'
+    | 'checkAccountCopy'
+    | 'getSnapshot'
+    | 'openAccountCopy'
+    | 'promoteOwnerDocument'
   >;
   resolution: DocumentAccessResolution;
   staticPreview: boolean;
@@ -2771,22 +2783,22 @@ function ResolvedDocumentWorkspace({
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [activeTab, closeActivityRail, mobileSidebarOpen, openActivityPanel, railVisible]);
 
-  const hasVerifiedLocalMarkdownSourceReceipt = useCallback(() => {
-    if (realtimeEnabled || localBodyState !== 'ready' || !editor) return false;
+  const readVerifiedLocalBodyReceipt = useCallback(() => {
+    if (realtimeEnabled || localBodyState !== 'ready' || !editor || editor.isDestroyed) return null;
     const storage = browserLocalStorage();
     const expected = localBodyExpectedRef.current;
-    if (!storage || !expected) return false;
+    if (!storage || !expected) return null;
     const loaded = loadLocalDocumentBody({
       storage,
       documentId: activeDocumentId,
       validateSchema: validateLocalBodySchema,
     });
-    return (
-      loaded.state === 'ready' &&
+    return loaded.state === 'ready' &&
       loaded.expected.revision === expected.revision &&
       loaded.expected.writeId === expected.writeId &&
       JSON.stringify(loaded.envelope.doc) === JSON.stringify(editor.getJSON())
-    );
+      ? loaded.envelope
+      : null;
   }, [activeDocumentId, editor, localBodyState, realtimeEnabled, validateLocalBodySchema]);
 
   const inspectCurrentMarkdownSource = useCallback(
@@ -2802,7 +2814,7 @@ function ResolvedDocumentWorkspace({
             readOnly: !canEditDocument,
           })
         : Promise.resolve(
-            hasVerifiedLocalMarkdownSourceReceipt()
+            readVerifiedLocalBodyReceipt()
               ? ({ ok: true } as const)
               : ({
                   ok: false,
@@ -2813,7 +2825,7 @@ function ResolvedDocumentWorkspace({
     [
       accessSnapshot.hydrated,
       canEditDocument,
-      hasVerifiedLocalMarkdownSourceReceipt,
+      readVerifiedLocalBodyReceipt,
       realtimeEnabled,
       realtimeSnapshot.hydrated,
       realtimeSnapshot.pendingUpdateCount,
@@ -2830,15 +2842,10 @@ function ResolvedDocumentWorkspace({
             kind: 'local',
             localBodyState,
             flushVerified: async () =>
-              hasVerifiedLocalMarkdownSourceReceipt() ||
+              Boolean(readVerifiedLocalBodyReceipt()) ||
               ((await markdownAutosaveControllerRef.current?.flushVerified()) ?? false),
           }),
-    [
-      hasVerifiedLocalMarkdownSourceReceipt,
-      inspectCurrentMarkdownSource,
-      localBodyState,
-      realtimeEnabled,
-    ],
+    [readVerifiedLocalBodyReceipt, inspectCurrentMarkdownSource, localBodyState, realtimeEnabled],
   );
 
   const handleImportMarkdown = useCallback(
@@ -3339,6 +3346,10 @@ function ResolvedDocumentWorkspace({
     accessSnapshot.phase === 'remote-ready' &&
     accessSnapshot.authoritativeOwner &&
     accessSnapshot.hydrated;
+  const promotionRecovery = accessSnapshot.promotionRecovery;
+  const deviceDraft =
+    promotionRecovery === 'device-draft' || promotionRecovery === 'account-copy-available';
+  const accountCopyOpen = promotionRecovery === 'account-copy-open' && ownerBacked;
   const promotionBaselineReady =
     localBodyState === 'ready' &&
     (historyAvailability === 'ready' ||
@@ -3390,6 +3401,19 @@ function ResolvedDocumentWorkspace({
     return () => abort.abort();
   }, [ownerShare]);
 
+  const verifySavedDeviceDraft = useCallback(async () => {
+    let envelope = readVerifiedLocalBodyReceipt();
+    if (!envelope) {
+      if (!(await markdownAutosaveControllerRef.current?.flushVerified())) return null;
+      envelope = readVerifiedLocalBodyReceipt();
+    }
+    const storage = browserLocalStorage();
+    const title = docTitle.trim() || DEFAULT_DOC_TITLE;
+    return storage && envelope && readDocumentTitle(storage, activeDocumentId) === title
+      ? { storage, envelope, title }
+      : null;
+  }, [activeDocumentId, docTitle, readVerifiedLocalBodyReceipt]);
+
   const closeOwnerShareDialog = useCallback(() => {
     if (promotionInFlightRef.current) return;
     setOwnerShare({ phase: 'closed' });
@@ -3397,12 +3421,33 @@ function ResolvedDocumentWorkspace({
     window.requestAnimationFrame(() => trigger?.focus({ preventScroll: true }));
   }, []);
 
+  const beginOwnerShareRequest = useCallback(
+    (phase: 'saving' | 'checking-copy' | 'opening-copy' | 'creating-device-draft') => {
+      if (promotionInFlightRef.current) return null;
+      const request = {};
+      promotionInFlightRef.current = request;
+      setOwnerShare({ phase, request });
+      return {
+        complete(next: OwnerShareState) {
+          setOwnerShare((current) =>
+            'request' in current && current.request === request ? next : current,
+          );
+        },
+        release() {
+          if (promotionInFlightRef.current === request) promotionInFlightRef.current = null;
+        },
+      };
+    },
+    [],
+  );
+
   const handleOwnerPromotion = useCallback(async () => {
     if (
       staticPreview ||
       !editor ||
       editor.isDestroyed ||
       ownerBacked ||
+      deviceDraft ||
       !promotionBaselineReady ||
       promotionInFlightRef.current ||
       (ownerShare.phase !== 'ready' && ownerShare.phase !== 'retryable')
@@ -3418,101 +3463,112 @@ function ResolvedDocumentWorkspace({
       return;
     }
 
-    // The activity rail can be closed or unmounted. The persisted discussion,
-    // including resolved threads and edits from other tabs, decides promotion.
-    const comments = readLocalChatThreadCount(historyDocumentId);
-    if (comments === null) {
-      setOwnerShare({
-        phase: 'unavailable',
-        detail:
-          'Lash couldn’t verify the comments saved on this device. Your document is still here. Reopen Share to try again.',
-      });
-      return;
-    }
-    const adjuncts = { comments, suggestions: unresolvedSuggestionCount };
-    if (adjuncts.comments > 0 || adjuncts.suggestions > 0) {
-      setOwnerShare({ phase: 'blocked', adjuncts });
-      return;
-    }
-
-    const body = editor.state.doc;
+    const activity = beginOwnerShareRequest('saving');
+    if (!activity) return;
     let submission = promotionAttemptRef.current;
-    if (submission && (submission.title !== docTitle || !submission.body.eq(body))) {
-      setOwnerShare({
-        phase: 'unavailable',
-        detail:
-          'An account copy may already exist from the previous attempt. To share the text of this draft, export it as Markdown before leaving, then import and share the file as a new document.',
-      });
-      return;
-    }
-    if (!submission) {
-      submission = {
+    try {
+      if (!(await verifySavedDeviceDraft())) {
+        activity.complete({
+          phase: submission ? 'promotion-recovery' : 'unavailable',
+          detail:
+            'Lash couldn’t verify the device draft. Finish saving it before moving to the account copy.',
+        });
+        return;
+      }
+
+      // The rail can be closed or unmounted. Read the persisted discussion,
+      // including resolved threads and changes from other tabs.
+      const comments = readLocalChatThreadCount(historyDocumentId);
+      const body = editor.state.doc;
+      const title = docTitle.trim() || DEFAULT_DOC_TITLE;
+      if (
+        submission &&
+        (submission.title !== title ||
+          !submission.body.eq(body) ||
+          comments !== 0 ||
+          unresolvedSuggestionCount !== 0)
+      ) {
+        activity.complete({ phase: 'promotion-recovery' });
+        return;
+      }
+      if (comments === null) {
+        activity.complete({
+          phase: 'unavailable',
+          detail:
+            'Lash couldn’t verify the comments saved on this device. Your document is still here. Reopen Share to try again.',
+        });
+        return;
+      }
+      const adjuncts = { comments, suggestions: unresolvedSuggestionCount };
+      if (adjuncts.comments > 0 || adjuncts.suggestions > 0) {
+        activity.complete({ phase: 'blocked', adjuncts });
+        return;
+      }
+
+      submission ??= {
         attempt: createBrowserDocumentPromotionAttempt(
-          {
-            adjuncts,
-            body: editor.getJSON(),
-            localDocumentId: activeDocumentId,
-            title: docTitle,
-          },
+          { adjuncts, body: editor.getJSON(), localDocumentId: activeDocumentId, title },
           window.crypto,
         ),
         body,
-        title: docTitle,
+        title,
       };
-    }
-    const request = {};
-    promotionInFlightRef.current = request;
-    setOwnerShare({ phase: 'saving', request });
-
-    const complete = (next: OwnerShareState) => {
-      setOwnerShare((current) =>
-        current.phase === 'saving' && current.request === request ? next : current,
+      const result: OwnerCutoverResult = await inviteIssuanceAuthority.promoteOwnerDocument(
+        submission.attempt,
       );
-    };
-    let result: OwnerCutoverResult;
-    try {
-      result = await inviteIssuanceAuthority.promoteOwnerDocument(submission.attempt);
-    } catch {
-      // A failed response can follow a successful server write. Keep the
-      // exact attempt available for a same-snapshot retry.
-      const detail = 'Lash couldn’t confirm account saving. Try again to check the account copy.';
-      promotionAttemptRef.current = { ...submission, retryDetail: detail };
-      complete({ phase: 'retryable', detail });
-      return;
-    } finally {
-      if (promotionInFlightRef.current === request) promotionInFlightRef.current = null;
-    }
-    if (result.ok) {
+      if (result.ok) {
+        promotionAttemptRef.current = null;
+        activity.complete({ phase: 'saved' });
+        return;
+      }
+      if (result.reason === 'device-draft-preserved') {
+        activity.complete({ phase: 'promotion-recovery' });
+        return;
+      }
+      if (result.reason === 'promotion-failed') {
+        const promotion = result.promotion;
+        if (promotion.reason === 'device-draft-unverified') {
+          activity.complete({
+            phase: 'unavailable',
+            detail: 'Lash couldn’t verify the device draft. Finish saving it before trying again.',
+          });
+          return;
+        }
+        if (promotion.reason === 'adjuncts-present') {
+          promotionAttemptRef.current = null;
+          activity.complete({ phase: 'blocked', adjuncts: promotion.adjuncts });
+          return;
+        }
+        if (promotion.reason === 'server-rejected' && promotion.error === 'unauthorized') {
+          promotionAttemptRef.current = null;
+          activity.complete({ phase: 'signed-out' });
+          return;
+        }
+      }
+      if (result.retryable) {
+        const detail =
+          result.reason === 'promotion-failed'
+            ? 'Lash could not reach account storage. Your document is still on this device.'
+            : 'Your document was saved, but Lash could not reconnect to it. Try again to finish opening the account copy.';
+        promotionAttemptRef.current = { ...submission, retryDetail: detail };
+        activity.complete({ phase: 'retryable', detail });
+        return;
+      }
       promotionAttemptRef.current = null;
-      complete({ phase: 'saved' });
-      return;
+      activity.complete({ phase: 'unavailable' });
+    } catch {
+      // A missing response may follow a successful write. Reuse its exact
+      // request while it still describes the verified device draft.
+      const detail = 'Lash couldn’t confirm account saving. Try again to check the account copy.';
+      if (submission) promotionAttemptRef.current = { ...submission, retryDetail: detail };
+      activity.complete({ phase: submission ? 'retryable' : 'unavailable', detail });
+    } finally {
+      activity.release();
     }
-    if (result.reason === 'promotion-failed') {
-      const promotion = result.promotion;
-      if (promotion.reason === 'adjuncts-present') {
-        promotionAttemptRef.current = null;
-        complete({ phase: 'blocked', adjuncts: promotion.adjuncts });
-        return;
-      }
-      if (promotion.reason === 'server-rejected' && promotion.error === 'unauthorized') {
-        promotionAttemptRef.current = null;
-        complete({ phase: 'signed-out' });
-        return;
-      }
-    }
-    if (result.retryable) {
-      const detail =
-        result.reason === 'promotion-failed'
-          ? 'Lash could not reach account storage. Your document is still on this device.'
-          : 'Your document was saved, but Lash could not reconnect to it. Try again to finish opening the account copy.';
-      promotionAttemptRef.current = { ...submission, retryDetail: detail };
-      complete({ phase: 'retryable', detail });
-      return;
-    }
-    promotionAttemptRef.current = null;
-    complete({ phase: 'unavailable' });
   }, [
     activeDocumentId,
+    beginOwnerShareRequest,
+    deviceDraft,
     docTitle,
     editor,
     historyDocumentId,
@@ -3522,12 +3578,138 @@ function ResolvedDocumentWorkspace({
     promotionBaselineReady,
     staticPreview,
     unresolvedSuggestionCount,
+    verifySavedDeviceDraft,
   ]);
+
+  const checkAccountCopy = useCallback(async () => {
+    const activity = beginOwnerShareRequest('checking-copy');
+    if (!activity) return;
+    try {
+      await inviteIssuanceAuthority.checkAccountCopy();
+      const available =
+        inviteIssuanceAuthority.getSnapshot().promotionRecovery === 'account-copy-available';
+      activity.complete({
+        phase: 'promotion-recovery',
+        ...(available
+          ? {}
+          : {
+              detail:
+                'Lash couldn’t verify an account copy. Your edits are still in this device draft.',
+              mayCreateDeviceDraft: true,
+            }),
+      });
+    } catch {
+      activity.complete({
+        phase: 'promotion-recovery',
+        detail: 'Lash couldn’t check the account copy. Your edits are still in this device draft.',
+        mayCreateDeviceDraft: true,
+      });
+    } finally {
+      activity.release();
+    }
+  }, [beginOwnerShareRequest, inviteIssuanceAuthority]);
+
+  const openAccountCopy = useCallback(async () => {
+    if (promotionRecovery !== 'account-copy-available') return;
+    const activity = beginOwnerShareRequest('opening-copy');
+    if (!activity) return;
+    try {
+      if (!(await verifySavedDeviceDraft())) {
+        activity.complete({
+          phase: 'promotion-recovery',
+          detail:
+            'Lash couldn’t verify the device draft. Finish saving it before opening the account copy.',
+        });
+        return;
+      }
+      const result = await inviteIssuanceAuthority.openAccountCopy();
+      if (result.ok) {
+        promotionAttemptRef.current = null;
+        activity.complete({ phase: 'closed' });
+        return;
+      }
+    } catch {
+      // The controller keeps the device draft mounted if the copy cannot open.
+    } finally {
+      activity.release();
+    }
+    activity.complete({
+      phase: 'promotion-recovery',
+      detail: 'Lash couldn’t open the account copy. Your edits are still in this device draft.',
+    });
+  }, [beginOwnerShareRequest, inviteIssuanceAuthority, promotionRecovery, verifySavedDeviceDraft]);
+
+  const createSeparateDeviceDraft = useCallback(async () => {
+    if (
+      ownerShare.phase !== 'promotion-recovery' ||
+      !ownerShare.mayCreateDeviceDraft ||
+      inviteIssuanceAuthority.getSnapshot().promotionRecovery === 'account-copy-available'
+    ) {
+      return;
+    }
+    const activity = beginOwnerShareRequest('creating-device-draft');
+    if (!activity) return;
+    const fail = (detail: string) =>
+      activity.complete({ phase: 'promotion-recovery', detail, mayCreateDeviceDraft: true });
+    try {
+      const source = await verifySavedDeviceDraft();
+      if (!source) {
+        fail('Lash couldn’t verify this draft. Finish saving it before creating a separate draft.');
+        return;
+      }
+
+      const result = commitNewDeviceDocument({
+        storage: source.storage,
+        sourceDocumentId: activeDocumentId,
+        doc: source.envelope.doc,
+        title: source.title,
+        createDocumentId: createNewDocumentId,
+        validateSchema: validateLocalBodySchema,
+        shouldCancelBeforeCommit: () => !editor || editor.isDestroyed,
+      });
+      if (result.status === 'cleanup-unverified') {
+        fail(
+          `Lash couldn’t verify cleanup of the incomplete copy. Your original is still here. Recovery ID: ${result.destinationId}.`,
+        );
+        return;
+      }
+      if (result.status !== 'committed') {
+        fail('Lash couldn’t save a separate draft on this device. Your original is still here.');
+        return;
+      }
+      const { path } = result.destination;
+      activity.complete({ phase: 'device-copy-ready', path });
+      window.requestAnimationFrame(() => navigateDocument(path));
+    } catch {
+      fail('Lash couldn’t save a separate draft on this device. Your original is still here.');
+    } finally {
+      activity.release();
+    }
+  }, [
+    activeDocumentId,
+    beginOwnerShareRequest,
+    editor,
+    inviteIssuanceAuthority,
+    navigateDocument,
+    ownerShare,
+    validateLocalBodySchema,
+    verifySavedDeviceDraft,
+  ]);
+
   let ownerSharePhase: OwnerShareDialogPhase =
-    ownerShare.phase === 'closed' ? 'checking-account' : ownerShare.phase;
+    ownerShare.phase === 'closed' || ownerShare.phase === 'promotion-recovery'
+      ? 'checking-account'
+      : ownerShare.phase;
   let ownerShareDetail = 'detail' in ownerShare ? ownerShare.detail : undefined;
   if (ownerBacked) {
     ownerSharePhase = 'saved';
+  } else if (
+    ownerShare.phase !== 'device-copy-ready' &&
+    !('request' in ownerShare) &&
+    (deviceDraft || ownerShare.phase === 'promotion-recovery')
+  ) {
+    ownerSharePhase =
+      promotionRecovery === 'account-copy-available' ? 'account-copy-available' : 'device-draft';
   } else if (
     !promotionBaselineReady &&
     (ownerSharePhase === 'ready' || ownerSharePhase === 'retryable')
@@ -3541,6 +3723,12 @@ function ResolvedDocumentWorkspace({
         'Lash couldn’t verify this device’s saved draft and versions. Export a copy before leaving, or reopen the draft to retry.';
     }
   }
+  const handleOwnerSharePrimary = () => {
+    if (ownerShare.phase === 'device-copy-ready') navigateDocument(ownerShare.path);
+    else if (ownerSharePhase === 'device-draft') void checkAccountCopy();
+    else if (ownerSharePhase === 'account-copy-available') void openAccountCopy();
+    else void handleOwnerPromotion();
+  };
   const syntheticMentionFixtureEnabled =
     typeof window !== 'undefined' &&
     canMountSyntheticMentionFixture({
@@ -3881,6 +4069,15 @@ function ResolvedDocumentWorkspace({
         setOwnerShare((current) => {
           if (current.phase !== 'closed') return current;
           if (ownerBacked) return { phase: 'saved' };
+          if (deviceDraft) return { phase: 'promotion-recovery' };
+          const earlier = promotionAttemptRef.current;
+          const title = docTitle.trim() || DEFAULT_DOC_TITLE;
+          if (
+            earlier &&
+            (earlier.title !== title || (editor && !earlier.body.eq(editor.state.doc)))
+          ) {
+            return { phase: 'promotion-recovery' };
+          }
           return staticPreview
             ? {
                 phase: 'unavailable',
@@ -3892,7 +4089,16 @@ function ResolvedDocumentWorkspace({
       }
       openActivityPanel('share', trigger ?? null);
     },
-    [cancelPendingMobileRailAction, openActivityPanel, ownerBacked, runtimeMode, staticPreview],
+    [
+      cancelPendingMobileRailAction,
+      deviceDraft,
+      docTitle,
+      editor,
+      openActivityPanel,
+      ownerBacked,
+      runtimeMode,
+      staticPreview,
+    ],
   );
 
   const handleShareClick = useCallback(
@@ -3941,6 +4147,24 @@ function ResolvedDocumentWorkspace({
     (realtimeSnapshot.syncState === 'saved' || realtimeSnapshot.syncState === 'syncing')
       ? 'Read only'
       : realtimeLabel;
+  const canReturnToDeviceDraft =
+    realtimeSnapshot.syncState === 'saved' &&
+    realtimeSnapshot.pendingUpdateCount === 0 &&
+    realtimeSnapshot.queuedUpdateCount === 0;
+  const returnToDeviceDraft = () => {
+    const current = realtimeProvider?.getSnapshot();
+    if (
+      accountCopyOpen &&
+      current?.syncState === 'saved' &&
+      current.pendingUpdateCount === 0 &&
+      current.queuedUpdateCount === 0
+    ) {
+      const target = new URL(window.location.href);
+      target.searchParams.set(DEVICE_DRAFT_QUERY_PARAM, '1');
+      if (target.href === window.location.href) window.location.reload();
+      else window.location.assign(target.href);
+    }
+  };
   const handleMarkdownAutosaveControllerChange = useCallback(
     (controller: AutosaveFlushController | null) => {
       markdownAutosaveControllerRef.current = controller;
@@ -4476,6 +4700,36 @@ function ResolvedDocumentWorkspace({
                   />
                 ) : null}
 
+                {deviceDraft && !realtimeEnabled ? (
+                  <div className="lash-local-body-notice" data-testid="promotion-recovery-notice">
+                    <span role="status">Your edits are still in this device draft.</span>
+                    <button
+                      type="button"
+                      className="lash-local-body-notice-action"
+                      onClick={(event) => openSharePanel(event.currentTarget)}
+                    >
+                      Account save options
+                    </button>
+                  </div>
+                ) : null}
+                {accountCopyOpen ? (
+                  <div className="lash-local-body-notice" data-testid="account-copy-notice">
+                    <span role="status">
+                      {canReturnToDeviceDraft
+                        ? 'You’re editing the account copy. Your device draft is still here.'
+                        : 'Wait for the account copy to save before returning to the device draft.'}
+                    </span>
+                    <button
+                      type="button"
+                      className="lash-local-body-notice-action"
+                      disabled={!canReturnToDeviceDraft}
+                      onClick={returnToDeviceDraft}
+                    >
+                      Return to device draft
+                    </button>
+                  </div>
+                ) : null}
+
                 {!realtimeEnabled && documentIndexNeedsRetry ? (
                   <div
                     className="lash-local-body-notice"
@@ -4595,7 +4849,12 @@ function ResolvedDocumentWorkspace({
         detail={ownerShareDetail}
         documentTitle={docTitle.trim() || DEFAULT_DOC_TITLE}
         onClose={closeOwnerShareDialog}
-        onPrimary={() => void handleOwnerPromotion()}
+        onPrimary={handleOwnerSharePrimary}
+        onCreateDeviceDraft={
+          ownerShare.phase === 'promotion-recovery' && ownerShare.mayCreateDeviceDraft
+            ? () => void createSeparateDeviceDraft()
+            : undefined
+        }
         open={shareDialogOpen}
         phase={ownerSharePhase}
         namedEditRoomId={

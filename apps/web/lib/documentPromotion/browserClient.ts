@@ -33,7 +33,15 @@ export interface BrowserPromotionInput {
 export interface BrowserPromotionSubmitOptions {
   fetcher: typeof fetch;
   signal?: AbortSignal;
+  beforeSend?: (snapshot: BrowserPromotionSnapshotProof) => Promise<boolean>;
 }
+
+export type BrowserPromotionSnapshotProof = Readonly<{
+  localDocumentId: string;
+  title: string;
+  bodySha256: string;
+  snapshotSha256: string;
+}>;
 
 export interface BrowserDocumentPromotionAttempt {
   submit(options: BrowserPromotionSubmitOptions): Promise<BrowserPromotionResult>;
@@ -70,6 +78,7 @@ export type BrowserPromotionResult =
         | 'aborted'
         | 'invalid-response'
         | 'snapshot-mismatch'
+        | 'device-draft-unverified'
         | 'cryptography-unavailable';
       retryable: false;
     }
@@ -221,7 +230,7 @@ const encodeStandardBase64 = (bytes: Uint8Array) => {
 const encodeBase64Url = (bytes: Uint8Array) =>
   encodeStandardBase64(bytes).replaceAll('+', '-').replaceAll('/', '_').replace(/=+$/u, '');
 
-const sha256Base64Url = async (
+export const hashPromotionBytes = async (
   value: string | Uint8Array,
   cryptoImpl: Pick<Crypto, 'getRandomValues' | 'subtle'>,
 ) => {
@@ -350,12 +359,9 @@ const readBoundedResponseBody = async (response: Response) => {
   return new TextDecoder('utf-8', { fatal: true }).decode(bytes);
 };
 
-type PreparedBrowserPromotion = {
-  localDocumentId: string;
-  title: string;
+type PreparedBrowserPromotion = BrowserPromotionSnapshotProof & {
   canonicalBody: string;
   requestBody: string;
-  snapshotSha256: string;
 };
 
 type BrowserPromotionFailure = Exclude<BrowserPromotionResult, { ok: true }>;
@@ -444,9 +450,9 @@ const prepareBrowserDocumentPromotion = async (
     const idempotencyBytes = new Uint8Array(IDEMPOTENCY_BYTES);
     cryptoImpl.getRandomValues(idempotencyBytes);
     idempotencyKey = encodeBase64Url(idempotencyBytes);
-    bodySha256 = await sha256Base64Url(canonicalBody, cryptoImpl);
-    initialUpdateSha256 = await sha256Base64Url(initialUpdateBytes, cryptoImpl);
-    snapshotSha256 = await sha256Base64Url(
+    bodySha256 = await hashPromotionBytes(canonicalBody, cryptoImpl);
+    initialUpdateSha256 = await hashPromotionBytes(initialUpdateBytes, cryptoImpl);
+    snapshotSha256 = await hashPromotionBytes(
       canonicalize({
         version: 1,
         title,
@@ -490,6 +496,7 @@ const prepareBrowserDocumentPromotion = async (
       title,
       canonicalBody,
       requestBody,
+      bodySha256,
       snapshotSha256,
     },
   };
@@ -501,6 +508,17 @@ const submitPreparedBrowserPromotion = async (
 ): Promise<BrowserPromotionResult> => {
   const { signal } = options;
   if (signal?.aborted) return { ok: false, reason: 'aborted', retryable: false };
+  if (options.beforeSend) {
+    const { localDocumentId, title, bodySha256, snapshotSha256 } = prepared;
+    let recorded = false;
+    try {
+      recorded = await options.beforeSend({ localDocumentId, title, bodySha256, snapshotSha256 });
+    } catch {
+      // An unverifiable recovery record stops the request before account storage changes.
+    }
+    if (signal?.aborted) return { ok: false, reason: 'aborted', retryable: false };
+    if (!recorded) return { ok: false, reason: 'device-draft-unverified', retryable: false };
+  }
 
   let response: Response;
   let rawResponse: string;
@@ -584,10 +602,9 @@ const submitPreparedBrowserPromotion = async (
 };
 
 /**
- * Freezes one exact local snapshot and one closure-private idempotency key.
- * Retain this opaque attempt in memory across transport retries; every submit
- * emits byte-identical promotion JSON. Durable authority still changes only
- * after the separate owner-session hydration and parity checks succeed.
+ * Freezes one exact local snapshot and a closure-private idempotency key.
+ * The browser controller records the verified source before dispatch. After
+ * dispatch it reconciles account access through the owner-session route.
  */
 export const createBrowserDocumentPromotionAttempt = (
   input: BrowserPromotionInput,

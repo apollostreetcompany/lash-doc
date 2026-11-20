@@ -1,7 +1,7 @@
 import { createLashEditorExtensions } from '@lash/editor-core';
 import { getSchema } from '@tiptap/core';
 import { describe, expect, it, vi } from 'vitest';
-import { prosemirrorJSONToYDoc } from 'y-prosemirror';
+import { prosemirrorJSONToYDoc, yXmlFragmentToProsemirrorJSON } from 'y-prosemirror';
 import * as Y from 'yjs';
 
 import {
@@ -10,7 +10,18 @@ import {
   type DocumentAccessDependencies,
 } from '../../../../apps/web/lib/documentAccess';
 import type { DocumentMutationAuthority } from '../../../../apps/web/lib/documentMutationAuthority';
-import type { BrowserDocumentPromotionAttempt } from '../../../../apps/web/lib/documentPromotion/browserClient';
+import {
+  createBrowserDocumentPromotionAttempt,
+  type BrowserDocumentPromotionAttempt,
+} from '../../../../apps/web/lib/documentPromotion/browserClient';
+import { createBrowserPendingPromotionStore } from '../../../../apps/web/lib/documentPromotion/pendingPromotion';
+import { readDocumentTitle, saveDocumentTitle } from '../../../../apps/web/lib/documentRegistry';
+import {
+  assertStrictLocalBodySchemaJson,
+  loadLocalDocumentBody,
+  localBodyExpectedRevision,
+  saveLocalDocumentBody,
+} from '../../../../apps/web/lib/localDocumentBodyPersistence';
 import {
   createOwnerCandidateResources,
   createRealtimeDocument,
@@ -49,6 +60,7 @@ const configuredRuntime: RealtimeRuntimeSelection = {
 const createStorage = () => {
   const values = new Map<string, string>();
   return {
+    clear: () => values.clear(),
     get length() {
       return values.size;
     },
@@ -60,6 +72,130 @@ const createStorage = () => {
     setItem: (key: string, value: string) => {
       values.set(key, value);
     },
+  };
+};
+
+const pendingPromotionKey = `lash:pending-promotion:v1:${ROUTE_DOCUMENT_ID}`;
+const revisedBody = {
+  type: 'doc',
+  content: [{
+    type: 'paragraph',
+    content: [{ type: 'text', text: 'Bring the revised schedule.', marks: [{ type: 'bold' }] }],
+  }],
+};
+const revisedTitle = 'Local revision of the launch plan';
+
+const createPendingPromotionFixture = () => {
+  const storage = createStorage();
+  const schema = getSchema(createLashEditorExtensions());
+  const persistence = {
+    storage,
+    documentId: ROUTE_DOCUMENT_ID,
+    validateSchema: (doc: Record<string, unknown>) => assertStrictLocalBodySchemaJson(doc, schema),
+  };
+  const initial = saveLocalDocumentBody({
+    ...persistence,
+    doc: BODY,
+    expected: null,
+    createWriteId: () => 'initial-draft',
+  });
+  saveDocumentTitle(storage, ROUTE_DOCUMENT_ID, TITLE);
+
+  let accountSnapshot: { title: string; body: unknown; snapshotSha256: string } | undefined;
+  let account: 'original' | 'different' = 'original';
+  let beforeNextOwnerSession: (() => Promise<void>) | undefined;
+  const fetcher = vi.fn<Parameters<typeof fetch>, ReturnType<typeof fetch>>(async (url, request) => {
+    if (url === `/api/documents/${ROUTE_DOCUMENT_ID}/promote`) {
+      const { snapshot } = JSON.parse(request?.body as string);
+      expect(snapshot).toMatchObject({ title: TITLE, body: BODY });
+      expect(JSON.parse(storage.getItem(pendingPromotionKey) ?? 'null')).toEqual({
+        version: 1,
+        documentId: ROUTE_DOCUMENT_ID,
+        snapshotSha256: snapshot.snapshotSha256,
+        bodySha256: snapshot.bodySha256,
+        revision: 1,
+        writeId: 'initial-draft',
+        title: TITLE,
+      });
+      accountSnapshot = snapshot;
+      throw new TypeError('Connection lost after the fixture committed the promotion');
+    }
+
+    expect(url).toBe(`/api/documents/${ROUTE_DOCUMENT_ID}/owner-session`);
+    const beforeResponse = beforeNextOwnerSession;
+    beforeNextOwnerSession = undefined;
+    await beforeResponse?.();
+    if (!accountSnapshot) {
+      return Response.json(
+        { version: 1, ok: false, error: 'document-unavailable', retryable: false },
+        { status: 404 },
+      );
+    }
+    const session = ownerSession({ promotionSnapshotSha256: account === 'original'
+      ? accountSnapshot.snapshotSha256
+      : SNAPSHOT_SHA256 });
+    return Response.json({
+      version: 1,
+      ok: true,
+      localDocumentId: session.routeDocumentId,
+      remoteDocumentId: session.remoteDocumentId,
+      promotionSnapshotSha256: session.promotionSnapshotSha256,
+      access: {
+        source: session.source,
+        capabilities: session.capabilities,
+        protocolVersion: session.protocolVersion,
+      },
+      socket: {
+        url: session.socketUrl,
+        protocol: session.socketProtocol,
+        ticketProtocol: session.ticketProtocol,
+        expiresAt: session.expiresAt,
+      },
+    });
+  });
+  const pendingPromotionStore = createBrowserPendingPromotionStore(storage, {
+    read: async () => ({ primaryRaw: null, backupRaw: null }),
+    commit: vi.fn(),
+  });
+  const createPage = (createOwnerResources = createCandidateFactory(), preferDeviceDraft = false) => createDocumentAccessController(
+    { documentId: ROUTE_DOCUMENT_ID },
+    createHarness({
+      createOwnerResources,
+      fetcher,
+      pendingPromotionStore,
+      preferDeviceDraft,
+      requestOwnerSession: (input) => requestBrowserOwnerSession({ ...input, fetcher }),
+    }, configuredRuntime).dependencies,
+  );
+  const createAttempt = () => {
+    const saved = loadLocalDocumentBody(persistence);
+    if (saved.state !== 'ready') throw new Error('Could not verify the fixture draft');
+    return createBrowserDocumentPromotionAttempt({
+      localDocumentId: ROUTE_DOCUMENT_ID,
+      title: readDocumentTitle(storage, ROUTE_DOCUMENT_ID),
+      body: saved.envelope.doc,
+      adjuncts: { comments: 0, suggestions: 0 },
+    }, globalThis.crypto);
+  };
+  return {
+    storage,
+    createPage,
+    createAttempt,
+    submit: (page: ReturnType<typeof createPage>) => page.promoteOwnerDocument(createAttempt()),
+    switchAccount(next: typeof account) { account = next; },
+    delayNextOwnerSession(delay: () => Promise<void>) { beforeNextOwnerSession = delay; },
+    saveRevisedDraft() {
+      saveLocalDocumentBody({
+        ...persistence,
+        doc: revisedBody,
+        expected: localBodyExpectedRevision(initial),
+        createWriteId: () => 'revised-draft',
+      });
+      saveDocumentTitle(storage, ROUTE_DOCUMENT_ID, revisedTitle);
+    },
+    readDraft: () => loadLocalDocumentBody(persistence),
+    readTitle: () => readDocumentTitle(storage, ROUTE_DOCUMENT_ID),
+    submittedRequests: () => fetcher.mock.calls.filter(([url]) => String(url).endsWith('/promote')),
   };
 };
 
@@ -237,6 +373,242 @@ const createHarness = (
 };
 
 describe('account-owner access cutover', () => {
+  it('keeps a newer device draft after an ambiguous save and opens the matching account copy only by choice', async () => {
+    const fixture = createPendingPromotionFixture();
+    const firstPage = fixture.createPage();
+    await firstPage.start();
+    const exactAttempt = fixture.createAttempt();
+    await expect(firstPage.promoteOwnerDocument(exactAttempt)).resolves.toMatchObject({
+      ok: false,
+      reason: 'device-draft-preserved',
+      retryable: false,
+    });
+    expect(firstPage.getSnapshot().promotionRecovery).toBe('device-draft');
+    expect(firstPage.getMutationAuthority().getSnapshot()).toMatchObject({ bodyWrite: true });
+    fixture.switchAccount('different');
+    await expect(firstPage.promoteOwnerDocument(exactAttempt)).resolves.toMatchObject({
+      ok: false,
+      reason: 'device-draft-preserved',
+    });
+    expect(fixture.submittedRequests()).toHaveLength(1);
+    fixture.switchAccount('original');
+    fixture.saveRevisedDraft();
+    firstPage.destroy();
+
+    const savedMarker = fixture.storage.getItem(pendingPromotionKey);
+    const candidate = createCandidateFactory();
+    const reloaded = fixture.createPage(candidate);
+    await reloaded.start();
+    expect(reloaded.getResolution()).toMatchObject({ kind: 'local' });
+    expect(reloaded.getSnapshot().promotionRecovery).toBe('device-draft');
+    await reloaded.checkAccountCopy();
+    expect(reloaded.getSnapshot().promotionRecovery).toBe('account-copy-available');
+    expect(reloaded.getMutationAuthority().getSnapshot()).toMatchObject({ bodyWrite: true, remoteDocumentId: null });
+    expect(candidate).not.toHaveBeenCalled();
+
+    fixture.switchAccount('different');
+    await expect(reloaded.openAccountCopy()).resolves.toMatchObject({
+      ok: false,
+      reason: 'device-draft-preserved',
+    });
+    expect(reloaded.getSnapshot().promotionRecovery).toBe('device-draft');
+    expect(candidate).not.toHaveBeenCalled();
+
+    fixture.switchAccount('original');
+    await reloaded.checkAccountCopy();
+    expect(reloaded.getSnapshot().promotionRecovery).toBe('account-copy-available');
+    expect(candidate).not.toHaveBeenCalled();
+    await expect(reloaded.openAccountCopy()).resolves.toMatchObject({
+      ok: true,
+      remoteDocumentId: REMOTE_DOCUMENT_ID,
+    });
+    const accountCopy = reloaded.getResolution();
+    expect(accountCopy?.kind).toBe('remote');
+    if (!accountCopy || accountCopy.kind !== 'remote') throw new Error('Account copy did not open');
+    expect(readRealtimeDocumentTitle(accountCopy.doc)).toBe(TITLE);
+    expect(yXmlFragmentToProsemirrorJSON(accountCopy.doc.getXmlFragment('content'))).toEqual(BODY);
+    expect(reloaded.getSnapshot().promotionRecovery).toBe('account-copy-open');
+    expect(fixture.storage.getItem(pendingPromotionKey)).toBe(savedMarker);
+    expect(fixture.readDraft()).toMatchObject({
+      state: 'ready',
+      envelope: { doc: revisedBody, revision: 2, writeId: 'revised-draft' },
+    });
+    expect(fixture.readTitle()).toBe(revisedTitle);
+    expect(fixture.submittedRequests()).toHaveLength(1);
+    reloaded.destroy();
+
+    const returned = fixture.createPage();
+    await returned.start();
+    expect(returned.getResolution()).toMatchObject({ kind: 'local' });
+    expect(returned.getSnapshot().promotionRecovery).toBe('device-draft');
+    returned.destroy();
+  });
+
+  it('keeps matching device text when new local Discussion is present after the response loss', async () => {
+    const fixture = createPendingPromotionFixture();
+    const firstPage = fixture.createPage();
+    await firstPage.start();
+    await fixture.submit(firstPage);
+    firstPage.destroy();
+    const discussionKey = `lash:chat-threads:${ROUTE_DOCUMENT_ID}`;
+    const newDiscussion = JSON.stringify([{ id: 'new-local-thread' }]);
+    fixture.storage.setItem(discussionKey, newDiscussion);
+
+    const reloaded = fixture.createPage();
+    await reloaded.start();
+    expect(reloaded.getResolution()).toMatchObject({ kind: 'local' });
+    expect(reloaded.getSnapshot().promotionRecovery).toBe('device-draft');
+    expect(fixture.storage.getItem(discussionKey)).toBe(newDiscussion);
+    expect(fixture.storage.getItem(pendingPromotionKey)).not.toBeNull();
+    reloaded.destroy();
+  });
+
+  it('recognizes unchanged local work without an extra promotion and keeps newer account edits', async () => {
+    const fixture = createPendingPromotionFixture();
+    const firstPage = fixture.createPage();
+    await firstPage.start();
+    await fixture.submit(firstPage);
+    firstPage.destroy();
+    expect(fixture.storage.getItem(pendingPromotionKey)).not.toBeNull();
+
+    const newerAccountTitle = 'Updated from another device';
+    const reloaded = fixture.createPage(createCandidateFactory({ body: revisedBody, title: newerAccountTitle }));
+    await reloaded.start();
+    const accountCopy = reloaded.getResolution();
+    if (!accountCopy || accountCopy.kind !== 'remote') throw new Error('Account copy did not reopen');
+    expect(readRealtimeDocumentTitle(accountCopy.doc)).toBe(newerAccountTitle);
+    expect(fixture.submittedRequests()).toHaveLength(1);
+    expect(fixture.storage.getItem(pendingPromotionKey)).toBeNull();
+    expect(reloaded.getSnapshot().promotionRecovery).toBeUndefined();
+    reloaded.destroy();
+  });
+
+  it('confirms an explicitly opened account copy when the device draft is unchanged', async () => {
+    const fixture = createPendingPromotionFixture();
+    const page = fixture.createPage();
+    await page.start();
+    await fixture.submit(page);
+    await page.checkAccountCopy();
+    expect(page.getResolution()).toMatchObject({ kind: 'local' });
+    expect(page.getSnapshot().promotionRecovery).toBe('account-copy-available');
+    await expect(page.openAccountCopy()).resolves.toMatchObject({ ok: true });
+    expect(page.getSnapshot().promotionRecovery).toBeUndefined();
+    expect(fixture.storage.getItem(pendingPromotionKey)).toBeNull();
+    expect(fixture.submittedRequests()).toHaveLength(1);
+    page.destroy();
+  });
+
+  it('honors an explicit return to the pending device draft even when the persisted body matches', async () => {
+    const fixture = createPendingPromotionFixture();
+    const original = fixture.createPage();
+    await original.start();
+    await fixture.submit(original);
+    original.destroy();
+
+    const candidate = createCandidateFactory();
+    const returned = fixture.createPage(candidate, true);
+    await returned.start();
+    expect(returned.getResolution()).toMatchObject({ kind: 'local' });
+    expect(returned.getSnapshot().promotionRecovery).toBe('device-draft');
+    expect(candidate).not.toHaveBeenCalled();
+    expect(fixture.storage.getItem(pendingPromotionKey)).not.toBeNull();
+    await returned.checkAccountCopy();
+    await expect(returned.openAccountCopy()).resolves.toMatchObject({ ok: true });
+    expect(fixture.storage.getItem(pendingPromotionKey)).toBeNull();
+    returned.destroy();
+  });
+
+  it('keeps the source when a different account signs in during automatic hydration', async () => {
+    const fixture = createPendingPromotionFixture();
+    const original = fixture.createPage();
+    await original.start();
+    await fixture.submit(original);
+    original.destroy();
+
+    const hydration = Promise.withResolvers<void>();
+    const candidate = createCandidateFactory({ waitForHydration: hydration.promise });
+    const reloaded = fixture.createPage(candidate);
+    const starting = reloaded.start();
+    await vi.waitFor(() => expect(candidate).toHaveBeenCalledOnce());
+    fixture.switchAccount('different');
+    hydration.resolve();
+    await starting;
+    expect(reloaded.getResolution()).toMatchObject({ kind: 'local' });
+    expect(reloaded.getSnapshot().promotionRecovery).toBe('device-draft');
+    expect(candidate.mock.results[0]?.value.provider.commitAuthorityOwnership).not.toHaveBeenCalled();
+    expect(fixture.storage.getItem(pendingPromotionKey)).not.toBeNull();
+    reloaded.destroy();
+  });
+
+  it('keeps a newer device save made while the final marked account check is pending', async () => {
+    const fixture = createPendingPromotionFixture();
+    const original = fixture.createPage();
+    await original.start();
+    await fixture.submit(original);
+    original.destroy();
+
+    const hydration = Promise.withResolvers<void>();
+    const candidate = createCandidateFactory({ waitForHydration: hydration.promise });
+    const reloaded = fixture.createPage(candidate);
+    const starting = reloaded.start();
+    await vi.waitFor(() => expect(candidate).toHaveBeenCalledOnce());
+    const finalCheck = Promise.withResolvers<void>();
+    const finalCheckStarted = Promise.withResolvers<void>();
+    fixture.delayNextOwnerSession(() => {
+      finalCheckStarted.resolve();
+      return finalCheck.promise;
+    });
+    hydration.resolve();
+    await finalCheckStarted.promise;
+    fixture.saveRevisedDraft();
+    finalCheck.resolve();
+    await starting;
+    expect(reloaded.getResolution()).toMatchObject({ kind: 'local' });
+    expect(reloaded.getSnapshot().promotionRecovery).toBe('device-draft');
+    expect(candidate.mock.results[0]?.value.provider.commitAuthorityOwnership).not.toHaveBeenCalled();
+    expect(fixture.storage.getItem(pendingPromotionKey)).not.toBeNull();
+    reloaded.destroy();
+  });
+
+  it('keeps the device draft when its pending account-save marker cannot be verified', async () => {
+    const fixture = createPendingPromotionFixture();
+    const original = fixture.createPage();
+    await original.start();
+    await fixture.submit(original);
+    original.destroy();
+    fixture.storage.setItem(pendingPromotionKey, '{"version":2}');
+
+    const candidate = createCandidateFactory();
+    const reloaded = fixture.createPage(candidate);
+    await reloaded.start();
+    await reloaded.checkAccountCopy();
+    expect(reloaded.getResolution()).toMatchObject({ kind: 'local' });
+    expect(reloaded.getSnapshot().promotionRecovery).toBe('device-draft');
+    expect(candidate).not.toHaveBeenCalled();
+    expect(fixture.storage.getItem(pendingPromotionKey)).toBe('{"version":2}');
+    reloaded.destroy();
+  });
+
+  it('does not dispatch promotion when the browser cannot verify the pending marker write', async () => {
+    const fixture = createPendingPromotionFixture();
+    const firstPage = fixture.createPage();
+    await firstPage.start();
+    const save = fixture.storage.setItem;
+    vi.spyOn(fixture.storage, 'setItem').mockImplementation((key, value) => {
+      if (key !== pendingPromotionKey) save(key, value);
+    });
+    await expect(fixture.submit(firstPage)).resolves.toMatchObject({
+      ok: false,
+      reason: 'promotion-failed',
+      promotion: { reason: 'device-draft-unverified', retryable: false },
+    });
+    expect(firstPage.getResolution()).toMatchObject({ kind: 'local' });
+    expect(firstPage.getMutationAuthority().getSnapshot()).toMatchObject({ bodyWrite: true });
+    expect(fixture.submittedRequests()).toHaveLength(0);
+    expect(firstPage.getSnapshot().promotionRecovery).toBeUndefined();
+    firstPage.destroy();
+  });
+
   it('passes the frozen 43-character promotion snapshot through the real owner provider boundary', () => {
     const controller = createDocumentAccessController(
       { documentId: ROUTE_DOCUMENT_ID },

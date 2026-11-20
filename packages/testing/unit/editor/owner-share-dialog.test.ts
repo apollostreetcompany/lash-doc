@@ -81,6 +81,53 @@ describe('owner Share dialog', () => {
     expect(input.onPrimary).toHaveBeenCalledTimes(1);
   });
 
+  it('requires a separate Open action after checking a preserved device draft', async () => {
+    const input = props({ phase: 'device-draft', onManagePublicAccess: vi.fn() });
+    const { host, rerender } = await render(React.createElement(OwnerShareDialog, input));
+    expect(host.textContent).toContain('Your edits are still in this device draft.');
+    expect(button(host, 'Open account copy')).toBeUndefined();
+    expect(button(host, 'Create separate device draft')).toBeUndefined();
+    expect(button(host, 'Manage in document settings')).toBeUndefined();
+    expect(host.querySelector('a')?.getAttribute('href')).toBe(input.signInHref);
+    await React.act(async () => button(host, 'Check account copy')?.click());
+    expect(input.onPrimary).toHaveBeenCalledTimes(1);
+
+    await rerender(React.createElement(OwnerShareDialog, { ...input, phase: 'checking-copy' }));
+    expect(button(host, 'Checking account copy…')?.disabled).toBe(true);
+    expect(button(host, 'Open account copy')).toBeUndefined();
+
+    await rerender(
+      React.createElement(OwnerShareDialog, { ...input, phase: 'account-copy-available' }),
+    );
+    expect(host.textContent).toContain('You can open the verified account copy.');
+    expect(button(host, 'Manage in document settings')).toBeUndefined();
+    await React.act(async () => button(host, 'Open account copy')?.click());
+    expect(input.onPrimary).toHaveBeenCalledTimes(2);
+
+    await rerender(React.createElement(OwnerShareDialog, { ...input, phase: 'opening-copy' }));
+    expect(button(host, 'Opening account copy…')?.disabled).toBe(true);
+    expect(host.querySelector<HTMLButtonElement>('[aria-label="Close sharing"]')?.disabled).toBe(
+      true,
+    );
+  });
+
+  it('discloses what stays with the original before creating a separate device draft', async () => {
+    const onCreateDeviceDraft = vi.fn();
+    const input = props({ phase: 'device-draft', onCreateDeviceDraft });
+    const { host, rerender } = await render(React.createElement(OwnerShareDialog, input));
+    expect(host.textContent).toMatch(/Discussion, suggestions,\s*and version history stay/);
+    await React.act(async () => button(host, 'Create separate device draft')?.click());
+    expect(onCreateDeviceDraft).toHaveBeenCalledTimes(1);
+
+    await rerender(
+      React.createElement(OwnerShareDialog, { ...input, phase: 'creating-device-draft' }),
+    );
+    expect(button(host, 'Creating separate draft…')?.disabled).toBe(true);
+    await rerender(React.createElement(OwnerShareDialog, { ...input, phase: 'device-copy-ready' }));
+    expect(button(host, 'Open separate draft')?.disabled).toBe(false);
+    expect(button(host, 'Create separate device draft')).toBeUndefined();
+  });
+
   it('links an encoded local continuation before enabling account saving', async () => {
     const { host } = await render(
       React.createElement(OwnerShareDialog, props({ phase: 'signed-out' })),
