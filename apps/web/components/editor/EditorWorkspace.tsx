@@ -1285,11 +1285,18 @@ function ResolvedDocumentWorkspace({
 
   const closeActivityRail = useCallback(() => {
     cancelPendingMobileRailAction();
+    if (getWorkspaceViewport() === 'desktop') {
+      const trigger = activityRailTriggerRef.current;
+      activityRailTriggerRef.current = null;
+      if (trigger?.isConnected && !trigger.closest('#lash-rail')) {
+        const { activeElement, body } = trigger.ownerDocument;
+        // Return focus before the rail unmounts, while its focus is still ours to move.
+        if (activeElement === body || activeElement?.closest('#lash-rail')) {
+          trigger.focus({ preventScroll: true });
+        }
+      }
+    }
     dispatchChrome({ type: 'close-rail', restoreFocus: true });
-    if (getWorkspaceViewport() === 'mobile') return;
-    const trigger = activityRailTriggerRef.current;
-    activityRailTriggerRef.current = null;
-    window.requestAnimationFrame(() => trigger?.focus({ preventScroll: true }));
   }, [cancelPendingMobileRailAction]);
 
   const handleChatDocumentNavigation = useCallback(
