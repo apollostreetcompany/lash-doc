@@ -27,6 +27,7 @@ import {
   type UnchangedSpan,
 } from '@lash/types';
 
+import { mixedBodyFormattingChanged, textDiffEdges } from './bodyDiff';
 import { applyBodyPatch, createBodyPatch } from './bodyPatch';
 import {
   HISTORY_CANONICAL_VERSION,
@@ -1060,8 +1061,6 @@ type DiffSpanInput =
 const spanId = (span: DiffSpanInput, index: number): string =>
   `span:${index}:${canonicalize(span)}`;
 
-const textOf = (doc: unknown): string => toHistoryState(doc, true).text;
-
 const materializeVersions = (entries: HistoryEntry[], baseline: HistoryDocumentState): Map<string, unknown> => {
   const states = new Map<string, unknown>();
   let state: unknown = cloneJson(baseline);
@@ -1097,25 +1096,18 @@ const diffStates = (
     throw new Error('computeDiff: unknown from/to version');
   }
 
-  const before = textOf(fromDoc);
-  const after = textOf(toDoc);
+  const { text: before, body: beforeBody } = toHistoryState(fromDoc, true);
+  const { text: after, body: afterBody } = toHistoryState(toDoc, true);
   const toEntry = entries.find((entry) => entry.resultSha === toSha);
-  const fromEntry = entries.find((entry) => entry.resultSha === fromSha);
+  // Restores can reuse a content hash. An unqualified hash cannot identify the actor.
+  const adjacent =
+    toEntry?.parentSha === fromSha &&
+    !entries.some((entry) => entry !== toEntry && entry.resultSha === toSha);
+  const fromEntry = adjacent
+    ? entries.find((entry) => entry.seq === toEntry.seq - 1 && entry.resultSha === fromSha)
+    : undefined;
   const spans: DiffSpan[] = [];
-
-  let prefix = 0;
-  while (prefix < before.length && prefix < after.length && before[prefix] === after[prefix]) {
-    prefix += 1;
-  }
-
-  let suffix = 0;
-  while (
-    suffix < before.length - prefix &&
-    suffix < after.length - prefix &&
-    before[before.length - 1 - suffix] === after[after.length - 1 - suffix]
-  ) {
-    suffix += 1;
-  }
+  const { prefix, suffix } = textDiffEdges(before, after);
 
   const addSpan = (span: DiffSpanInput) => {
     spans.push({ ...span, id: spanId(span, spans.length) } as DiffSpan);
@@ -1132,11 +1124,15 @@ const diffStates = (
       from: prefix,
       to: prefix,
       text: deleted,
-      entryId: fromEntry?.id,
-      authorId: fromEntry?.actor.id,
-      actorType: fromEntry?.actor.type,
-      intent: fromEntry?.intent,
-      ts: fromEntry?.ts,
+      ...(adjacent
+        ? {
+            entryId: fromEntry?.id,
+            authorId: fromEntry?.actor.id,
+            actorType: fromEntry?.actor.type,
+            intent: fromEntry?.intent,
+            ts: fromEntry?.ts,
+          }
+        : {}),
     });
   }
 
@@ -1147,12 +1143,16 @@ const diffStates = (
       from: prefix,
       to: prefix + inserted.length,
       text: inserted,
-      entryId: toEntry?.id,
-      opIndex: 0,
-      authorId: toEntry?.actor.id,
-      actorType: toEntry?.actor.type,
-      intent: toEntry?.intent,
-      ts: toEntry?.ts,
+      ...(adjacent
+        ? {
+            entryId: toEntry.id,
+            opIndex: 0,
+            authorId: toEntry.actor.id,
+            actorType: toEntry.actor.type,
+            intent: toEntry.intent,
+            ts: toEntry.ts,
+          }
+        : {}),
     });
   }
 
@@ -1160,9 +1160,22 @@ const diffStates = (
     addSpan({ kind: 'unchanged', from: after.length - suffix, to: after.length });
   }
 
-  if (before === after && isRecord(fromDoc) && isRecord(toDoc) && fromDoc.body && toDoc.body &&
-      canonicalize(fromDoc.body) !== canonicalize(toDoc.body)) {
-    addSpan({ kind: 'attrChanged', from: 0, to: after.length, nodeId: 'document', before: {}, after: {} });
+  if (
+    beforeBody &&
+    afterBody &&
+    beforeBody !== afterBody &&
+    (before === after
+      ? canonicalize(beforeBody) !== canonicalize(afterBody)
+      : mixedBodyFormattingChanged(beforeBody, afterBody))
+  ) {
+    addSpan({
+      kind: 'attrChanged',
+      from: 0,
+      to: after.length,
+      nodeId: 'document',
+      before: {},
+      after: {},
+    });
   }
 
   if (!spans.length) {
