@@ -24,9 +24,9 @@ test('keeps an older version comparison in view with a long device history', asy
   const versions = page.getByTestId('history-version');
   const changedText = page.getByTestId('history-diff-insert');
   const restore = page.getByRole('button', { name: 'Restore', exact: true });
-  const versionCount = 14;
-  const comparisonVersion = 8;
-  const firstRecentVersion = 11;
+  const versionCount = 8;
+  const comparisonVersion = 5;
+  const firstRecentVersion = 7;
   const today = Date.now();
   await page.clock.setFixedTime(today - 8 * 24 * 60 * 60 * 1000);
   await editor.click();
@@ -98,13 +98,13 @@ test('keeps an older version comparison in view with a long device history', asy
     await expect(mobileVersions).toHaveCount(versionCount + 1);
     await expect(mobileVersions.last()).toHaveAttribute('aria-pressed', 'true');
     await expect(mobileVersions.last()).toBeInViewport({ ratio: 1 });
-    const mobileTarget = mobileVersions.nth(10);
+    const mobileTarget = mobileVersions.nth(comparisonVersion - 1);
     await mobileTarget.scrollIntoViewIfNeeded();
     const mobilePosition = await canvasPosition(mobile);
     await mobileTarget.tap();
     await expect(mobileTarget).toHaveAttribute('aria-pressed', 'true');
     const mobileChange = mobile.getByTestId('history-diff-insert');
-    await expect(mobileChange).toHaveText('Note 11.');
+    await expect(mobileChange).toHaveText(`Note ${comparisonVersion}.`);
     await expect(mobileChange).toBeInViewport({ ratio: 1 });
     await expect(mobile.getByRole('button', { name: 'Restore', exact: true })).toBeInViewport({
       ratio: 1,
