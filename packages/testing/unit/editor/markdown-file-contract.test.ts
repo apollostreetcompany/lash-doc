@@ -916,26 +916,48 @@ Plain text with **bold text**.
   });
 
   it('rejects unsafe export URLs and structurally invalid documents', () => {
+    const unsafeParagraph = {
+      type: 'paragraph',
+      content: [
+        {
+          type: 'text',
+          text: 'unsafe',
+          marks: [{ type: 'link', attrs: { href: 'javascript:alert(1)' } }],
+        },
+      ],
+    };
     const unsafe = serializeDocToMarkdownFile(
+      { type: 'doc', content: [unsafeParagraph] },
+      { title: 'Unsafe' },
+    );
+    expect(unsafe.markdown).toBe('');
+    expect(unsafe.blockedReasons).toEqual(['Link uses an unsafe URL.']);
+
+    const unsafeShareCopy = serializeDocToMarkdownFile(
       {
         type: 'doc',
         content: [
           {
-            type: 'paragraph',
+            type: 'table',
             content: [
               {
-                type: 'text',
-                text: 'unsafe',
-                marks: [{ type: 'link', attrs: { href: 'javascript:alert(1)' } }],
+                type: 'tableRow',
+                content: [
+                  {
+                    type: 'tableCell',
+                    attrs: { cellType: 'status', value: 'Done' },
+                    content: [unsafeParagraph],
+                  },
+                ],
               },
             ],
           },
         ],
       },
-      { title: 'Unsafe' },
+      { title: 'Unsafe', mode: 'share-copy' },
     );
-    expect(unsafe.markdown).toBe('');
-    expect(unsafe.blockedReasons).toEqual(['Link uses an unsafe URL.']);
+    expect(unsafeShareCopy.markdown).toBe('');
+    expect(unsafeShareCopy.blockedReasons).toEqual(['Link uses an unsafe URL.']);
 
     const invalid = serializeDocToMarkdownFile(
       { type: 'paragraph', content: [{ type: 'text', text: 'not a doc' }] },
