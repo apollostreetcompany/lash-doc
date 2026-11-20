@@ -30,14 +30,21 @@ type WorkerResult =
       commentError?: NamedCommentInviteError;
     };
 
-type WorkerRequest = {
+type WorkerAuthority = {
   workerOrigin: string;
   controlSecret: string;
   roomId: string;
   principalId: string;
+};
+type NamedEditWorkerRequest = WorkerAuthority & {
   operation: NamedEditOperation;
   body: Record<string, unknown>;
 };
+type RecentWorkerRequest = WorkerAuthority & {
+  operation: 'recent';
+  body: { version: 1 };
+};
+type RecentWorkerResult = { ok: true; title: string } | { ok: false; status: 403 | 503 };
 
 const workerInvite = (value: unknown): value is WorkerNamedInvite =>
   isObject(value) &&
@@ -55,7 +62,9 @@ const interruptedBody = Symbol('interrupted named edit response body');
 export async function readNamedEditJson(
   request: Request | Response,
   limit: number,
+  signal?: AbortSignal,
 ): Promise<unknown> {
+  if (signal?.aborted) return interruptedBody;
   const declared = request.headers.get('content-length');
   if (
     !request.body ||
@@ -64,18 +73,20 @@ export async function readNamedEditJson(
     return null;
   }
   const reader = request.body.getReader();
+  const cancel = () => void reader.cancel().catch(() => undefined);
+  signal?.addEventListener('abort', cancel, { once: true });
   const decoder = new TextDecoder('utf-8', { fatal: true });
   let bytes = 0;
   let body = '';
   try {
     while (true) {
       const chunk = await reader.read().catch(() => null);
-      if (!chunk) return interruptedBody;
+      if (!chunk || signal?.aborted) return interruptedBody;
       const { done, value } = chunk;
       if (done) break;
       bytes += value.byteLength;
       if (bytes > limit) {
-        await reader.cancel();
+        cancel();
         return null;
       }
       body += decoder.decode(value, { stream: true });
@@ -84,11 +95,16 @@ export async function readNamedEditJson(
   } catch {
     return null;
   } finally {
+    signal?.removeEventListener('abort', cancel);
     reader.releaseLock();
   }
 }
 
-const parseResult = (data: unknown, status: number, request: WorkerRequest): WorkerResult => {
+const parseResult = (
+  data: unknown,
+  status: number,
+  request: NamedEditWorkerRequest,
+): WorkerResult => {
   if (data === interruptedBody) return { ok: false, status: 503 };
   const invalidResponse = {
     ok: false,
@@ -182,10 +198,42 @@ const parseResult = (data: unknown, status: number, request: WorkerRequest): Wor
   return invalidResponse;
 };
 
+function parseRecentResult(data: unknown, status: number): RecentWorkerResult {
+  if (!isObject(data) || data.version !== 1) return { ok: false, status: 503 };
+  if (
+    status === 403 &&
+    hasKeys(data, ['ok', 'version', 'error', 'retryable']) &&
+    data.ok === false &&
+    data.error === 'forbidden' &&
+    data.retryable === false
+  ) {
+    return { ok: false, status: 403 };
+  }
+  if (
+    status === 200 &&
+    hasKeys(data, ['ok', 'version', 'title']) &&
+    data.ok === true &&
+    typeof data.title === 'string' &&
+    data.title.trim() &&
+    Buffer.byteLength(data.title, 'utf8') <= 4 * 1024
+  ) {
+    return { ok: true, title: data.title.trim() };
+  }
+  return { ok: false, status: 503 };
+}
+
 export async function callNamedEditWorker(
-  request: WorkerRequest,
+  request: NamedEditWorkerRequest,
+  fetcher?: typeof fetch,
+): Promise<WorkerResult>;
+export async function callNamedEditWorker(
+  request: RecentWorkerRequest,
+  fetcher?: typeof fetch,
+): Promise<RecentWorkerResult>;
+export async function callNamedEditWorker(
+  request: NamedEditWorkerRequest | RecentWorkerRequest,
   fetcher = fetch,
-): Promise<WorkerResult> {
+): Promise<WorkerResult | RecentWorkerResult> {
   const pathname = `/api/management/documents/${request.roomId}/named-edit/${request.operation}`;
   const body = canonicalize(request.body);
   const bodyHash = createHash('sha256').update(body).digest('base64url');
@@ -203,6 +251,7 @@ export async function callNamedEditWorker(
   const signature = createHmac('sha256', request.controlSecret)
     .update(assertion)
     .digest('base64url');
+  const signal = AbortSignal.timeout(8000);
   try {
     const response = await fetcher(request.workerOrigin + pathname, {
       method: 'POST',
@@ -218,12 +267,18 @@ export async function callNamedEditWorker(
       cache: 'no-store',
       credentials: 'omit',
       redirect: 'error',
-      signal: AbortSignal.timeout(8000),
+      signal,
     });
-    if (response.headers.get('content-type')?.split(';', 1)[0]?.trim() !== 'application/json') {
-      return parseResult(null, response.status, request);
-    }
-    return parseResult(await readNamedEditJson(response, 640 * 1024), response.status, request);
+    const recent = request.operation === 'recent';
+    // JSON escaping can expand each byte of a 4 KiB title up to sixfold.
+    const responseLimit = recent ? 25 * 1024 : 640 * 1024;
+    const data =
+      response.headers.get('content-type')?.split(';', 1)[0]?.trim() === 'application/json'
+        ? await readNamedEditJson(response, responseLimit, recent ? signal : undefined)
+        : null;
+    return recent
+      ? parseRecentResult(data, response.status)
+      : parseResult(data, response.status, request);
   } catch {
     return { ok: false, status: 503 };
   }

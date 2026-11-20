@@ -63,6 +63,29 @@ const failure = (status: number) =>
     status,
   );
 
+export { response as namedEditRouteResponse, failure as namedEditRouteFailure };
+
+export function loadNamedEditRouteConfig() {
+  const worker = loadDocumentPromotionConfig();
+  const siteOrigin = requireSupabaseAuthConfig().siteOrigin;
+  const rawKey = process.env.LASH_NAMED_EDIT_KEY ?? '';
+  const key = Buffer.from(rawKey, 'base64url');
+  if (key.length < 32 || key.toString('base64url') !== rawKey) {
+    throw new Error('Invalid named edit key');
+  }
+  return { worker, siteOrigin, key };
+}
+
+export const isTrustedNamedEditRequest = (request: NextRequest, siteOrigin: string) =>
+  isTrustedSiteRequest(request, siteOrigin, { requireOriginHeader: true }) &&
+  request.headers.get('sec-fetch-site') === 'same-origin' &&
+  request.headers.get('sec-fetch-mode') === 'cors' &&
+  request.headers.get('sec-fetch-dest') === 'empty';
+
+export const isNamedEditJsonRequest = (request: NextRequest) =>
+  /^application\/json(?:;\s*charset=utf-8)?$/iu.test(request.headers.get('content-type') ?? '') &&
+  !request.headers.has('content-encoding');
+
 type BrowserRequest =
   | { kind: 'issue'; inviteId: string; email: string; role: NamedInviteRole }
   | { kind: 'list'; includeComment: boolean }
@@ -123,33 +146,15 @@ export async function handleNamedEdit(request: NextRequest, roomId: string, oper
     return failure(400);
   }
 
-  let worker: ReturnType<typeof loadDocumentPromotionConfig>;
-  let siteOrigin: string;
-  let key: Buffer;
+  let config: ReturnType<typeof loadNamedEditRouteConfig>;
   try {
-    worker = loadDocumentPromotionConfig();
-    siteOrigin = requireSupabaseAuthConfig().siteOrigin;
-    const rawKey = process.env.LASH_NAMED_EDIT_KEY ?? '';
-    key = Buffer.from(rawKey, 'base64url');
-    if (key.length < 32 || key.toString('base64url') !== rawKey) return failure(503);
+    config = loadNamedEditRouteConfig();
   } catch {
     return failure(503);
   }
-  if (
-    !isTrustedSiteRequest(request, siteOrigin, { requireOriginHeader: true }) ||
-    request.headers.get('sec-fetch-site') !== 'same-origin' ||
-    request.headers.get('sec-fetch-mode') !== 'cors' ||
-    request.headers.get('sec-fetch-dest') !== 'empty'
-  )
-    return failure(403);
-
-  if (
-    !/^application\/json(?:;\s*charset=utf-8)?$/iu.test(
-      request.headers.get('content-type') ?? '',
-    ) ||
-    request.headers.has('content-encoding')
-  )
-    return failure(400);
+  const { worker, siteOrigin, key } = config;
+  if (!isTrustedNamedEditRequest(request, siteOrigin)) return failure(403);
+  if (!isNamedEditJsonRequest(request)) return failure(400);
   const parsed = parseBrowserRequest(operation, await readNamedEditJson(request, 2048));
   if (!parsed) return failure(400);
 
@@ -263,9 +268,19 @@ export async function handleNamedEdit(request: NextRequest, roomId: string, oper
       worker.workerOrigin,
     );
     socketUrl.protocol = socketUrl.protocol === 'https:' ? 'wss:' : 'ws:';
-    return finalize(
-      response({ ok: true, session: { ...result.session, socketUrl: socketUrl.href } }),
-    );
+    const sessionResponse = response({
+      ok: true,
+      session: { ...result.session, socketUrl: socketUrl.href },
+    });
+    try {
+      sessionResponse.headers.set(
+        'X-Lash-Recent-Bookmark',
+        encryptNamedEditValue(key, 'recent', roomId, principal.id, siteOrigin),
+      );
+    } catch {
+      // Opening the document still succeeds if the optional bookmark cannot be created.
+    }
+    return finalize(sessionResponse);
   }
 
   const decodeInvite = (
