@@ -142,7 +142,8 @@ test('a readable 100×20 table scrolls locally and keeps its status options clic
   const picker = statusCell.getByRole('button', { name: 'Open', exact: true });
   await picker.evaluate((control) => control.scrollIntoView({ block: 'center' }));
   await picker.click();
-  const menus = page.getByRole('listbox');
+  const canvas = page.getByRole('region', { name: 'Writing canvas' });
+  const menus = canvas.getByRole('listbox');
   const option = (name: string) => menus.getByRole('option', { name, exact: true });
   const done = option('Done');
   await expectPointerTarget(done);
