@@ -16,6 +16,7 @@ import {
   type NamedEditOperation,
   type NamedEditSession,
 } from './contract';
+import { isRecentSharedBookmark, RECENT_SHARED_BOOKMARK_HEADER } from '../recentSharedDocuments';
 
 const browserFetch: typeof fetch = (input, init) => fetch(input, init);
 
@@ -48,14 +49,18 @@ const requestNamedEdit = async (
           throw error;
         })
       : null;
-    return { status, body };
+    const recentBookmark =
+      operation === 'session' && status === 200
+        ? response.headers.get(RECENT_SHARED_BOOKMARK_HEADER)
+        : null;
+    return { status, body, recentBookmark };
   } catch {
     return { status: 503, body: null };
   }
 };
 
 export type NamedEditSessionResult =
-  | { ok: true; session: NamedEditSession }
+  | { ok: true; session: NamedEditSession; recentBookmark?: string }
   | { ok: false; retryable: boolean; signInRequired?: true; protocolInvalid?: true };
 
 const invalidSessionResponse = { ok: false, retryable: false, protocolInvalid: true } as const;
@@ -65,7 +70,7 @@ export async function requestNamedEditSession(
   signal: AbortSignal,
   fetcher?: typeof fetch,
 ): Promise<NamedEditSessionResult> {
-  const { status, body } = await requestNamedEdit(
+  const { status, body, recentBookmark } = await requestNamedEdit(
     roomId,
     'session',
     { token: null },
@@ -103,7 +108,11 @@ export async function requestNamedEditSession(
   )
     return invalidSessionResponse;
 
-  return { ok: true, session: { ...body.session, socketUrl: body.session.socketUrl } };
+  return {
+    ok: true,
+    session: { ...body.session, socketUrl: body.session.socketUrl },
+    ...(!signal.aborted && isRecentSharedBookmark(recentBookmark) ? { recentBookmark } : {}),
+  };
 }
 
 const inviteFrom = (value: unknown): NamedEditInvite | null =>

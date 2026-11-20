@@ -4190,8 +4190,11 @@ function ResolvedDocumentWorkspace({
     [navigateDocument],
   );
 
-  const documentOptions = documents.some((record) => record.id === activeDocumentId)
-    ? documents.map((record) =>
+  const deviceDocumentOptions = staticPreview
+    ? documents
+    : documents.filter(({ id }) => !NAMED_EDIT_ROOM_ID.test(id));
+  const documentOptions = deviceDocumentOptions.some((record) => record.id === activeDocumentId)
+    ? deviceDocumentOptions.map((record) =>
         record.id === activeDocumentId
           ? { ...record, title: docTitle.trim() || DEFAULT_DOC_TITLE }
           : record,
@@ -4203,7 +4206,7 @@ function ResolvedDocumentWorkspace({
           createdAt: new Date(0).toISOString(),
           updatedAt: new Date(0).toISOString(),
         },
-        ...documents,
+        ...deviceDocumentOptions,
       ];
 
   const documentControls = (

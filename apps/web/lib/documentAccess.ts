@@ -56,6 +56,7 @@ import {
   createRealtimeRecoveryJournal,
   type RealtimeRecoveryJournal,
 } from './realtimeRecoveryJournal';
+import { rememberRecentSharedDocument } from './recentSharedDocuments';
 
 export type DocumentAccessPhase =
   | 'checking'
@@ -1352,6 +1353,15 @@ class BrowserDocumentAccessController implements DocumentAccessController {
       epoch,
       signal,
     });
+    if (
+      result.recentBookmark &&
+      this.isCurrent(epoch, signal) &&
+      this.snapshot.phase === 'remote-ready' &&
+      this.snapshot.connectionState === 'ready' &&
+      this.resources?.provider.getSnapshot().hydrated
+    ) {
+      rememberRecentSharedDocument(result.session.actorId, result.recentBookmark);
+    }
   }
 
   private async hydrateRemoteDocument({
