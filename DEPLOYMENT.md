@@ -143,13 +143,54 @@ Worker phases and retain stored grants and feedback.
 - CORS preflight: handled routes return 204 and the exact allow-header list `authorization, cache-control, content-type`; requested header values and bearer-shaped strings are not reflected.
 - Local verification command: `pnpm run verify:realtime`.
 
-## Cloudflare Pages Preflight
+## Cloudflare Pages Release
 
-1. Stop local `next start` before building: `make stop`.
-2. Verify auth: `npx wrangler whoami`.
-3. Build static assets: `pnpm run build:static`.
-4. Deploy: `make deploy-cloudflare CLOUDFLARE_PAGES_PROJECT=lash`.
-5. Verify public URL: `make verify-cloudflare URL=https://lash-9xx.pages.dev/`.
+The protected `build-and-test` job builds the static export and checks the
+ordinary Documents and Markdown handoff journeys. A successful push run on
+`main` keeps one `lash-pages-<commit>-<attempt>` artifact for 14 days. The
+artifact contains the site tarball. CI leaves publication to the operator.
+
+Find the successful `CI` push run and attempt for the reviewed `main` commit.
+Set `run_id`, `source_sha`, and `attempt` to its run ID, full commit SHA, and
+attempt number. Set `archive_sha` to the SHA-256 recorded in the run summary.
+Download and verify the matching archive before extracting it.
+
+```sh
+release_dir=$(mktemp -d)
+archive="lash-pages-${source_sha}-${attempt}"
+gh run download "$run_id" --name "$archive" --dir "$release_dir" &&
+  printf '%s  %s\n' "$archive_sha" "$release_dir/$archive.tar.gz" | shasum -a 256 -c - &&
+  mkdir "$release_dir/site" &&
+  tar -xzf "$release_dir/$archive.tar.gz" -C "$release_dir/site"
+```
+
+With the existing Pages authorization, publish the extracted site to a branch
+preview and run the browser checks at the returned `preview_url`.
+
+```sh
+pnpm exec wrangler whoami
+pnpm exec wrangler pages deploy "$release_dir/site" --project-name lash \
+  --branch "release-${source_sha}" --commit-hash "$source_sha"
+LASH_STATIC_PREVIEW_URL="$preview_url" pnpm exec playwright test \
+  --config=playwright.static-preview.config.ts --workers=1
+```
+
+Record the current successful production deployment ID for rollback. After the
+preview passes, publish the same extracted directory to `main`, then repeat the
+browser checks against the canonical origin and run its public performance gate.
+
+```sh
+pnpm exec wrangler pages deploy "$release_dir/site" --project-name lash \
+  --branch main --commit-hash "$source_sha"
+LASH_STATIC_PREVIEW_URL=https://lash-9xx.pages.dev pnpm exec playwright test \
+  --config=playwright.static-preview.config.ts --workers=1
+make verify-cloudflare URL=https://lash-9xx.pages.dev/
+```
+
+If the artifact is unavailable, use `NEXT_PUBLIC_LASH_TEST_HOOKS=false make deploy-cloudflare`
+from an exact reviewed checkout. It builds locally, so stop the checkout’s owned
+Next server first and satisfy the local disk check. Set `CLOUDFLARE_BRANCH` to
+your preview branch and verify it before publishing to `main`.
 
 ## Public Performance Gate
 
@@ -161,9 +202,9 @@ Worker phases and retain stored grants and feedback.
 
 - Health check: `curl -fsSI https://lash-9xx.pages.dev/`
 - Smoke URL: `https://lash-9xx.pages.dev/`
-- Cloudflare Pages rollback path: Cloudflare dashboard -> Workers & Pages -> `lash` -> Deployments -> promote a prior successful deployment.
+- Cloudflare Pages rollback path: Cloudflare dashboard -> Workers & Pages -> `lash` -> Deployments. Open the actions menu for the recorded production deployment and select **Rollback to this deployment**.
 - CLI deployment inspection: `npx wrangler pages deployment list --project-name lash --environment production`
-- CLI fallback: redeploy a known-good checkout with `make deploy-cloudflare`.
+- CLI fallback: redeploy a known-good checkout with `NEXT_PUBLIC_LASH_TEST_HOOKS=false make deploy-cloudflare`.
 - Realtime Worker rollback path: disable the v2 web caller first and close/freeze new Worker promotion. Inspect versions with `pnpm exec wrangler versions list --config packages/realtime-worker/wrangler.jsonc`, then select only a version that retains every activated Durable Object class/migration. After any claim alias exists, do not roll back to a pre-`LashDocumentClaim` version; preserve all alias, owner, projection, audit, and Yjs rows.
 - Render rollback path: use Render Dashboard -> `lash-doc-web` -> Deploys -> Roll back to the previous successful deploy, or trigger a known-good commit after the service is created from `render.yaml`.
 - For future deploy-affecting beads, record the health check URL, smoke URL, and rollback command/path in `handoff/beads.jsonl`.
