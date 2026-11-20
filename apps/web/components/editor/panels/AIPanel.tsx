@@ -3,16 +3,18 @@
 import { suggestFallback, validateEditPatch, type ValidatorOptions } from '@lash/ai';
 import type { DocumentId, EditPatch, EditPatchCitation } from '@lash/types';
 import type { Editor } from '@tiptap/core';
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 
 import { getAiSelection, isAiSelectionCurrent, type AiSelection } from '../../../lib/aiSelection';
 import {
-  getWritingModelAvailability,
+  canUseWritingModel,
+  checkWritingModelAvailability,
+  markWritingModelAvailable,
   MAX_AI_QUESTION_LENGTH,
   MAX_AI_REVISION_LENGTH,
   MAX_AI_SELECTION_LENGTH,
   requestWritingModel,
-  type WritingModelAvailability,
+  useWritingModelAvailability,
 } from '../../../lib/browserWritingModel';
 
 export interface AIPanelProps {
@@ -89,12 +91,11 @@ export function AIPanel({
   // Read the owner synchronously in event handlers. React renders only its phase.
   const operation = useRef<Activity>(IDLE);
   const panelVisit = useRef<symbol | null>(null);
-  const capabilityCheck = useRef<symbol | null>(null);
   const promptRef = useRef<HTMLTextAreaElement>(null);
   const lastFocusedRevision = useRef<number | undefined>(undefined);
-  const [availability, setAvailability] = useState<WritingModelAvailability | 'checking'>(
-    'checking',
-  );
+  const availability = useWritingModelAvailability(open && !showTestControls, {
+    refreshOnSubscribe: true,
+  });
   const [panelResult, setPanelResult] = useState<PanelResult>(NO_RESULT);
   const [activity, setActivity] = useState<Activity['phase']>('idle');
   const [prompt, setPrompt] = useState('');
@@ -106,24 +107,6 @@ export function AIPanel({
     setActivity(next.phase);
   };
   const setStatus = (status: string) => setPanelResult((current) => ({ ...current, status }));
-
-  const checkCapability = useCallback(() => {
-    const check = Symbol();
-    capabilityCheck.current = check;
-    void getWritingModelAvailability().then((result) => {
-      if (capabilityCheck.current !== check) return;
-      capabilityCheck.current = null;
-      setAvailability(result);
-    });
-  }, []);
-
-  useEffect(() => {
-    if (!open || showTestControls) return;
-    checkCapability();
-    return () => {
-      capabilityCheck.current = null;
-    };
-  }, [checkCapability, open, showTestControls]);
 
   useLayoutEffect(() => {
     panelVisit.current = Symbol();
@@ -147,11 +130,7 @@ export function AIPanel({
     if (!open || !editorDoc || selectionFrom === selectionTo) return null;
     return getAiSelection(editor, currentText);
   }, [currentText, editor, editorDoc, open, selectionFrom, selectionTo]);
-  const hasModel =
-    showTestControls ||
-    availability === 'available' ||
-    availability === 'downloadable' ||
-    availability === 'downloading';
+  const hasModel = showTestControls || canUseWritingModel(availability);
   const canUseModel = Boolean(editor && baseVersion && hasModel);
   const selectionFits = Boolean(
     selection?.text.trim() && selection.text.length <= MAX_AI_SELECTION_LENGTH,
@@ -299,8 +278,7 @@ export function AIPanel({
       );
       if (operation.current !== generation || controller.signal.aborted) return;
       // Successful inference is stronger evidence than the outstanding capability check.
-      capabilityCheck.current = null;
-      setAvailability('available');
+      markWritingModelAvailable();
       if (editor.isDestroyed || !isAiSelectionCurrent(editor, excerpt)) {
         setStatus(DRAFT_CHANGED);
         return;
@@ -559,14 +537,7 @@ export function AIPanel({
         {status || guidance}
       </p>
       {availability === 'timed-out' ? (
-        <button
-          type="button"
-          className="ai-action-button"
-          onClick={() => {
-            setAvailability('checking');
-            checkCapability();
-          }}
-        >
+        <button type="button" className="ai-action-button" onClick={checkWritingModelAvailability}>
           Check again
         </button>
       ) : null}

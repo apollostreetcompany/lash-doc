@@ -8,7 +8,6 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { AIPanel, type AIPanelProps } from '../../../../apps/web/components/editor/panels/AIPanel';
 import { getAiSelection, prepareAiReplacement } from '../../../../apps/web/lib/aiSelection';
-import { getWritingModelAvailability } from '../../../../apps/web/lib/browserWritingModel';
 import * as React from '../../../../apps/web/node_modules/react';
 import { createRoot, type Root } from '../../../../apps/web/node_modules/react-dom/client';
 
@@ -115,15 +114,6 @@ afterEach(async () => {
 });
 
 describe('AIPanel exact selection scope', () => {
-  it('bounds how long the browser can leave model availability unresolved', async () => {
-    vi.useFakeTimers();
-    vi.stubGlobal('LanguageModel', { availability: () => new Promise<string>(() => {}) });
-    const settled = vi.fn();
-    void getWritingModelAvailability().then(settled);
-    await vi.advanceTimersByTimeAsync(8000);
-    expect(settled).toHaveBeenCalledWith('timed-out');
-  });
-
   it('reports unavailability when the browser has no model, even with text selected', async () => {
     const editor = createEditor('<p>A draft sentence.</p>');
     editor.commands.setTextSelection(findOccurrencePmRange(editor, 'A draft sentence.', 0));

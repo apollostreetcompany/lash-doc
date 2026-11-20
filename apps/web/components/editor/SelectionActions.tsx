@@ -6,8 +6,9 @@ import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 
 import styles from './SelectionActions.module.css';
 import {
-  getWritingModelAvailability,
+  canUseWritingModel,
   MAX_AI_SELECTION_LENGTH,
+  useWritingModelAvailability,
 } from '../../lib/browserWritingModel';
 import { Icon } from '../shell/Icon';
 
@@ -175,12 +176,11 @@ function positionActions(actions: HTMLDivElement, selection: Range, touch: boole
 
 export function SelectionActions({ editor, onComment, onRevise }: SelectionActionsProps) {
   const [desktop, setDesktop] = useState(false);
-  const [modelAvailable, setModelAvailable] = useState(false);
   const [context, setContext] = useState<SelectionContext | null>(null);
   const currentContext = useRef<SelectionContext | null>(null);
   const pressedContext = useRef<SelectionContext | null>(null);
   const actionsRef = useRef<HTMLDivElement>(null);
-  const revisionEnabled = Boolean(onRevise);
+  const availability = useWritingModelAvailability(desktop && Boolean(onRevise));
 
   useEffect(() => {
     const pointer = window.matchMedia('(min-width: 768px) and (pointer: fine)');
@@ -189,24 +189,6 @@ export function SelectionActions({ editor, onComment, onRevise }: SelectionActio
     pointer.addEventListener('change', syncViewport);
     return () => pointer.removeEventListener('change', syncViewport);
   }, []);
-
-  useEffect(() => {
-    if (!desktop || !revisionEnabled) {
-      setModelAvailable(false);
-      return;
-    }
-    let active = true;
-    void getWritingModelAvailability().then((outcome) => {
-      if (active) {
-        setModelAvailable(
-          outcome === 'available' || outcome === 'downloadable' || outcome === 'downloading',
-        );
-      }
-    });
-    return () => {
-      active = false;
-    };
-  }, [desktop, revisionEnabled]);
 
   useEffect(() => {
     if (editor.isDestroyed) return;
@@ -266,7 +248,9 @@ export function SelectionActions({ editor, onComment, onRevise }: SelectionActio
     };
   }, [editor]);
 
-  const showRevision = Boolean(onRevise && desktop && modelAvailable && context?.canRevise);
+  const showRevision = Boolean(
+    onRevise && desktop && canUseWritingModel(availability) && context?.canRevise,
+  );
   const showActions = Boolean(onComment || showRevision);
 
   useLayoutEffect(() => {
