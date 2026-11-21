@@ -2029,7 +2029,7 @@ main[data-testid='lash-home'] > section {
 .editor-loading {
   padding: var(--space-7) 0;
   text-align: center;
-  color: var(--color-text-muted);
+  color: var(--color-text-secondary);
   font-size: var(--text-ui);
 }
 
