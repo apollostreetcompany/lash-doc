@@ -66,11 +66,16 @@ test('creates, finds, reopens and shares a draft using only static files', async
   const senderEditor = documentEditor(page);
   const formattedText = 'Café notes for the next writer.';
   await expect(senderEditor).toContainText('First browser-local notes.');
+  await expect(senderEditor).toBeEditable();
   const senderUrl = page.url();
   await senderEditor.press('End');
   await page.keyboard.press('Enter');
   await page.keyboard.press('ControlOrMeta+B');
   await page.keyboard.insertText(formattedText);
+  await expect(senderEditor.locator(':scope > p')).toHaveText([
+    'First browser-local notes.',
+    formattedText,
+  ]);
   await expect(senderEditor.locator('strong')).toHaveText(formattedText);
   await expect(page.getByTestId('autosave-indicator')).toHaveAttribute('data-status', 'saved');
 

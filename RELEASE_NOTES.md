@@ -21,6 +21,10 @@ runs in workspaces configured for accounts and collaboration.
   the version you want to inspect and choose the other one under **Compare
   with**. **Read version** and **Restore** act on the selected timeline row.
   On desktop, pressing Enter on **History** moves keyboard focus into the panel.
+- A saved device draft shows **Opening draft…** while its history loads. When
+  the writing surface appears, it can accept your first keystroke. Returning
+  to the public editor in a new tab reuses its downloaded scripts, styles and
+  fonts while the page checks for the current release.
 - The page, title and toolbar are readable as soon as the editor renders. On
   phones, closing History returns focus to its button. Widening the window
   releases the drawer so you can keep writing.
